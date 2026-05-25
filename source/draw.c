@@ -1,0 +1,345 @@
+#include "log.h"
+#include "maths.h"
+#include "memory.h"
+#include "render.h"
+#include "strings.h"
+#include "draw.h"
+
+#include <assert.h>
+#include <float.h>
+#include <math.h>
+
+d_font D_LoadFontFromTTF(draw_context *D, u8 *Data)
+{
+	d_font Font = {0};
+	stbtt_fontinfo Info = {0};
+	int Status = stbtt_InitFont(&Info, Data, 0);
+	if (!Status)
+	{
+		LogError("Internal font file is invalid");
+	}
+	else
+	{
+		stbtt_GetFontVMetrics(&Info, &Font.Ascent, &Font.Descent, &Font.LineGap);
+		Font.Info = Info;
+	}
+	return Font;
+}
+
+static void CurvesFromCodePoint(draw_context *Draw, m_arena *Arena,
+                                d_atlas_glyph *Glyph, u32 CodePoint, d_font Font,
+                                int *CurveCount, v2f **Curves)
+{
+	s32 GlyphIndex = stbtt_FindGlyphIndex(&Font.Info, CodePoint);
+	stbtt_vertex *Vertices;
+	s32 NumberOfVertices = stbtt_GetGlyphShape(&Font.Info, GlyphIndex, &Vertices);
+
+	v4i Box = {0};
+	stbtt_GetGlyphBox(&Font.Info, GlyphIndex, &Box.X, &Box.Y, &Box.Z, &Box.W);
+	f32 Width = (f32)(Box.Z - Box.X);
+	f32 Height = (f32)(Box.W - Box.Y);
+	v2f Size = v2f(Width, Height);
+
+	v2f Shift = v2f(Box.X, Box.Y);
+
+	Curves[0] = ArenaPushArrayZero(Arena, v2f, NumberOfVertices * 3);
+	CurveCount[0] = 0;
+
+	v2f First = {0};
+	for (s32 I = 0; I < NumberOfVertices; I++)
+	{
+		stbtt_vertex *V = Vertices + I;
+		switch (V->type)
+		{
+		case STBTT_vmove:
+			First = SubV2F(v2f(V->x, V->y), Shift);
+			break;
+		case STBTT_vcurve:
+		{
+			v2f Control = SubV2F(v2f(V->cx, V->cy), Shift);
+			v2f End     = SubV2F(v2f(V->x,  V->y),  Shift);
+			Curves[0][CurveCount[0]++] = End;
+			Curves[0][CurveCount[0]++] = Control;
+			Curves[0][CurveCount[0]++] = First;
+			First = End;
+		} break;
+		case STBTT_vline:
+		{
+			v2f End = SubV2F(v2f(V->x, V->y), Shift);
+			v2f Control = v2f((First.X + End.X)*0.5f, (First.Y + End.Y)*0.5f);
+			Curves[0][CurveCount[0]++] = End;
+			Curves[0][CurveCount[0]++] = Control;
+			Curves[0][CurveCount[0]++] = First;
+			First = End;
+		} break;
+		}
+	}
+
+	for (int I = 0; I < CurveCount[0]; I++)
+	{
+		Curves[0][I].X /= Size.X;
+		Curves[0][I].Y = (Height - Curves[0][I].Y) / Size.Y;
+	}
+
+	stbtt_FreeShape(&Font.Info, Vertices);
+
+	R_UpdateCurves(Draw->Render, Curves[0], CurveCount[0], Draw->CurveCount);
+	Draw->CurveCount += CurveCount[0];
+}
+
+d_atlas_glyph *D_GlyphFromCodePoint(draw_context *D, d_font Font, u32 CodePoint)
+{
+	u64 Hash = M_FNVHashBytes(M_FNV_HASH_START, (u8*)&Font, sizeof(d_font));
+	Hash = M_FNVHashBytes(Hash, (u8*)&CodePoint, sizeof(u32));
+
+	d_atlas_glyph *Glyph = D->GlyphTable + (Hash % D_GLYPH_TABLE_SIZE);
+	for (; Glyph->NextInHashSlot != Null && Glyph->Hash != Hash; Glyph = Glyph->NextInHashSlot);
+	d_atlas_glyph *Result = Glyph;
+
+	if (Glyph->Hash != 0 && Glyph->Hash != Hash)
+	{
+		d_atlas_glyph *Next = ArenaPushArrayZero(D->Arena, d_atlas_glyph, 1);
+		Glyph->NextInHashSlot = Next;
+		Glyph = Next;
+		Result = Next;
+	}
+
+	if (Glyph->Hash == 0)
+	{
+		int AdvanceX;
+		int LeftSideBearing;
+		stbtt_GetCodepointHMetrics(&Font.Info, CodePoint, &AdvanceX, &LeftSideBearing);
+		Glyph->AdvanceX = (f32)AdvanceX;
+		Glyph->Hash = Hash;
+		Glyph->CodePoint = CodePoint;
+		stbtt_GetCodepointBox(&Font.Info, CodePoint, &Glyph->Box.X, &Glyph->Box.Y,
+		                                              &Glyph->Box.Z, &Glyph->Box.W);
+
+		Glyph->CurveStart = D->CurveCount;
+		CurvesFromCodePoint(D, D->Arena, Glyph, CodePoint, Font, &Glyph->CurveCount, &Glyph->Curves);
+	}
+
+	return Result;
+}
+
+void D_Quad(draw_context *D, v2f Position, f32 Width, f32 Height, v4f Colour)
+{
+	m_arena *Arena = TemporaryArena();
+	r_command Command = {0};
+	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
+	Command.VerticesCount = 6;
+
+	v2f V[6] =
+	{
+		v2f(Position.X,           Position.Y),
+		v2f(Position.X + Width,   Position.Y),
+		v2f(Position.X + Width,   Position.Y + Height),
+
+		v2f(Position.X,           Position.Y),
+		v2f(Position.X,           Position.Y + Height),
+		v2f(Position.X + Width,   Position.Y + Height),
+	};
+
+	for (int I = 0; I < 6; I++)
+	{
+		Command.Vertices[I].Position = v4f(V[I].X, V[I].Y, 0, 1);
+		Command.Vertices[I].Colour = Colour;
+	}
+	Command.Type = R_COMMAND_TRIANGLE;
+	Command.Attributes = R_AttributesFromCommandType(Command.Type);
+	R_PushCommand(D->Render, Command);
+}
+
+f32 D_Str8WidthFromHeight(d_font Font, str8 String, f32 HeightInPixels)
+{
+	f32 Width = 0.0f;
+	f32 Scale = stbtt_ScaleForPixelHeight(&Font.Info, HeightInPixels);
+	for (s64 I = 0; I < String.Size; I++)
+	{
+		int CP = String.Bytes[I];
+		int NextCP = (I + 1 < String.Size) ? String.Bytes[I + 1] : 0;
+		int GlyphIndex = stbtt_FindGlyphIndex(&Font.Info, CP);
+		int Advance, LSB;
+		stbtt_GetGlyphHMetrics(&Font.Info, GlyphIndex, &Advance, &LSB);
+		int NextGlyphIndex = stbtt_FindGlyphIndex(&Font.Info, NextCP);
+		int Kern = stbtt_GetGlyphKernAdvance(&Font.Info, GlyphIndex, NextGlyphIndex);
+		Width += (Kern + Advance) * Scale;
+	}
+	return Width;
+}
+
+f32 D_LineHeightFromFont(d_font Font, f32 HeightInPixels)
+{
+	f32 Scale = stbtt_ScaleForPixelHeight(&Font.Info, HeightInPixels);
+	return (Font.Ascent - Font.Descent + Font.LineGap) * Scale;
+}
+
+void D_BaseStr8(draw_context *D, str8 String, d_str8_options Options)
+{
+	m_arena *Arena = TemporaryArena();
+	int TotalTriangleCount = (int)String.Size * 6;
+	r_command Command = {0};
+	Command.Vertices = (r_vertex*)ArenaPushZero(Arena, TotalTriangleCount * sizeof(r_vertex));
+	Command.VerticesCount = 0;
+
+	f32 StartX = Options.Position.X;
+	r_vertex *Out = Command.Vertices;
+
+	assert(Options.HeightInPixels > 0.0f);
+	f32 Scale = stbtt_ScaleForPixelHeight(&Options.Font.Info, Options.HeightInPixels);
+
+	for (s64 I = 0; I < String.Size; I++)
+	{
+		u32 CodePoint = String.Bytes[I];
+		u32 NextCodePoint = (I + 1 < String.Size) ? String.Bytes[I + 1] : 0;
+
+		if (CodePoint == '\r') continue;
+		f32 TabMultiplier = 1.0f;
+		if (CodePoint == '\t') { CodePoint = ' '; TabMultiplier = 4.0f; }
+
+		if (CodePoint == '\n')
+		{
+			Options.Position.Y -= (Options.Font.Ascent - Options.Font.Descent + Options.Font.LineGap) * Scale;
+			Options.Position.X = StartX;
+			continue;
+		}
+
+		d_atlas_glyph *Glyph = D_GlyphFromCodePoint(D, Options.Font, CodePoint);
+		int Kern = stbtt_GetCodepointKernAdvance(&Options.Font.Info, CodePoint, NextCodePoint);
+		f32 AdvanceX = (Kern + Glyph->AdvanceX) * Scale * TabMultiplier;
+
+		f32 GlyphWidth  = ((f32)(Glyph->Box.Z - Glyph->Box.X) * Scale);
+		f32 GlyphHeight = ((f32)(Glyph->Box.W - Glyph->Box.Y) * Scale);
+
+		v2f V[6] =
+		{
+			v2f(Options.Position.X,              Options.Position.Y),
+			v2f(Options.Position.X + GlyphWidth, Options.Position.Y),
+			v2f(Options.Position.X + GlyphWidth, Options.Position.Y + GlyphHeight),
+
+			v2f(Options.Position.X,              Options.Position.Y),
+			v2f(Options.Position.X,              Options.Position.Y + GlyphHeight),
+			v2f(Options.Position.X + GlyphWidth, Options.Position.Y + GlyphHeight),
+		};
+		v2f UV[6] =
+		{
+			v2f(0,1), v2f(1,1), v2f(1,0),
+			v2f(0,1), v2f(0,0), v2f(1,0)
+		};
+
+		if (CodePoint != ' ')
+		{
+			for (int J = 0; J < 6; J++)
+			{
+				r_vertex Vx = {
+					.Position   = v4f(V[J].X, V[J].Y + Glyph->Box.Y * Scale, Options.Position.Z, 1),
+					.UV         = UV[J],
+					.Colour     = Options.Colour,
+					.CurveStart = Glyph->CurveStart,
+					.CurveCount = Glyph->CurveCount,
+				};
+				*Out++ = Vx;
+				Command.VerticesCount++;
+			}
+		}
+
+		Options.Position.X += AdvanceX;
+	}
+
+	if (Command.VerticesCount > 0)
+	{
+		Command.Type = R_COMMAND_GLYPH;
+		Command.Attributes = R_AttributesFromCommandType(Command.Type);
+		R_PushCommand(D->Render, Command);
+	}
+}
+
+// Helper: write a screen-space quad (6 vertices) where every vertex carries
+// the same per-primitive attributes. SDF shaders (line/bezier/point) sample
+// fragCoord.xy and read flat-interpolated Start/End/Centre/Thickness.
+static void PushQuad6(r_vertex *Out, v2f Min, v2f Max, r_vertex Template)
+{
+	v2f V[6] = {
+		v2f(Min.X, Min.Y), v2f(Max.X, Min.Y), v2f(Max.X, Max.Y),
+		v2f(Min.X, Min.Y), v2f(Min.X, Max.Y), v2f(Max.X, Max.Y),
+	};
+	for (int I = 0; I < 6; I++)
+	{
+		Out[I] = Template;
+		Out[I].Position = v4f(V[I].X, V[I].Y, 0, 1);
+	}
+}
+
+void D_Line(draw_context *D, v2f Start, v2f End, f32 Thickness, v4f Colour)
+{
+	m_arena *Arena = TemporaryArena();
+	r_command Command = {0};
+	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
+	Command.VerticesCount = 6;
+
+	f32 Pad = Thickness * 0.5f + 1.0f;
+	v2f Min = v2f(fminf(Start.X, End.X) - Pad, fminf(Start.Y, End.Y) - Pad);
+	v2f Max = v2f(fmaxf(Start.X, End.X) + Pad, fmaxf(Start.Y, End.Y) + Pad);
+
+	r_vertex Tmpl = {
+		.Colour = Colour,
+		.Start = Start,
+		.End = End,
+		.Thickness = Thickness,
+	};
+	PushQuad6(Command.Vertices, Min, Max, Tmpl);
+
+	Command.Type = R_COMMAND_LINES;
+	Command.Attributes = R_AttributesFromCommandType(Command.Type);
+	R_PushCommand(D->Render, Command);
+}
+
+void D_Bezier(draw_context *D, v2f Start, v2f Control, v2f End, f32 Thickness, v4f Colour)
+{
+	m_arena *Arena = TemporaryArena();
+	r_command Command = {0};
+	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
+	Command.VerticesCount = 6;
+
+	f32 Pad = Thickness * 0.5f + 1.0f;
+	f32 MinX = fminf(Start.X, fminf(Control.X, End.X)) - Pad;
+	f32 MinY = fminf(Start.Y, fminf(Control.Y, End.Y)) - Pad;
+	f32 MaxX = fmaxf(Start.X, fmaxf(Control.X, End.X)) + Pad;
+	f32 MaxY = fmaxf(Start.Y, fmaxf(Control.Y, End.Y)) + Pad;
+
+	r_vertex Tmpl = {
+		.Colour = Colour,
+		.Start = Start,
+		.Control = Control,
+		.End = End,
+		.Thickness = Thickness,
+	};
+	PushQuad6(Command.Vertices, v2f(MinX, MinY), v2f(MaxX, MaxY), Tmpl);
+
+	Command.Type = R_COMMAND_BEZIER;
+	Command.Attributes = R_AttributesFromCommandType(Command.Type);
+	R_PushCommand(D->Render, Command);
+}
+
+void D_Point(draw_context *D, v2f Position, f32 Size, v4f Colour)
+{
+	m_arena *Arena = TemporaryArena();
+	r_command Command = {0};
+	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
+	Command.VerticesCount = 6;
+
+	f32 Half = Size * 0.5f + 1.0f;
+	v2f Min = v2f(Position.X - Half, Position.Y - Half);
+	v2f Max = v2f(Position.X + Half, Position.Y + Half);
+
+	r_vertex Tmpl = {
+		.Colour = Colour,
+		.PointSize = Size,
+		.Centre = Position,
+	};
+	PushQuad6(Command.Vertices, Min, Max, Tmpl);
+
+	Command.Type = R_COMMAND_POINTS;
+	Command.Attributes = R_AttributesFromCommandType(Command.Type);
+	R_PushCommand(D->Render, Command);
+}
