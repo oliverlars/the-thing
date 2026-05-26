@@ -115,6 +115,161 @@ static AppDelegate    *GlobalAppDelegate    = nil;
 static WindowDelegate *GlobalWindowDelegate = nil;
 static MetalView      *GlobalView           = nil;
 
+// Ring buffer for OS_NextEvent. The run loop classifies each Cocoa NSEvent
+// it pulls off the system queue and pushes a corresponding os_event here;
+// the host's frame callback drains it with OS_NextEvent.
+#define OS_EVENT_QUEUE_CAP 1024
+static os_event GlobalEventQueue[OS_EVENT_QUEUE_CAP];
+static int      GlobalEventHead = 0;  // next to pop
+static int      GlobalEventTail = 0;  // next to push
+
+static void OS_PushEvent(os_event E)
+{
+	int Next = (GlobalEventTail + 1) % OS_EVENT_QUEUE_CAP;
+	if (Next == GlobalEventHead) return;  // full — drop oldest by dropping the new one
+	GlobalEventQueue[GlobalEventTail] = E;
+	GlobalEventTail = Next;
+}
+
+b32 OS_NextEvent(os_window *Window, os_event *Out)
+{
+	(void)Window;
+	if (GlobalEventHead == GlobalEventTail) return False;
+	*Out = GlobalEventQueue[GlobalEventHead];
+	GlobalEventHead = (GlobalEventHead + 1) % OS_EVENT_QUEUE_CAP;
+	return True;
+}
+
+// Polling-layer state. Held bits persist across frames (cleared on UP);
+// Pressed/Released are edge-triggered, set when a transition happens and
+// cleared at the start of the next frame. Both are updated in lockstep with
+// the event queue inside OS_Run.
+#define OS_KEY_BIT_COUNT 256
+static u64 GlobalKeyHeld     [OS_KEY_BIT_COUNT / 64];
+static u64 GlobalKeyPressed  [OS_KEY_BIT_COUNT / 64];
+static u64 GlobalKeyReleased [OS_KEY_BIT_COUNT / 64];
+static u32 GlobalMouseHeld;
+static u32 GlobalMousePressed;
+static u32 GlobalMouseReleased;
+
+static void OS_BitSet  (u64 *Bits, int I) { Bits[I >> 6] |=  (1ULL << (I & 63)); }
+static void OS_BitClear(u64 *Bits, int I) { Bits[I >> 6] &= ~(1ULL << (I & 63)); }
+static b32  OS_BitTest (u64 *Bits, int I) { return (b32)((Bits[I >> 6] >> (I & 63)) & 1ULL); }
+
+static void OS_UpdateInputState(os_event E)
+{
+	switch (E.Type)
+	{
+		case OS_EVENT_KEY_DOWN:
+			if (E.KeyCode >= 0 && E.KeyCode < OS_KEY_BIT_COUNT) {
+				OS_BitSet(GlobalKeyHeld,    E.KeyCode);
+				OS_BitSet(GlobalKeyPressed, E.KeyCode);
+			}
+			break;
+		case OS_EVENT_KEY_UP:
+			if (E.KeyCode >= 0 && E.KeyCode < OS_KEY_BIT_COUNT) {
+				OS_BitClear(GlobalKeyHeld,    E.KeyCode);
+				OS_BitSet  (GlobalKeyReleased, E.KeyCode);
+			}
+			break;
+		case OS_EVENT_MOUSE_DOWN:
+			if (E.KeyCode >= 0 && E.KeyCode < 32) {
+				GlobalMouseHeld    |=  (1U << E.KeyCode);
+				GlobalMousePressed |=  (1U << E.KeyCode);
+			}
+			break;
+		case OS_EVENT_MOUSE_UP:
+			if (E.KeyCode >= 0 && E.KeyCode < 32) {
+				GlobalMouseHeld     &= ~(1U << E.KeyCode);
+				GlobalMouseReleased |=  (1U << E.KeyCode);
+			}
+			break;
+		default: break;
+	}
+}
+
+static void OS_ResetTransitions(void)
+{
+	for (int I = 0; I < (int)(sizeof(GlobalKeyPressed) / sizeof(GlobalKeyPressed[0])); I++) {
+		GlobalKeyPressed [I] = 0;
+		GlobalKeyReleased[I] = 0;
+	}
+	GlobalMousePressed  = 0;
+	GlobalMouseReleased = 0;
+}
+
+b32 OS_KeyDown    (int Key)    { return (Key    >= 0 && Key    < OS_KEY_BIT_COUNT) ? OS_BitTest(GlobalKeyHeld,     Key)    : False; }
+b32 OS_KeyPressed (int Key)    { return (Key    >= 0 && Key    < OS_KEY_BIT_COUNT) ? OS_BitTest(GlobalKeyPressed,  Key)    : False; }
+b32 OS_KeyReleased(int Key)    { return (Key    >= 0 && Key    < OS_KEY_BIT_COUNT) ? OS_BitTest(GlobalKeyReleased, Key)    : False; }
+b32 OS_MouseDown    (int Button) { return (Button >= 0 && Button < 32) ? (b32)((GlobalMouseHeld     >> Button) & 1U) : False; }
+b32 OS_MousePressed (int Button) { return (Button >= 0 && Button < 32) ? (b32)((GlobalMousePressed  >> Button) & 1U) : False; }
+b32 OS_MouseReleased(int Button) { return (Button >= 0 && Button < 32) ? (b32)((GlobalMouseReleased >> Button) & 1U) : False; }
+
+// Convert a window-base NSPoint (Cocoa, points) into the renderer's pixel-
+// space, top-left origin coordinates — same convention as OS_MousePosition.
+static v2f WindowPointToRender(NSPoint WindowPt, NSWindow *NSWin, NSView *View)
+{
+	NSPoint LocView = [View convertPoint:WindowPt fromView:nil];
+	CGFloat Scale   = NSWin.backingScaleFactor;
+	return v2f((f32)(LocView.x * Scale), (f32)(LocView.y * Scale));
+}
+
+// Classify a Cocoa NSEvent into the equivalent os_event. Returns Type=NONE
+// for events we don't care about, which the run loop should skip pushing.
+static os_event OS_EventFromNSEvent(NSEvent *E, NSWindow *NSWin, NSView *View)
+{
+	os_event Out = {0};
+	switch (E.type)
+	{
+		case NSEventTypeLeftMouseDown:
+		case NSEventTypeRightMouseDown:
+		case NSEventTypeOtherMouseDown:
+			Out.Type          = OS_EVENT_MOUSE_DOWN;
+			Out.KeyCode       = (int)E.buttonNumber;
+			Out.MousePosition = WindowPointToRender(E.locationInWindow, NSWin, View);
+			break;
+
+		case NSEventTypeLeftMouseUp:
+		case NSEventTypeRightMouseUp:
+		case NSEventTypeOtherMouseUp:
+			Out.Type          = OS_EVENT_MOUSE_UP;
+			Out.KeyCode       = (int)E.buttonNumber;
+			Out.MousePosition = WindowPointToRender(E.locationInWindow, NSWin, View);
+			break;
+
+		case NSEventTypeMouseMoved:
+		case NSEventTypeLeftMouseDragged:
+		case NSEventTypeRightMouseDragged:
+		case NSEventTypeOtherMouseDragged:
+			Out.Type          = OS_EVENT_MOUSE_MOVE;
+			Out.MousePosition = WindowPointToRender(E.locationInWindow, NSWin, View);
+			break;
+
+		case NSEventTypeScrollWheel:
+			Out.Type          = OS_EVENT_SCROLL;
+			Out.MousePosition = WindowPointToRender(E.locationInWindow, NSWin, View);
+			Out.Scroll        = v2f((f32)E.scrollingDeltaX, (f32)E.scrollingDeltaY);
+			break;
+
+		case NSEventTypeKeyDown:
+			// Skip auto-repeats so the host gets a clean down/up pair per
+			// physical press. Hosts that want repeats can poll instead.
+			if (E.isARepeat) break;
+			Out.Type    = OS_EVENT_KEY_DOWN;
+			Out.KeyCode = (int)E.keyCode;
+			break;
+
+		case NSEventTypeKeyUp:
+			Out.Type    = OS_EVENT_KEY_UP;
+			Out.KeyCode = (int)E.keyCode;
+			break;
+
+		default:
+			break;
+	}
+	return Out;
+}
+
 os_window OS_MakeWindow(str8 Name, int Width, int Height)
 {
 	@autoreleasepool {
@@ -139,6 +294,10 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 
 		GlobalWindowDelegate = [[WindowDelegate alloc] init];
 		[Window setDelegate:GlobalWindowDelegate];
+
+		// We want continuous OS_EVENT_MOUSE_MOVE events even when no button
+		// is held; Cocoa only delivers those when this flag is set.
+		[Window setAcceptsMouseMovedEvents:YES];
 
 		id<MTLDevice> Device = MTLCreateSystemDefaultDevice();
 
@@ -183,6 +342,24 @@ int OS_WindowHeight(os_window *Window)
 	return (int)Layer.drawableSize.height;
 }
 
+v2f OS_MousePosition(os_window *Window)
+{
+	NSWindow *NSWin = (__bridge NSWindow*)Window->Handle;
+	NSView   *View  = (__bridge NSView*)Window->MetalView;
+	if (!NSWin || !View) return v2f(0, 0);
+
+	// Empirically, `convertPoint:fromView:nil` on this layer-hosted MetalView
+	// returns coordinates already in top-left origin (Y increases downward),
+	// in points. So we just scale to backing pixels with no flip — the
+	// result matches the renderer's pixel-space coordinate system directly.
+	NSPoint MouseInWindow = [NSWin mouseLocationOutsideOfEventStream];
+	NSPoint MouseInView   = [View convertPoint:MouseInWindow fromView:nil];
+	CGFloat Scale         = NSWin.backingScaleFactor;
+	f32 X = (f32)(MouseInView.x * Scale);
+	f32 Y = (f32)(MouseInView.y * Scale);
+	return v2f(X, Y);
+}
+
 void *OS_NextDrawable(os_window *Window)
 {
 	CAMetalLayer *Layer = (__bridge CAMetalLayer*)Window->Layer;
@@ -195,15 +372,31 @@ void OS_Run(os_window *Window, os_frame_fn FrameFn, void *UserData)
 	@autoreleasepool {
 		[NSApp finishLaunching];
 
+		NSWindow *NSWin = (__bridge NSWindow*)Window->Handle;
+
 		while (True)
 		{
 			@autoreleasepool {
+				// Clear last frame's edge bits so OS_KeyPressed / Released
+				// only fire on transitions that happen between here and the
+				// next frame call.
+				OS_ResetTransitions();
+
 				NSEvent *Event;
 				while ((Event = [NSApp nextEventMatchingMask:NSEventMaskAny
 				                                  untilDate:[NSDate distantPast]
 				                                     inMode:NSDefaultRunLoopMode
 				                                    dequeue:YES]))
 				{
+					os_event Mapped = OS_EventFromNSEvent(Event, NSWin, GlobalView);
+					if (Mapped.Type != OS_EVENT_NONE)
+					{
+						OS_PushEvent(Mapped);
+						OS_UpdateInputState(Mapped);
+					}
+
+					// Still send to NSApp so default behaviour (window
+					// drag, key focus, etc.) keeps working.
 					[NSApp sendEvent:Event];
 				}
 

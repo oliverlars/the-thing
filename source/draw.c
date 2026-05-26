@@ -321,6 +321,59 @@ void D_Bezier(draw_context *D, v2f Start, v2f Control, v2f End, f32 Thickness, v
 	R_PushCommand(D->Render, Command);
 }
 
+static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
+                       f32 Width, f32 Height, f32 Param, d_shape_options Options)
+{
+	m_arena *Arena = TemporaryArena();
+	r_command Command = {0};
+	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
+	Command.VerticesCount = 6;
+
+	v2f HalfSize = v2f(Width * 0.5f, Height * 0.5f);
+	v2f Centre   = v2f(Position.X + HalfSize.X, Position.Y + HalfSize.Y);
+
+	// Pad enough for AA on the edge plus the outline (drawn just inside, but
+	// AA can spill 1px outside).
+	f32 Pad = 1.0f + fmaxf(0.0f, Options.OutlineThickness);
+	v2f Min = v2f(Position.X - Pad,         Position.Y - Pad);
+	v2f Max = v2f(Position.X + Width + Pad, Position.Y + Height + Pad);
+
+	// Zero-initialised options default to a raised bevel (+1 on the normal's
+	// z); pass a non-zero Extrusion to override (e.g. -1 for recessed).
+	f32 Extrusion = (Options.Extrusion == 0.0f) ? 1.0f : Options.Extrusion;
+
+	r_vertex Tmpl = {
+		.Colour           = Options.Colour,
+		.Centre           = Centre,
+		.HalfSize         = HalfSize,
+		.Thickness        = Param,
+		.OutlineColour    = Options.OutlineColour,
+		.OutlineThickness = Options.OutlineThickness,
+		.Extrusion        = Extrusion,
+	};
+	PushQuad6(Command.Vertices, Min, Max, Tmpl);
+
+	Command.Type = Type;
+	Command.Attributes = R_AttributesFromCommandType(Command.Type);
+	R_PushCommand(D->Render, Command);
+}
+
+void D_BaseRoundedQuad(draw_context *D, v2f Position, f32 Width, f32 Height, f32 CornerRadius, d_shape_options Options)
+{
+	PushSDFBox(D, R_COMMAND_ROUNDED_BOX, Position, Width, Height, CornerRadius, Options);
+}
+
+void D_BaseCapsule(draw_context *D, v2f Position, f32 Width, f32 Height, d_shape_options Options)
+{
+	f32 Radius = 0.5f * fminf(Width, Height);
+	PushSDFBox(D, R_COMMAND_ROUNDED_BOX, Position, Width, Height, Radius, Options);
+}
+
+void D_BaseSquircle(draw_context *D, v2f Position, f32 Width, f32 Height, f32 N, d_shape_options Options)
+{
+	PushSDFBox(D, R_COMMAND_SQUIRCLE, Position, Width, Height, N, Options);
+}
+
 void D_Point(draw_context *D, v2f Position, f32 Size, v4f Colour)
 {
 	m_arena *Arena = TemporaryArena();

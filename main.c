@@ -43,6 +43,11 @@ static void Frame(void *UserData, v2i ViewportSize)
 	f32 W = (f32)ViewportSize.X;
 	f32 H = (f32)ViewportSize.Y;
 
+	// Light follows the mouse cursor; .z hovers it above the screen plane.
+	v2f Mouse = OS_MousePosition(App->Window);
+	v3f LightPos = v3f(Mouse.X, Mouse.Y, 200.0f);
+	R_SetLight(&App->Render, LightPos, v3f(0.1f, 0.1f, 0.1f));
+
 	f32 BX0 = W * 0.20f;
 	f32 BX1 = W * 0.80f;
 	f32 BMid = (BX0 + BX1) * 0.5f;
@@ -75,11 +80,62 @@ static void Frame(void *UserData, v2i ViewportSize)
 	D_Point(&App->Draw, v2f(BX0, BY), 20.0f, v4f(1, 0.9f, 0.2f, 1));
 	D_Point(&App->Draw, v2f(BX1, BY), 20.0f, v4f(0.2f, 0.9f, 1.0f, 1));
 
+	f32 ShapeY = H * 0.12f;
+	f32 ShapeSize = 96.0f;
+	f32 ShapeGap = 32.0f;
+
+	// Flat rounded quad.
+	D_RoundedQuad(&App->Draw, v2f(W * 0.10f, ShapeY),
+		ShapeSize, ShapeSize, 20.0f,
+		.Colour = v4f(0.95f, 0.45f, 0.30f, 1));
+
+	// Capsule with an outline, also flat.
+	D_Capsule(&App->Draw, v2f(W * 0.10f + (ShapeSize + ShapeGap), ShapeY),
+		ShapeSize * 2.0f, ShapeSize * 0.55f,
+		.Colour = v4f(0.35f, 0.85f, 0.55f, 1),
+		.OutlineColour = v4f(1, 1, 1, 1),
+		.OutlineThickness = 3.0f);
+
+	// Squircles with varying exponent. The middle one opts into a soft sheen
+	// that tracks the cursor; the others stay flat for comparison.
+	f32 SquircleStartX = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + ShapeGap;
+	f32 Exponents[] = { 2.5f, 4.0f, 8.0f };
+	for (int I = 0; I < (int)(sizeof(Exponents)/sizeof(Exponents[0])); I++)
+	{
+		f32 X = SquircleStartX + (ShapeSize + ShapeGap) * (f32)I;
+		D_Squircle(&App->Draw, v2f(X, ShapeY),
+			ShapeSize, ShapeSize, Exponents[I],
+			.Colour = v4f(0.55f, 0.65f, 1.0f, 1),
+			.OutlineColour = v4f(0.1f, 0.1f, 0.15f, 1),
+			.OutlineThickness = 2.0f);
+	}
+
+	// Oscillates Extrusion between −1 (recessed) and +1 (raised) on a 2s
+	// period to make the raise↔recess transition visible at a glance.
+	f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
+	static f32 Extrusion = 1.0;
+	v2f MousePosition = OS_MousePosition(App->Window);
+	if (MousePosition.X >= 500 && MousePosition.X < 750 &&
+		MousePosition.Y >= 500 && MousePosition.Y <= 580 && OS_MousePressed(OS_MOUSE_LEFT)) {
+			Extrusion *= -1;
+		}
+	D_Capsule(&App->Draw, v2f(500, 500),
+		250, 80,
+		.Colour = v4f(1.0f, 0.4f, 0.0f, 1),
+		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 1),
+		.OutlineThickness = 5.0f,
+		.Extrusion = Extrusion);
+
 	D_Str8(&App->Draw, Str8("HELLO, WORLD!"),
 		.Font = App->Font,
 		.Position = v3f(W * 0.10f, H * 0.90f, 0),
 		.HeightInPixels = 64.0f,
 		.Colour = v4f(1, 1, 1, 1));
+
+	// DEBUG: render a magenta dot at whatever OS_MousePosition reports. If
+	// this dot sits under the OS cursor the mouse coords are correct; if
+	// it's offset (e.g. flipped vertically) the offset tells us the bug.
+	D_Point(&App->Draw, Mouse, 16.0f, v4f(1.0f, 0.0f, 1.0f, 1));
 
 	R_Update(&App->Render, OS_NextDrawable(App->Window));
 }

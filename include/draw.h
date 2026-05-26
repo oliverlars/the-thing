@@ -64,6 +64,47 @@ void D_BaseStr8(draw_context *D_Context, str8 String, d_str8_options Options);
 
 void D_Quad(draw_context *D, v2f Position, f32 Width, f32 Height, v4f Colour);
 
+// Options shared by all 2D SDF shapes (rounded quad, capsule, squircle).
+// Designed for designated-initializer use via the variadic macros below — any
+// field left zero takes a sensible default.
+typedef struct d_shape_options
+{
+	v4f Colour;
+
+	// Outline rendered just inside the shape's edge. Thickness in pixels;
+	// Thickness <= 0 disables the outline.
+	v4f OutlineColour;
+	f32 OutlineThickness;
+
+	// Multiplier on the bevel normal's z component. Controls how the rim
+	// reads under the point light:
+	//   +1 (default): raised — bevel sits above the surface plane.
+	//    0          : flat normal — purely lateral rim, no z-axis influence.
+	//   -1         : recessed — bevel reads as pressed into the surface.
+	// Animate this for a smooth raise/recess transition. If left zero in the
+	// shape options, the constructor substitutes +1 (default-raised). Pass an
+	// explicit non-zero value (e.g. 1e-3 ≈ 0) to opt out of that substitution.
+	f32 Extrusion;
+}
+d_shape_options;
+
+void D_BaseRoundedQuad(draw_context *D, v2f Position, f32 Width, f32 Height, f32 CornerRadius, d_shape_options Options);
+void D_BaseCapsule    (draw_context *D, v2f Position, f32 Width, f32 Height,                   d_shape_options Options);
+void D_BaseSquircle   (draw_context *D, v2f Position, f32 Width, f32 Height, f32 N,            d_shape_options Options);
+
+#define D_RoundedQuad(D, Pos, W, H, Radius, ...) \
+	D_BaseRoundedQuad(D, Pos, W, H, Radius, (d_shape_options){ __VA_ARGS__ })
+
+// A capsule is just a rounded rectangle whose corner radius is half the short
+// side, so this is a convenience wrapper around D_RoundedQuad.
+#define D_Capsule(D, Pos, W, H, ...) \
+	D_BaseCapsule(D, Pos, W, H, (d_shape_options){ __VA_ARGS__ })
+
+// Apple-style squircle (superellipse). Exponent N: 2 = ellipse, 4 = classic
+// squircle, ~5 matches the iOS app-icon shape, higher → more rectangular.
+#define D_Squircle(D, Pos, W, H, N, ...) \
+	D_BaseSquircle(D, Pos, W, H, N, (d_shape_options){ __VA_ARGS__ })
+
 void D_Line(draw_context *D, v2f Start, v2f End, f32 Thickness, v4f Colour);
 
 void D_Bezier(draw_context *D, v2f Start, v2f Control, v2f End, f32 Thickness, v4f Colour);

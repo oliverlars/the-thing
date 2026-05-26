@@ -24,6 +24,13 @@ r_vertex_attributes R_AttributesFromCommandType(r_command_type CommandType)
 	case R_COMMAND_LINES:
 		R = R_VA_POSITION | R_VA_COLOUR | R_VA_START | R_VA_END | R_VA_THICKNESS;
 		break;
+	case R_COMMAND_ROUNDED_BOX:
+	case R_COMMAND_SQUIRCLE:
+		R = R_VA_POSITION | R_VA_COLOUR
+		  | R_VA_THICKNESS | R_VA_CENTRE | R_VA_HALF_SIZE
+		  | R_VA_OUTLINE_COLOUR | R_VA_OUTLINE_THICKNESS
+		  | R_VA_EXTRUSION;
+		break;
 	}
 	return R;
 }
@@ -74,4 +81,10 @@ m44f R_CurrentTransform(render_context *R)
 {
 	assert(R->TransformCount >= 1);
 	return R->TransformStack[R->TransformCount - 1];
+}
+
+void R_SetLight(render_context *R, v3f Position, v3f Colour)
+{
+	R->LightPosition = Position;
+	R->LightColour   = Colour;
 }

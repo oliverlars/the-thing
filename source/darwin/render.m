@@ -36,6 +36,8 @@ typedef struct metal_context
 	metal_shader PointShader;
 	metal_shader LineShader;
 	metal_shader BezierShader;
+	metal_shader RoundedBoxShader;
+	metal_shader SquircleShader;
 
 	id<MTLDepthStencilState> DepthOn;   // LessEqual + write
 	id<MTLDepthStencilState> DepthOff;  // Always + no write
@@ -57,7 +59,9 @@ metal_context;
 
 typedef struct uniforms
 {
-	m44f PVMMatrix;
+	m44f PVMMatrix;       // 64 bytes
+	v4f  LightPosition;   // 16 bytes — xyz = position, w unused (padding)
+	v4f  LightColour;     // 16 bytes — rgb = colour*intensity, w unused
 } uniforms;
 
 void R_UpdateCurves(render_context *Render, v2f *CurvePoints, int CurvePointsCount, int CurvePointsSoFar)
@@ -226,11 +230,13 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 	MTLPixelFormat Depth = MTLPixelFormatDepth32Float;
 
 	m_scratch_arena Scratch = ScratchBegin(0, 0);
-	M->TriangleShader = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "triangle.metal"), R_COMMAND_TRIANGLE, Color, Depth);
-	M->GlyphShader    = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "glyph.metal"),    R_COMMAND_GLYPH,    Color, Depth);
-	M->PointShader    = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "point.metal"),    R_COMMAND_POINTS,   Color, Depth);
-	M->LineShader     = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "line.metal"),     R_COMMAND_LINES,    Color, Depth);
-	M->BezierShader   = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "bezier.metal"),   R_COMMAND_BEZIER,   Color, Depth);
+	M->TriangleShader   = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "triangle.metal"),    R_COMMAND_TRIANGLE,    Color, Depth);
+	M->GlyphShader      = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "glyph.metal"),       R_COMMAND_GLYPH,       Color, Depth);
+	M->PointShader      = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "point.metal"),       R_COMMAND_POINTS,      Color, Depth);
+	M->LineShader       = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "line.metal"),        R_COMMAND_LINES,       Color, Depth);
+	M->BezierShader     = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "bezier.metal"),      R_COMMAND_BEZIER,      Color, Depth);
+	M->RoundedBoxShader = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "rounded_box.metal"), R_COMMAND_ROUNDED_BOX, Color, Depth);
+	M->SquircleShader   = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "squircle.metal"),    R_COMMAND_SQUIRCLE,    Color, Depth);
 	ScratchEnd(Scratch);
 
 	// Two depth states — triangles/points test+write depth, the SDF primitives
@@ -359,7 +365,11 @@ void R_Update(render_context *R, void *DrawableHandle)
 		              || !MemoryEqual(&Command->Transform, &Command->Next->Transform, sizeof(m44f));
 		if (!EndOfBatch) continue;
 
-		uniforms U = { Command->Transform };
+		uniforms U = {
+			.PVMMatrix     = Command->Transform,
+			.LightPosition = v4f(R->LightPosition.X, R->LightPosition.Y, R->LightPosition.Z, 0),
+			.LightColour   = v4f(R->LightColour.X,   R->LightColour.Y,   R->LightColour.Z,   0),
+		};
 		MemoryCopy((u8*)M->UniformBuffers[ResourceIndex].contents + UniformIndex * sizeof(uniforms),
 		           &U, sizeof(U));
 
@@ -402,18 +412,24 @@ void R_Update(render_context *R, void *DrawableHandle)
 		b32 NeedsCurves = NO;
 		switch (D->Type)
 		{
-		case R_COMMAND_TRIANGLE: Shader = &M->TriangleShader; WriteDepth = YES; break;
-		case R_COMMAND_GLYPH:    Shader = &M->GlyphShader;    NeedsCurves = YES; break;
-		case R_COMMAND_POINTS:   Shader = &M->PointShader;    WriteDepth = YES; break;
-		case R_COMMAND_LINES:    Shader = &M->LineShader;     break;
-		case R_COMMAND_BEZIER:   Shader = &M->BezierShader;   break;
+		case R_COMMAND_TRIANGLE:    Shader = &M->TriangleShader;   WriteDepth = YES; break;
+		case R_COMMAND_GLYPH:       Shader = &M->GlyphShader;      NeedsCurves = YES; break;
+		case R_COMMAND_POINTS:      Shader = &M->PointShader;      WriteDepth = YES; break;
+		case R_COMMAND_LINES:       Shader = &M->LineShader;       break;
+		case R_COMMAND_BEZIER:      Shader = &M->BezierShader;     break;
+		case R_COMMAND_ROUNDED_BOX: Shader = &M->RoundedBoxShader; break;
+		case R_COMMAND_SQUIRCLE:    Shader = &M->SquircleShader;   break;
 		}
 
 		[E setRenderPipelineState:Shader->PipelineState];
 		[E setDepthStencilState:(WriteDepth ? M->DepthOn : M->DepthOff)];
 		[E setScissorRect:ScissorFor(D->Scissor, M->Viewport)];
-		[E setVertexBuffer:M->VertexBuffers[ResourceIndex]  offset:D->VertexOffset                 atIndex:0];
-		[E setVertexBuffer:M->UniformBuffers[ResourceIndex] offset:D->UniformIndex * sizeof(uniforms) atIndex:1];
+		[E setVertexBuffer:M->VertexBuffers[ResourceIndex]    offset:D->VertexOffset                    atIndex:0];
+		[E setVertexBuffer:M->UniformBuffers[ResourceIndex]   offset:D->UniformIndex * sizeof(uniforms) atIndex:1];
+		// Fragment shaders for the lit SDF shapes also read uniforms (light
+		// pos/colour). Vertex and fragment stages have independent buffer
+		// tables, so this binding is required on top of the vertex one above.
+		[E setFragmentBuffer:M->UniformBuffers[ResourceIndex] offset:D->UniformIndex * sizeof(uniforms) atIndex:1];
 		if (NeedsCurves)
 		{
 			[E setFragmentBuffer:M->CurveBuffers[ResourceIndex] offset:0 atIndex:0];
