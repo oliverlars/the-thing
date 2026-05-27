@@ -76,14 +76,10 @@ typedef struct d_shape_options
 	v4f OutlineColour;
 	f32 OutlineThickness;
 
-	// Multiplier on the bevel normal's z component. Controls how the rim
-	// reads under the point light:
-	//   +1 (default): raised — bevel sits above the surface plane.
-	//    0          : flat normal — purely lateral rim, no z-axis influence.
-	//   -1         : recessed — bevel reads as pressed into the surface.
-	// Animate this for a smooth raise/recess transition. If left zero in the
-	// shape options, the constructor substitutes +1 (default-raised). Pass an
-	// explicit non-zero value (e.g. 1e-3 ≈ 0) to opt out of that substitution.
+	// Bevel depth/direction. 0 (default from zero-init) = fully flat; +1 =
+	// fully raised; -1 = fully recessed. Animatable between any of these.
+	// Pass +1 explicitly to get a raised lip — leaving this unset keeps the
+	// shape flat.
 	f32 Extrusion;
 }
 d_shape_options;

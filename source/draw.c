@@ -338,10 +338,6 @@ static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
 	v2f Min = v2f(Position.X - Pad,         Position.Y - Pad);
 	v2f Max = v2f(Position.X + Width + Pad, Position.Y + Height + Pad);
 
-	// Zero-initialised options default to a raised bevel (+1 on the normal's
-	// z); pass a non-zero Extrusion to override (e.g. -1 for recessed).
-	f32 Extrusion = (Options.Extrusion == 0.0f) ? 1.0f : Options.Extrusion;
-
 	r_vertex Tmpl = {
 		.Colour           = Options.Colour,
 		.Centre           = Centre,
@@ -349,7 +345,7 @@ static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
 		.Thickness        = Param,
 		.OutlineColour    = Options.OutlineColour,
 		.OutlineThickness = Options.OutlineThickness,
-		.Extrusion        = Extrusion,
+		.Extrusion        = Options.Extrusion,
 	};
 	PushQuad6(Command.Vertices, Min, Max, Tmpl);
 

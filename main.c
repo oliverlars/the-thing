@@ -114,18 +114,34 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// period to make the raise↔recess transition visible at a glance.
 	f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
 	static f32 Extrusion = 1.0;
+	v4f CapsuleColours[2] = { v4f(1.0f, 0.4f, 0.0f, 1), v4f(0.8f, 0.35f, 0.0f, 1) };
+	static b32 Clicked = False;
+	f32 Extrusions[2] = { 1.0, 0.5 };
 	v2f MousePosition = OS_MousePosition(App->Window);
 	if (MousePosition.X >= 500 && MousePosition.X < 750 &&
 		MousePosition.Y >= 500 && MousePosition.Y <= 580 && OS_MousePressed(OS_MOUSE_LEFT)) {
-			Extrusion *= -1;
+			Clicked = !Clicked;
 		}
 	D_Capsule(&App->Draw, v2f(500, 500),
 		250, 80,
-		.Colour = v4f(1.0f, 0.4f, 0.0f, 1),
+		.Colour = CapsuleColours[Clicked],
 		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 1),
-		.OutlineThickness = 5.0f,
-		.Extrusion = Extrusion);
-
+		.OutlineThickness = 4.0f,
+		.Extrusion = Extrusions[Clicked]);
+	if(Clicked)
+	{
+		D_Str8(&App->Draw, Str8("ON!"), .Font = App->Font,
+			.Position = v3f(590, 520, 0),
+			.HeightInPixels = 64.0f,
+			.Colour = v4f(1, 1, 1, 1));
+	}
+	else
+	{
+		D_Str8(&App->Draw, Str8("OFF!"), .Font = App->Font,
+			.Position = v3f(580, 520, 0),
+			.HeightInPixels = 64.0f,
+			.Colour = v4f(0.2, 0.2, 0.2, 1));
+	}
 	D_Str8(&App->Draw, Str8("HELLO, WORLD!"),
 		.Font = App->Font,
 		.Position = v3f(W * 0.10f, H * 0.90f, 0),
