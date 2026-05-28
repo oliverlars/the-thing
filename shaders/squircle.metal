@@ -57,8 +57,7 @@ vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
 // Approximate 2D signed distance to the superellipse, in pixels. The raw field
 // |x/a|^n+|y/b|^n-1 is not a distance — its iso-lines are scaled squircles — so
 // we divide by the analytic gradient magnitude (a first-order distance
-// estimate). Computed in closed form so it's evaluable at any point, which the
-// 3D trace below needs.
+// estimate).
 float Squircle2D(float2 P, float2 HalfSize, float N)
 {
 	float n = clamp(N, 2.0, 32.0);
@@ -76,48 +75,7 @@ float Squircle2D(float2 P, float2 HalfSize, float N)
 	return Field / max(length(Grad), 1e-5);
 }
 
-// 3D signed distance to the extruded solid: the squircle cross-section,
-// intersected with a z-slab [0, Th], rim rounded by R. Th is the signed height
-// (+1 raised, 0 flat, -1 recessed).
-float Map(float2 P, float Z, float2 HalfSize, float Exponent, float Th)
-{
-	float D2 = Squircle2D(P, HalfSize, Exponent);
-	float R  = 0.5 * abs(Th);
-	float Cz = 0.5 * Th;
-	float2 W = float2(D2 + R, abs(Z - Cz));
-	return min(max(W.x, W.y), 0.0) + length(max(W, 0.0)) - R;
-}
-
-// Normal = normalize(gradient(Map)), tetrahedron sampling (4 evaluations).
-float3 MapNormal(float2 P, float Z, float2 HalfSize, float Exponent, float Th)
-{
-	const float E = 0.5;
-	const float2 K = float2(1.0, -1.0);
-	float3 N =
-		K.xyy * Map(P + E * K.xy, Z + E * K.y, HalfSize, Exponent, Th) +
-		K.yyx * Map(P + E * K.yy, Z + E * K.x, HalfSize, Exponent, Th) +
-		K.yxy * Map(P + E * K.yx, Z + E * K.y, HalfSize, Exponent, Th) +
-		K.xxx * Map(P + E * K.xx, Z + E * K.x, HalfSize, Exponent, Th);
-	return normalize(N);
-}
-
-// Orthographic top-down sphere trace to the surface height for this pixel.
-float TraceSurface(float2 P, float2 HalfSize, float Exponent, float Th)
-{
-	float ZStart = max(Th, 0.0) + 1.0;
-	float ZStop  = min(Th, 0.0) - 1.0;
-	float Z = ZStart;
-	for (int i = 0; i < 48; ++i)
-	{
-		float D = Map(P, Z, HalfSize, Exponent, Th);
-		if (D < 0.001) break;
-		Z -= max(D, 0.05);
-		if (Z < ZStop) { Z = ZStop; break; }
-	}
-	return Z;
-}
-
-// Plain Blinn-Phong on a real position + normal.
+// Plain Blinn-Phong on a position + normal.
 float3 ApplyLighting(float3 BaseColour, float3 Position, float3 Normal,
                      float3 LightPos, float3 LightColour)
 {
@@ -128,7 +86,7 @@ float3 ApplyLighting(float3 BaseColour, float3 Position, float3 Normal,
 	float3 V = float3(0.0, 0.0, 1.0);
 	float3 H = normalize(L + V);
 
-	const float Ambient = 0.5;
+	const float Ambient = 0.35;
 	float Lambert = max(0.0, dot(Normal, L));
 	float Spec    = pow(max(0.0, dot(Normal, H)), 32.0);
 
@@ -141,7 +99,7 @@ fragment float4 FragmentMain(vertex_output Input [[stage_in]],
 	float2 P = Input.LocalPos - Input.Centre;
 	float Dist = Squircle2D(P, Input.HalfSize, Input.Exponent);
 
-	// 2D distance still drives coverage and antialiasing.
+	// 2D distance drives coverage and antialiasing.
 	float FillAlpha = clamp(0.5 - Dist / max(fwidth(Dist), 1e-5), 0.0, 1.0);
 	if (FillAlpha <= 0.0) discard_fragment();
 
@@ -160,24 +118,39 @@ fragment float4 FragmentMain(vertex_output Input [[stage_in]],
 		BaseAlpha  = Input.Colour.a;
 	}
 
-	float Bevel = min(12.0, min(Input.HalfSize.x, Input.HalfSize.y));
-	float Th    = Bevel * Input.Extrusion;
-
-	float3 Normal;
-	float  SurfaceZ;
-	if (abs(Th) < 1e-3)
+	float3 Lit;
+	if (abs(Input.Extrusion) < 1e-3)
 	{
-		Normal   = float3(0.0, 0.0, 1.0);
-		SurfaceZ = 0.0;
+		// Fully flat: no bevel and no per-pixel lighting. A flat normal under a
+		// nearby point light still gets a grazing-falloff gradient that reads as a
+		// faint dome, so for Extrusion 0 we skip lighting and emit the raw colour.
+		Lit = BaseColour;
 	}
 	else
 	{
-		SurfaceZ = TraceSurface(P, Input.HalfSize, Input.Exponent, Th);
-		Normal   = MapNormal(P, SurfaceZ, Input.HalfSize, Input.Exponent, Th);
-	}
+		// Fake-3D normal map from the 2D field: treat the band Dist in [-Bevel, 0]
+		// as a quarter-circle rolling from the flat top (normal +z) down to the
+		// silhouette (normal horizontal). No raymarch — the distance field is
+		// turned straight into a normal. Extrusion scales the tilt and signs the
+		// roll direction (+ raised lip, - recessed wall).
+		float Bevel = min(24.0, min(Input.HalfSize.x, Input.HalfSize.y) * 0.5);
 
-	float3 Position = float3(Input.LocalPos, SurfaceZ);
-	float3 Lit = ApplyLighting(BaseColour, Position, Normal,
-	                           Uniforms.LightPosition.xyz, Uniforms.LightColour.rgb);
+		// SDF gradient points outward (toward increasing distance / the edge).
+		float2 Grad    = float2(dfdx(Dist), dfdy(Dist));
+		float2 GradDir = Grad / max(length(Grad), 1e-5);
+
+		float T       = clamp(-Dist / Bevel, 0.0, 1.0); // 0 at silhouette, 1 on flat top
+		float Angle   = T * (3.14159265 * 0.5);
+		float SlopeXY = cos(Angle);                     // 1 at edge → 0 on flat top
+		float SlopeZ  = sin(Angle);                     // 0 at edge → 1 on flat top
+
+		float3 Tilted = float3(sign(Input.Extrusion) * GradDir * SlopeXY, SlopeZ);
+		float3 Normal = normalize(mix(float3(0.0, 0.0, 1.0), Tilted, abs(Input.Extrusion)));
+		float  Height = Input.Extrusion * SlopeZ * Bevel;
+
+		float3 Position = float3(Input.LocalPos, Height);
+		Lit = ApplyLighting(BaseColour, Position, Normal,
+		                    Uniforms.LightPosition.xyz, Uniforms.LightColour.rgb);
+	}
 	return float4(Lit, FillAlpha * BaseAlpha);
 }

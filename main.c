@@ -55,7 +55,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	f32 BCY = H * 0.70f;
 
 	D_Quad(&App->Draw, v2f(BX0 - 4, BY - 4), (BX1 - BX0) + 8, (BCY - BY) + 8,
-		v4f(0.25f, 0.25f, 0.25f, 1.0f));
+		.Colour = v4f(0.25f, 0.25f, 0.25f, 1.0f));
 
 	D_Bezier(&App->Draw,
 		v2f(BX0,  BY),
@@ -77,8 +77,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 		Prev = P;
 	}
 
-	D_Point(&App->Draw, v2f(BX0, BY), 20.0f, v4f(1, 0.9f, 0.2f, 1));
-	D_Point(&App->Draw, v2f(BX1, BY), 20.0f, v4f(0.2f, 0.9f, 1.0f, 1));
+	D_Point(&App->Draw, v2f(BX0, BY), 20.0f, .Colour = v4f(1, 0.9f, 0.2f, 1));
+	D_Point(&App->Draw, v2f(BX1, BY), 20.0f, .Colour = v4f(0.2f, 0.9f, 1.0f, 1));
 
 	f32 ShapeY = H * 0.12f;
 	f32 ShapeSize = 96.0f;
@@ -113,13 +113,17 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// Oscillates Extrusion between −1 (recessed) and +1 (raised) on a 2s
 	// period to make the raise↔recess transition visible at a glance.
 	f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
-	static f32 Extrusion = 1.0;
 	v4f CapsuleColours[2] = { v4f(1.0f, 0.4f, 0.0f, 1), v4f(0.8f, 0.35f, 0.0f, 1) };
 	static b32 Clicked = False;
-	f32 Extrusions[2] = { 1.0, 0.5 };
+	f32 Extrusions[2] = { 1.0, 0.0 };
+	static f32 ExtrusionTarget = 1.0;
+	static f32 Extrusion = 1.0;
+
+	Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
 	v2f MousePosition = OS_MousePosition(App->Window);
 	if (MousePosition.X >= 500 && MousePosition.X < 750 &&
 		MousePosition.Y >= 500 && MousePosition.Y <= 580 && OS_MousePressed(OS_MOUSE_LEFT)) {
+			ExtrusionTarget = (f32)Clicked;
 			Clicked = !Clicked;
 		}
 	D_Capsule(&App->Draw, v2f(500, 500),
@@ -127,7 +131,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 		.Colour = CapsuleColours[Clicked],
 		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 1),
 		.OutlineThickness = 4.0f,
-		.Extrusion = Extrusions[Clicked]);
+		.Extrusion = Extrusion);
 	if(Clicked)
 	{
 		D_Str8(&App->Draw, Str8("ON!"), .Font = App->Font,
@@ -151,7 +155,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// DEBUG: render a magenta dot at whatever OS_MousePosition reports. If
 	// this dot sits under the OS cursor the mouse coords are correct; if
 	// it's offset (e.g. flipped vertically) the offset tells us the bug.
-	D_Point(&App->Draw, Mouse, 16.0f, v4f(1.0f, 0.0f, 1.0f, 1));
+	D_Point(&App->Draw, Mouse, 16.0f, .Colour = v4f(1.0f, 0.0f, 1.0f, 1));
 
 	R_Update(&App->Render, OS_NextDrawable(App->Window));
 }

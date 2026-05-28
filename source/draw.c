@@ -122,32 +122,16 @@ d_atlas_glyph *D_GlyphFromCodePoint(draw_context *D, d_font Font, u32 CodePoint)
 	return Result;
 }
 
-void D_Quad(draw_context *D, v2f Position, f32 Width, f32 Height, v4f Colour)
+// Defined further down; Quad/Point route through it so they pick up the same
+// outline + extrusion + lighting as the rounded shapes.
+static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
+                       f32 Width, f32 Height, f32 Param, d_shape_options Options);
+
+void D_BaseQuad(draw_context *D, v2f Position, f32 Width, f32 Height, d_shape_options Options)
 {
-	m_arena *Arena = TemporaryArena();
-	r_command Command = {0};
-	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
-	Command.VerticesCount = 6;
-
-	v2f V[6] =
-	{
-		v2f(Position.X,           Position.Y),
-		v2f(Position.X + Width,   Position.Y),
-		v2f(Position.X + Width,   Position.Y + Height),
-
-		v2f(Position.X,           Position.Y),
-		v2f(Position.X,           Position.Y + Height),
-		v2f(Position.X + Width,   Position.Y + Height),
-	};
-
-	for (int I = 0; I < 6; I++)
-	{
-		Command.Vertices[I].Position = v4f(V[I].X, V[I].Y, 0, 1);
-		Command.Vertices[I].Colour = Colour;
-	}
-	Command.Type = R_COMMAND_TRIANGLE;
-	Command.Attributes = R_AttributesFromCommandType(Command.Type);
-	R_PushCommand(D->Render, Command);
+	// Corner radius 0 → sharp rectangle, but flowing through the SDF path means it
+	// inherits outline + extrusion + lighting like the rounded shapes.
+	PushSDFBox(D, R_COMMAND_ROUNDED_BOX, Position, Width, Height, 0.0f, Options);
 }
 
 f32 D_Str8WidthFromHeight(d_font Font, str8 String, f32 HeightInPixels)
@@ -370,25 +354,11 @@ void D_BaseSquircle(draw_context *D, v2f Position, f32 Width, f32 Height, f32 N,
 	PushSDFBox(D, R_COMMAND_SQUIRCLE, Position, Width, Height, N, Options);
 }
 
-void D_Point(draw_context *D, v2f Position, f32 Size, v4f Colour)
+void D_BasePoint(draw_context *D, v2f Position, f32 Size, d_shape_options Options)
 {
-	m_arena *Arena = TemporaryArena();
-	r_command Command = {0};
-	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
-	Command.VerticesCount = 6;
-
-	f32 Half = Size * 0.5f + 1.0f;
-	v2f Min = v2f(Position.X - Half, Position.Y - Half);
-	v2f Max = v2f(Position.X + Half, Position.Y + Half);
-
-	r_vertex Tmpl = {
-		.Colour = Colour,
-		.PointSize = Size,
-		.Centre = Position,
-	};
-	PushQuad6(Command.Vertices, Min, Max, Tmpl);
-
-	Command.Type = R_COMMAND_POINTS;
-	Command.Attributes = R_AttributesFromCommandType(Command.Type);
-	R_PushCommand(D->Render, Command);
+	// A rounded box whose corner radius equals its half-size is a circle.
+	// PushSDFBox expects the top-left corner; D_Point's Position is the centre.
+	f32 Half = Size * 0.5f;
+	v2f Corner = v2f(Position.X - Half, Position.Y - Half);
+	PushSDFBox(D, R_COMMAND_ROUNDED_BOX, Corner, Size, Size, Half, Options);
 }
