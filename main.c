@@ -132,20 +132,14 @@ static void Frame(void *UserData, v2i ViewportSize)
 		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 1),
 		.OutlineThickness = 4.0f,
 		.Extrusion = Extrusion);
-	if(Clicked)
-	{
-		D_Str8(&App->Draw, Str8("ON!"), .Font = App->Font,
-			.Position = v3f(590, 520, 0),
-			.HeightInPixels = 64.0f,
-			.Colour = v4f(1, 1, 1, 1));
-	}
-	else
-	{
-		D_Str8(&App->Draw, Str8("OFF!"), .Font = App->Font,
-			.Position = v3f(580, 520, 0),
-			.HeightInPixels = 64.0f,
-			.Colour = v4f(0.2, 0.2, 0.2, 1));
-	}
+	str8 Label = Clicked ? Str8("ON!") : Str8("OFF!");
+	v4f LabelColour = Clicked ? v4f(1, 1, 1, 1) : v4f(0.2f, 0.2f, 0.2f, 1);
+	D_Str8InBox(&App->Draw, Label,
+		v2f(500, 500), v2f(250, 80),
+		D_ALIGN_CENTRE, D_ALIGN_CENTRE,
+		.Font = App->Font,
+		.HeightInPixels = 48.0f,
+		.Colour = LabelColour);
 	D_Str8(&App->Draw, Str8("HELLO, WORLD!"),
 		.Font = App->Font,
 		.Position = v3f(W * 0.10f, H * 0.90f, 0),

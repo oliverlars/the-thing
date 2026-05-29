@@ -158,6 +158,49 @@ f32 D_LineHeightFromFont(d_font Font, f32 HeightInPixels)
 	return (Font.Ascent - Font.Descent + Font.LineGap) * Scale;
 }
 
+f32 D_Str8HeightFromHeight(d_font Font, f32 HeightInPixels)
+{
+	f32 Scale = stbtt_ScaleForPixelHeight(&Font.Info, HeightInPixels);
+	return (f32)(Font.Ascent - Font.Descent) * Scale;
+}
+
+static f32 D_AlignFraction(d_align Align)
+{
+	switch (Align)
+	{
+		case D_ALIGN_CENTRE: return 0.5f;
+		case D_ALIGN_MAX:    return 1.0f;
+		case D_ALIGN_MIN:    return 0.0f;
+		default:             return 0.0f;
+	}
+}
+
+v2f D_Str8AlignInBox(d_font Font, str8 String, f32 HeightInPixels,
+                     v2f BoxPosition, v2f BoxSize, d_align AlignX, d_align AlignY)
+{
+	f32 Scale = stbtt_ScaleForPixelHeight(&Font.Info, HeightInPixels);
+	f32 TextW = D_Str8WidthFromHeight(Font, String, HeightInPixels);
+	f32 TextH = (f32)(Font.Ascent - Font.Descent) * Scale;
+
+	f32 PenX = BoxPosition.X + (BoxSize.X - TextW) * D_AlignFraction(AlignX);
+
+	f32 BoxBottomY = BoxPosition.Y + (BoxSize.Y - TextH) * D_AlignFraction(AlignY);
+	f32 PenY = BoxBottomY - (f32)Font.Descent * Scale;
+
+	return v2f(PenX, PenY);
+}
+
+void D_BaseStr8InBox(draw_context *D, str8 String,
+                     v2f BoxPosition, v2f BoxSize, d_align AlignX, d_align AlignY,
+                     d_str8_options Options)
+{
+	v2f Pen = D_Str8AlignInBox(Options.Font, String, Options.HeightInPixels,
+	                           BoxPosition, BoxSize, AlignX, AlignY);
+	Options.Position.X = Pen.X;
+	Options.Position.Y = Pen.Y;
+	D_BaseStr8(D, String, Options);
+}
+
 void D_BaseStr8(draw_context *D, str8 String, d_str8_options Options)
 {
 	m_arena *Arena = TemporaryArena();

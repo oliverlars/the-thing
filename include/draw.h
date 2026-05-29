@@ -60,7 +60,26 @@ d_str8_options;
 
 f32 D_Str8WidthFromHeight(d_font Font, str8 String, f32 HeightInPixels);
 
+f32 D_Str8HeightFromHeight(d_font Font, f32 HeightInPixels);
+
 void D_BaseStr8(draw_context *D_Context, str8 String, d_str8_options Options);
+
+typedef enum d_align
+{
+	D_ALIGN_MIN,
+	D_ALIGN_CENTRE,
+	D_ALIGN_MAX,
+} d_align;
+
+v2f D_Str8AlignInBox(d_font Font, str8 String, f32 HeightInPixels,
+                     v2f BoxPosition, v2f BoxSize, d_align AlignX, d_align AlignY);
+
+void D_BaseStr8InBox(draw_context *D_Context, str8 String,
+                     v2f BoxPosition, v2f BoxSize, d_align AlignX, d_align AlignY,
+                     d_str8_options Options);
+
+#define D_Str8InBox(Draw, String, BoxPos, BoxSize, AlignX, AlignY, ...) \
+	D_BaseStr8InBox(Draw, String, BoxPos, BoxSize, AlignX, AlignY, (d_str8_options){ __VA_ARGS__ })
 
 // Options shared by all 2D SDF shapes (rounded quad, capsule, squircle, quad,
 // point).
