@@ -1,0 +1,134 @@
+#include <metal_stdlib>
+
+using namespace metal;
+
+struct uniforms
+{
+	float4x4 PVMMatrix;
+	float4   LightPosition;   // xyz = world-space position of point light
+	float4   LightColour;     // rgb = colour * intensity; zero = lighting off
+};
+
+// Attribute indices follow enum bit order in r_vertex_attributes, not
+// declaration order. Param is the shape-specific scalar (corner radius for the
+// rounded box, exponent for the squircle).
+struct vertex_input
+{
+	float4 Position         [[attribute(0)]];
+	float4 Colour           [[attribute(1)]];
+	float  Param            [[attribute(2)]];
+	float2 Centre           [[attribute(3)]];
+	float2 HalfSize         [[attribute(4)]];
+	float4 OutlineColour    [[attribute(5)]];
+	float  OutlineThickness [[attribute(6)]];
+	float  Extrusion        [[attribute(7)]];
+};
+
+struct vertex_output
+{
+	float4 Position [[position]];
+	float2 LocalPos;
+	float4 Colour;
+	float2 Centre;
+	float2 HalfSize;
+	float  Param;
+	float4 OutlineColour;
+	float  OutlineThickness;
+	float  Extrusion;
+};
+
+vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
+                                constant uniforms &Uniforms [[buffer(1)]],
+                                uint VertexID [[vertex_id]])
+{
+	vertex_output Output;
+	Output.Position         = Uniforms.PVMMatrix * Vertices[VertexID].Position;
+	Output.LocalPos         = Vertices[VertexID].Position.xy;
+	Output.Colour           = Vertices[VertexID].Colour;
+	Output.Centre           = Vertices[VertexID].Centre;
+	Output.HalfSize         = Vertices[VertexID].HalfSize;
+	Output.Param            = Vertices[VertexID].Param;
+	Output.OutlineColour    = Vertices[VertexID].OutlineColour;
+	Output.OutlineThickness = Vertices[VertexID].OutlineThickness;
+	Output.Extrusion        = Vertices[VertexID].Extrusion;
+	return Output;
+}
+
+#define AMBIENT 0.35
+
+// Plain Blinn-Phong on a position + normal.
+float3 ApplyLighting(float3 BaseColour, float3 Position, float3 Normal,
+                     float3 LightPos, float3 LightColour)
+{
+	float Strength = length(LightColour);
+
+	float3 L = normalize(LightPos - Position);
+	float3 V = float3(0.0, 0.0, 1.0);
+	float3 H = normalize(L + V);
+
+	float Lambert  = max(0.0, dot(Normal, L));
+	float Specular = pow(max(0.0, dot(Normal, H)), 32.0);
+
+	return BaseColour * (AMBIENT + (1.0 - AMBIENT) * Lambert) + BaseColour * Specular;
+}
+
+// Turns a 2D signed distance field (pixels, negative inside) into the final
+// blended + optionally bevel-lit colour. The only shape-specific input is Dist;
+// every SDF shape shares the coverage, outline and fake-3D bevel logic here.
+// BevelMax caps the bevel band width in pixels.
+float4 ShadeSDF(float Dist, float2 LocalPos, float2 HalfSize,
+                float4 Colour, float4 OutlineColour, float OutlineThickness,
+                float Extrusion, float BevelMax, constant uniforms &Uniforms)
+{
+	float FillAlpha = clamp(0.5 - Dist / max(fwidth(Dist), 1e-5), 0.0, 1.0);
+	if (FillAlpha <= 0.0) discard_fragment();
+
+	float3 BaseColour;
+	float  BaseAlpha;
+	if (OutlineThickness > 0.0)
+	{
+		float PW = max(fwidth(Dist), 1e-5);
+		float InteriorAlpha = clamp(0.5 - (Dist + OutlineThickness) / PW, 0.0, 1.0);
+		BaseColour = mix(OutlineColour.rgb, Colour.rgb, InteriorAlpha);
+		BaseAlpha  = mix(OutlineColour.a,   Colour.a,   InteriorAlpha);
+	}
+	else
+	{
+		BaseColour = Colour.rgb;
+		BaseAlpha  = Colour.a;
+	}
+
+	if (abs(Extrusion) < 1e-3)
+	{
+		// Fully flat: no bevel, no per-pixel lighting (a flat normal under a
+		// nearby point light still picks up a grazing gradient that reads as a
+		// faint dome), so emit the raw colour.
+		return float4(BaseColour, FillAlpha * BaseAlpha);
+	}
+
+	// Fake-3D normal from the 2D field: treat the band Dist in [-Bevel, 0] as a
+	// quarter-circle rolling from the flat top (normal +z) down to the silhouette
+	// (normal horizontal). Extrusion scales the tilt and signs the roll direction
+	// (+ raised lip, - recessed wall).
+	float Bevel = min(BevelMax, min(HalfSize.x, HalfSize.y) * 0.5);
+
+	// Gradient points outward (toward increasing distance / the edge). dfdy is
+	// negated to undo the framebuffer's y-down orientation, so the tilt is in the
+	// same y-up space as the light.
+	float2 Grad    = float2(dfdx(Dist), -dfdy(Dist));
+	float2 GradDir = Grad / max(length(Grad), 1e-5);
+
+	float T       = clamp(-Dist / Bevel, 0.0, 1.0); // 0 at silhouette, 1 on flat top
+	float Angle   = T * (3.14159265 * 0.5);
+	float SlopeXY = cos(Angle);
+	float SlopeZ  = sin(Angle);
+
+	float3 Tilted = float3(sign(Extrusion) * GradDir * SlopeXY, SlopeZ);
+	float3 Normal = normalize(mix(float3(0.0, 0.0, 1.0), Tilted, abs(Extrusion)));
+	float  Height = Extrusion * SlopeZ * Bevel;
+
+	float3 Position = float3(LocalPos, Height);
+	float3 Lit = ApplyLighting(BaseColour, Position, Normal,
+	                           Uniforms.LightPosition.xyz, Uniforms.LightColour.rgb);
+	return float4(Lit, FillAlpha * BaseAlpha);
+}
