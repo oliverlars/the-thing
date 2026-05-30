@@ -163,10 +163,65 @@ static int StrideFromAttributes(r_vertex_attributes Attributes)
 	return Align(Offset, MaxAlignment ? MaxAlignment : 16);
 }
 
-static str8 LoadShaderSource(m_arena *Arena, str8 ShaderDir, char *Name)
+static str8 LoadShaderFile(m_arena *Arena, str8 ShaderDir, char *Name)
 {
 	str8 Path = Str8PushF(Arena, "?S/?cstr", ShaderDir, Name);
 	return OS_LoadEntireFileIntoMemory(Arena, Path);
+}
+
+// Metal's newLibraryWithSource has no include search path, so we resolve local
+// #include "file" directives ourselves: each is replaced by the (recursively
+// resolved) contents of that file from the shader dir. #include <...> is left
+// untouched for the Metal compiler.
+static str8 ResolveShaderIncludes(m_arena *Arena, str8 ShaderDir, str8 Source)
+{
+	str8_list Parts = {0};
+	s64 LineStart = 0;
+	for (s64 I = 0; I <= Source.Size; I++)
+	{
+		b32 EndOfLine = (I == Source.Size) || (Source.Bytes[I] == '\n');
+		if (!EndOfLine) continue;
+
+		u8 *Bytes = Source.Bytes + LineStart;
+		s64 LineSize = I - LineStart;
+
+		s64 J = 0;
+		while (J < LineSize && (Bytes[J] == ' ' || Bytes[J] == '\t')) J++;
+
+		char *Marker = "#include \"";
+		s64 MarkerSize = 10;
+		str8 IncludeName = {0};
+		if (LineSize - J >= MarkerSize && memcmp(Bytes + J, Marker, MarkerSize) == 0)
+		{
+			s64 NameStart = J + MarkerSize;
+			s64 K = NameStart;
+			while (K < LineSize && Bytes[K] != '"') K++;
+			if (K < LineSize) IncludeName = (str8){ K - NameStart, Bytes + NameStart };
+		}
+
+		if (IncludeName.Size > 0)
+		{
+			char *NameCStr = CStrFromStr8(Arena, IncludeName);
+			str8 Included = LoadShaderFile(Arena, ShaderDir, NameCStr);
+			Str8ListAppend(Arena, &Parts, ResolveShaderIncludes(Arena, ShaderDir, Included));
+			Str8ListAppend(Arena, &Parts, Str8("\n"));
+		}
+		else
+		{
+			// Re-emit the original line, including its trailing newline (if any).
+			s64 EmitSize = (I < Source.Size) ? (LineSize + 1) : LineSize;
+			Str8ListAppend(Arena, &Parts, (str8){ EmitSize, Bytes });
+		}
+
+		LineStart = I + 1;
+	}
+	return Str8ListJoin(Arena, &Parts);
+}
+
+static str8 LoadShaderSource(m_arena *Arena, str8 ShaderDir, char *Name)
+{
+	str8 Raw = LoadShaderFile(Arena, ShaderDir, Name);
+	return ResolveShaderIncludes(Arena, ShaderDir, Raw);
 }
 
 static metal_shader MakeShader(metal_context *M, str8 Source, r_command_type Type,

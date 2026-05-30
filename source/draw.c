@@ -259,7 +259,7 @@ void D_BaseStr8(draw_context *D, str8 String, d_str8_options Options)
 			for (int J = 0; J < 6; J++)
 			{
 				r_vertex Vx = {
-					.Position   = v4f(V[J].X, V[J].Y + Glyph->Box.Y * Scale, Options.Position.Z, 1),
+					.Position   = v4f(V[J].X + Glyph->Box.X * Scale, V[J].Y + Glyph->Box.Y * Scale, Options.Position.Z, 1),
 					.UV         = UV[J],
 					.Colour     = Options.Colour,
 					.CurveStart = Glyph->CurveStart,
