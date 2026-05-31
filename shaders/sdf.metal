@@ -5,23 +5,24 @@ using namespace metal;
 struct uniforms
 {
 	float4x4 PVMMatrix;
-	float4   LightPosition;   // xyz = world-space position of point light
+	float4   LightPosition;   // xyz = world-space position of point light, w = falloff radius (same units)
 	float4   LightColour;     // rgb = colour * intensity; zero = lighting off
 };
 
-// Attribute indices follow enum bit order in r_vertex_attributes, not
-// declaration order. Param is the shape-specific scalar (corner radius for the
-// rounded box, exponent for the squircle).
+// Field order follows enum bit order in r_vertex_attributes (see
+// VERTEX_ATTRIBUTE_FIELDS in render_common.h) so the struct layout matches the
+// CPU-packed vertex buffer. Param is the shape-specific scalar (corner radius
+// for the rounded box, exponent for the squircle).
 struct vertex_input
 {
-	float4 Position         [[attribute(0)]];
-	float4 Colour           [[attribute(1)]];
-	float  Param            [[attribute(2)]];
-	float2 Centre           [[attribute(3)]];
-	float2 HalfSize         [[attribute(4)]];
-	float4 OutlineColour    [[attribute(5)]];
-	float  OutlineThickness [[attribute(6)]];
-	float  Extrusion        [[attribute(7)]];
+	float4 Position;
+	float4 Colour;
+	float  Param;
+	float2 Centre;
+	float2 HalfSize;
+	float4 OutlineColour;
+	float  OutlineThickness;
+	float  Extrusion;
 };
 
 struct vertex_output
@@ -54,22 +55,25 @@ vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
 	return Output;
 }
 
-#define AMBIENT 0.35
+#define AMBIENT 1.0
 
-// Plain Blinn-Phong on a position + normal.
+// Plain Blinn-Phong on a position + normal. Radius is the distance at which the
+// non-ambient contribution falls to half — falloff is 1 / (1 + (d/R)^2) so the
+// units of Radius must match Position / LightPos.
 float3 ApplyLighting(float3 BaseColour, float3 Position, float3 Normal,
-                     float3 LightPos, float3 LightColour)
+                     float3 LightPos, float3 LightColour, float Radius)
 {
-	float Strength = length(LightColour);
-
 	float3 L = normalize(LightPos - Position);
 	float3 V = float3(0.0, 0.0, 1.0);
 	float3 H = normalize(L + V);
 
+	float D = distance(LightPos, Position) / max(Radius, 1e-5);
+	float Attenuation = 1.0 / (1.0 + D * D);
+
 	float Lambert  = max(0.0, dot(Normal, L));
 	float Specular = pow(max(0.0, dot(Normal, H)), 32.0);
 
-	return BaseColour * (AMBIENT + (1.0 - AMBIENT) * Lambert) + BaseColour * Specular;
+	return BaseColour * AMBIENT + ((1.0 - AMBIENT) * Lambert * BaseColour + BaseColour * Specular) * LightColour * Attenuation;
 }
 
 // Turns a 2D signed distance field (pixels, negative inside) into the final
@@ -98,18 +102,11 @@ float4 ShadeSDF(float Dist, float2 LocalPos, float2 HalfSize,
 		BaseAlpha  = Colour.a;
 	}
 
-	if (abs(Extrusion) < 1e-3)
-	{
-		// Fully flat: no bevel, no per-pixel lighting (a flat normal under a
-		// nearby point light still picks up a grazing gradient that reads as a
-		// faint dome), so emit the raw colour.
-		return float4(BaseColour, FillAlpha * BaseAlpha);
-	}
-
 	// Fake-3D normal from the 2D field: treat the band Dist in [-Bevel, 0] as a
 	// quarter-circle rolling from the flat top (normal +z) down to the silhouette
 	// (normal horizontal). Extrusion scales the tilt and signs the roll direction
-	// (+ raised lip, - recessed wall).
+	// (+ raised lip, - recessed wall). At Extrusion ≈ 0 the tilt collapses to
+	// (0,0,1) and Height to 0, leaving a flat surface still lit by the point light.
 	float Bevel = min(BevelMax, min(HalfSize.x, HalfSize.y) * 0.5);
 
 	// Gradient points outward (toward increasing distance / the edge). dfdy is
@@ -129,6 +126,7 @@ float4 ShadeSDF(float Dist, float2 LocalPos, float2 HalfSize,
 
 	float3 Position = float3(LocalPos, Height);
 	float3 Lit = ApplyLighting(BaseColour, Position, Normal,
-	                           Uniforms.LightPosition.xyz, Uniforms.LightColour.rgb);
+	                           Uniforms.LightPosition.xyz, Uniforms.LightColour.rgb,
+	                           Uniforms.LightPosition.w);
 	return float4(Lit, FillAlpha * BaseAlpha);
 }

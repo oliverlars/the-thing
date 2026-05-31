@@ -87,11 +87,13 @@ typedef struct render_context
 	int ScissorCount;
 
 	// Global point light. Position is in the same coordinate space as shape
-	// positions (world / pixel space for the default ortho setup). Default
-	// colour is zero, which makes shapes render as pure base colour with no
-	// lighting contribution — call R_SetLight to enable.
+	// positions (world / pixel space for the default ortho setup). Radius is
+	// the half-falloff distance in those same units. Default colour is zero,
+	// which makes shapes render as pure base colour with no lighting
+	// contribution — call R_SetLight to enable.
 	v3f LightPosition;
 	v3f LightColour;
+	f32 LightRadius;
 }
 render_context;
 
@@ -112,4 +114,4 @@ m44f R_CurrentTransform(render_context *Render);
 
 void R_UpdateCurves(render_context *Render, v2f *CurvePoints, int CurvePointsCount, int CurvePointsSoFar);
 
-void R_SetLight(render_context *Render, v3f Position, v3f Colour);
+void R_SetLight(render_context *Render, v3f Position, v3f Colour, f32 Radius);

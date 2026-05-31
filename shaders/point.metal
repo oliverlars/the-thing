@@ -13,10 +13,10 @@ struct vertex_output
 
 struct vertex_input
 {
-	float4 Position  [[attribute(0)]];
-	float4 Colour    [[attribute(1)]];
-	float  PointSize [[attribute(2)]];
-	float2 Centre    [[attribute(3)]];
+	float4 Position;
+	float4 Colour;
+	float  PointSize;
+	float2 Centre;
 };
 
 struct uniforms

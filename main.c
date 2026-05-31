@@ -46,7 +46,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// Light follows the mouse cursor; .z hovers it above the screen plane.
 	v2f Mouse = OS_MousePosition(App->Window);
 	v3f LightPos = v3f(Mouse.X, Mouse.Y, 200.0f);
-	R_SetLight(&App->Render, LightPos, v3f(0.1f, 0.1f, 0.1f));
+	R_SetLight(&App->Render, LightPos, v3f(1.0f, 1.0f, 1.0f), 400.0f);
 
 	f32 BX0 = W * 0.20f;
 	f32 BX1 = W * 0.80f;
@@ -115,7 +115,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 	f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
 	v4f CapsuleColours[2] = { v4f(1.0f, 0.4f, 0.0f, 1), v4f(0.8f, 0.35f, 0.0f, 1) };
 	static b32 Clicked = False;
-	f32 Extrusions[2] = { 1.0, 0.0 };
 	static f32 ExtrusionTarget = 1.0;
 	static f32 Extrusion = 1.0;
 
@@ -133,7 +132,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 		.OutlineThickness = 4.0f,
 		.Extrusion = Extrusion);
 	str8 Label = Clicked ? Str8("ON!") : Str8("OFF!");
-	v4f LabelColour = Clicked ? v4f(1, 1, 1, 1) : v4f(0.2f, 0.2f, 0.2f, 1);
+	v4f LabelColour = Clicked ? v4f(0.45f, 0.05f, 0.0f, 1) : v4f(1.0f, 0.80f, 0.20f, 1);
 	D_Str8InBox(&App->Draw, Label,
 		v2f(500, 500), v2f(250, 80),
 		D_ALIGN_CENTRE, D_ALIGN_CENTRE,

@@ -16,12 +16,12 @@ struct vertex_output
 
 struct vertex_input
 {
-	float4 Position  [[attribute(0)]];
-	float4 Colour    [[attribute(1)]];
-	float2 Start     [[attribute(2)]];
-	float2 Control   [[attribute(3)]];
-	float2 End       [[attribute(4)]];
-	float  Thickness [[attribute(5)]];
+	float4 Position;
+	float4 Colour;
+	float2 Start;
+	float2 Control;
+	float2 End;
+	float  Thickness;
 };
 
 struct uniforms

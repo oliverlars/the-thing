@@ -60,7 +60,7 @@ metal_context;
 typedef struct uniforms
 {
 	m44f PVMMatrix;       // 64 bytes
-	v4f  LightPosition;   // 16 bytes — xyz = position, w unused (padding)
+	v4f  LightPosition;   // 16 bytes — xyz = position, w = falloff radius (same units)
 	v4f  LightColour;     // 16 bytes — rgb = colour*intensity, w unused
 } uniforms;
 
@@ -422,7 +422,7 @@ void R_Update(render_context *R, void *DrawableHandle)
 
 		uniforms U = {
 			.PVMMatrix     = Command->Transform,
-			.LightPosition = v4f(R->LightPosition.X, R->LightPosition.Y, R->LightPosition.Z, 0),
+			.LightPosition = v4f(R->LightPosition.X, R->LightPosition.Y, R->LightPosition.Z, R->LightRadius),
 			.LightColour   = v4f(R->LightColour.X,   R->LightColour.Y,   R->LightColour.Z,   0),
 		};
 		MemoryCopy((u8*)M->UniformBuffers[ResourceIndex].contents + UniformIndex * sizeof(uniforms),

@@ -83,8 +83,9 @@ m44f R_CurrentTransform(render_context *R)
 	return R->TransformStack[R->TransformCount - 1];
 }
 
-void R_SetLight(render_context *R, v3f Position, v3f Colour)
+void R_SetLight(render_context *R, v3f Position, v3f Colour, f32 Radius)
 {
 	R->LightPosition = Position;
 	R->LightColour   = Colour;
+	R->LightRadius   = Radius;
 }
