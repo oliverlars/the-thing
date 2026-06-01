@@ -4,6 +4,7 @@
 
 #include "strings.h"
 #include "memory.h"
+#include "maths.h"
 
 b32 Str8Equal(str8 A, str8 B)
 {
@@ -70,7 +71,7 @@ str8 Str8PushFV(m_arena *Arena, char *Format, va_list InputArgList)
 			str8 UpTo = {Iter - Start - 1, (u8*)Start};
 			Str8ListAppend(Arena, &Builder, UpTo);
 
-			char Buf[256];
+			char Buf[1024];
 			int Len = 0;
 			int Skip = 0;
 
@@ -110,6 +111,47 @@ str8 Str8PushFV(m_arena *Arena, char *Format, va_list InputArgList)
 				double V = va_arg(ArgList, double);
 				Len = snprintf(Buf, sizeof(Buf), "%f", V);
 				Skip = 3;
+			}
+			else if (Str8Equal((str8){3, (u8*)Iter}, Str8("v2f")))
+			{
+				v2f V = va_arg(ArgList, v2f);
+				Len = snprintf(Buf, sizeof(Buf), "(%f, %f)", V.X, V.Y);
+				Skip = 3;
+			}
+			else if (Str8Equal((str8){3, (u8*)Iter}, Str8("v2i")))
+			{
+				v2i V = va_arg(ArgList, v2i);
+				Len = snprintf(Buf, sizeof(Buf), "(%d, %d)", V.X, V.Y);
+				Skip = 3;
+			}
+			else if (Str8Equal((str8){3, (u8*)Iter}, Str8("v3f")))
+			{
+				v3f V = va_arg(ArgList, v3f);
+				Len = snprintf(Buf, sizeof(Buf), "(%f, %f, %f)", V.X, V.Y, V.Z);
+				Skip = 3;
+			}
+			else if (Str8Equal((str8){3, (u8*)Iter}, Str8("v4f")))
+			{
+				v4f V = va_arg(ArgList, v4f);
+				Len = snprintf(Buf, sizeof(Buf), "(%f, %f, %f, %f)", V.X, V.Y, V.Z, V.W);
+				Skip = 3;
+			}
+			else if (Str8Equal((str8){3, (u8*)Iter}, Str8("v4i")))
+			{
+				v4i V = va_arg(ArgList, v4i);
+				Len = snprintf(Buf, sizeof(Buf), "(%d, %d, %d, %d)", V.X, V.Y, V.Z, V.W);
+				Skip = 3;
+			}
+			else if (Str8Equal((str8){4, (u8*)Iter}, Str8("m44f")))
+			{
+				m44f M = va_arg(ArgList, m44f);
+				Len = snprintf(Buf, sizeof(Buf),
+					"[%f %f %f %f | %f %f %f %f | %f %f %f %f | %f %f %f %f]",
+					M.E[0][0], M.E[0][1], M.E[0][2], M.E[0][3],
+					M.E[1][0], M.E[1][1], M.E[1][2], M.E[1][3],
+					M.E[2][0], M.E[2][1], M.E[2][2], M.E[2][3],
+					M.E[3][0], M.E[3][1], M.E[3][2], M.E[3][3]);
+				Skip = 4;
 			}
 
 			if (Skip)
