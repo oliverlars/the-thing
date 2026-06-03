@@ -6,6 +6,7 @@
 #include "os.h"
 #include "render.h"
 #include "draw.h"
+#include "ui.h"
 
 #include <math.h>
 
@@ -18,6 +19,8 @@ typedef struct app_state
 	os_window *Window;
 	d_font Font;
 	u64 StartTime;
+
+	ui_context UI;
 } app_state;
 
 static void Frame(void *UserData, v2i ViewportSize)
@@ -119,26 +122,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 	static f32 Extrusion = 1.0;
 
 	Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
-	v2f MousePosition = OS_MousePosition(App->Window);
-	if (MousePosition.X >= 500 && MousePosition.X < 750 &&
-		MousePosition.Y >= 500 && MousePosition.Y <= 580 && OS_MousePressed(OS_MOUSE_LEFT)) {
-			ExtrusionTarget = (f32)Clicked;
-			Clicked = !Clicked;
-		}
-	D_Capsule(&App->Draw, v2f(500, 500),
-		250, 80,
-		.Colour = CapsuleColours[Clicked],
-		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 1),
-		.OutlineThickness = 4.0f,
-		.Extrusion = Extrusion);
-	str8 Label = Clicked ? Str8("ON!") : Str8("OFF!");
-	v4f LabelColour = Clicked ? v4f(0.45f, 0.05f, 0.0f, 1) : v4f(1.0f, 0.80f, 0.20f, 1);
-	D_Str8InBox(&App->Draw, Label,
-		v2f(500, 500), v2f(250, 80),
-		D_ALIGN_CENTRE, D_ALIGN_CENTRE,
-		.Font = App->Font,
-		.HeightInPixels = 48.0f,
-		.Colour = LabelColour);
 	D_Str8(&App->Draw, Str8("HELLO, WORLD!"),
 		.Font = App->Font,
 		.Position = v3f(W * 0.10f, H * 0.90f, 0),
@@ -149,6 +132,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// this dot sits under the OS cursor the mouse coords are correct; if
 	// it's offset (e.g. flipped vertically) the offset tells us the bug.
 	D_Point(&App->Draw, Mouse, 16.0f, .Colour = v4f(1.0f, 0.0f, 1.0f, 1));
+
+	UI_Button(&App->UI, Str8("Ooga booga"));
 
 	R_Update(&App->Render, OS_NextDrawable(App->Window));
 }
@@ -187,6 +172,10 @@ int main(int ArgCount, char **Args)
 	App.Font = D_LoadFontFromTTF(&App.Draw, FontBytes.Bytes);
 
 	App.StartTime = OS_TimeStampNow();
+
+	App.UI.Draw = &App.Draw;
+	App.UI.Font = App.Font;
+	App.UI.Window = App.Window;
 
 	OS_Run(&Window, Frame, &App);
 	return 0;
