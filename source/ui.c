@@ -38,14 +38,19 @@ b32 UI_Button(ui_context *UI, str8 Name)
 	b32 Clicked = False;
 	v2f MousePosition = OS_MousePosition(UI->Window);
 	if (MousePosition.X >= 500 && MousePosition.X < 750 &&
-		MousePosition.Y >= 500 && MousePosition.Y <= 600 && OS_MouseDown(OS_MOUSE_LEFT))
+		MousePosition.Y >= 500 && MousePosition.Y <= 600)
 	{
-		Clicked = True;
+		Widget->HoverAnimation = LerpF32(Widget->HoverAnimation, 1.0, 0.1);
+		if(OS_MouseDown(OS_MOUSE_LEFT)) Clicked = True;
+	}
+	else
+	{
+		Widget->HoverAnimation = LerpF32(Widget->HoverAnimation, 0.0, 0.1);
 	}
 	f32 Extrusion = 1.0;
 	if (Clicked) Extrusion = 0.0;
-	D_Capsule(UI->Draw, v2f(500, 500),
-		250, 100,
+	D_Capsule(UI->Draw, v2f(500 - Widget->HoverAnimation*10, 500 - Widget->HoverAnimation*10),
+		250 + Widget->HoverAnimation*20, 100 + Widget->HoverAnimation*20,
 		.Colour = v4f(1.0f, 0.5f, 0.0f, 1),
 		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 1),
 		.OutlineThickness = 4.0f,
@@ -56,6 +61,6 @@ b32 UI_Button(ui_context *UI, str8 Name)
 		.Font = UI->Font,
 		.HeightInPixels = 48.0f,
 		.Colour = v4f(0.45f, 0.05f, 0.0f, 1));
-
+	
 	return Clicked;
 }
