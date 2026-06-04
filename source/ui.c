@@ -9,25 +9,28 @@
 ui_widget *GetWidget(ui_context *UI, str8 Name)
 {
 	u64 Key = M_FNVHashString(M_FNV_HASH_START, Name);
-	ui_widget *Widget = UI->Widgets + (Key % 4096);
-	if(Widget->Key == 0 && Widget->Key == Key)
+	ui_widget *Widget = UI->Widgets + (Key % UI_WIDGET_TABLE_SIZE);
+	if(Widget->Key == 0)
 	{
-		MemorySet(Widget, 0, sizeof(ui_widget));
+		MemoryZero(Widget, sizeof(ui_widget));
 	}
-	else if(Widget->Key != 0 && Widget->Key != Key && Widget->FramesSinceLastTouched > 2)
+	else if(Widget->Key != Key)
 	{
-		MemorySet(Widget, 0, sizeof(ui_widget));
-		Widget->Key = Key;
-	}
-	else if(Widget->Key != 0 && Widget->Key != Key && Widget->FramesSinceLastTouched < 2)
-	{
-		for(int I = 1; I < 4096; I++)
+		if(Widget->FrameLastTouched < UI->Frame)
 		{
-			Widget = UI->Widgets + ((Key % 4096) + I) % 4096;
-			if(Widget->Key == Key) break;
+			MemoryZero(Widget, sizeof(ui_widget));
+			Widget->Key = Key;
+		}
+		else
+		{
+			for(int I = 1; I < UI_WIDGET_TABLE_SIZE; I++)
+			{
+				Widget = UI->Widgets + ((Key % UI_WIDGET_TABLE_SIZE) + I) % UI_WIDGET_TABLE_SIZE;
+				if(Widget->Key == Key) break;
+			}
 		}
 	}
-
+	Widget->FrameLastTouched = UI->Frame;
 	return Widget;
 }
 

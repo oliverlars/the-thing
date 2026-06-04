@@ -135,6 +135,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 	UI_Button(&App->UI, Str8("Ooga booga"));
 
+	App->UI.Frame += 1;
+
 	R_Update(&App->Render, OS_NextDrawable(App->Window));
 }
 
