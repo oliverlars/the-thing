@@ -133,7 +133,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// it's offset (e.g. flipped vertically) the offset tells us the bug.
 	D_Point(&App->Draw, Mouse, 16.0f, .Colour = v4f(1.0f, 0.0f, 1.0f, 1));
 
-	UI_Button(&App->UI, Str8("Ooga booga"));
+	UI_Button(&App->UI, Str8("Submit"));
 
 	App->UI.Frame += 1;
 

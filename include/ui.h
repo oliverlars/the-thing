@@ -10,7 +10,15 @@ typedef struct ui_widgget
 	f32 ActiveAnimation;
 	f32 HoverAnimation;
 	s32 FrameLastTouched;
-} ui_widget;
+}
+ui_widget;
+
+
+typedef struct ui_layout
+{
+
+}
+ui_layout;
 
 typedef struct ui_context
 {
@@ -25,3 +33,6 @@ typedef struct ui_context
 
 
 b32 UI_Button(ui_context *UI, str8 Name);
+
+void UI_LayoutPop(ui_context *UI);
+void UI_LayoutPush(ui_context *UI, ui_layout Layout);

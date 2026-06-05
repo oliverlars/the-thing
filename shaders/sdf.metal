@@ -55,25 +55,38 @@ vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
 	return Output;
 }
 
-#define AMBIENT 1.0
+#define AMBIENT 0.8
+
+struct point_light
+{
+	float3 Position;
+	float3 Colour;
+	float Radius;
+};
 
 // Plain Blinn-Phong on a position + normal. Radius is the distance at which the
 // non-ambient contribution falls to half — falloff is 1 / (1 + (d/R)^2) so the
 // units of Radius must match Position / LightPos.
 float3 ApplyLighting(float3 BaseColour, float3 Position, float3 Normal,
-                     float3 LightPos, float3 LightColour, float Radius)
+                     point_light PointLights[], int PointLightCount)
 {
-	float3 L = normalize(LightPos - Position);
-	float3 V = float3(0.0, 0.0, 1.0);
-	float3 H = normalize(L + V);
+	float3 Contribution = float3(0.0);
 
-	float D = distance(LightPos, Position) / max(Radius, 1e-5);
-	float Attenuation = 1.0 / (1.0 + D * D);
+	for(int Index = 0; Index < PointLightCount; Index++)
+	{
+		point_light Light = PointLights[Index];
+		float3 L = normalize(Light.Position - Position);
+		float3 V = float3(0.0, 0.0, 1.0);
+		float3 H = normalize(L + V);
 
-	float Lambert  = max(0.0, dot(Normal, L));
-	float Specular = pow(max(0.0, dot(Normal, H)), 32.0);
+		float D = distance(Light.Position, Position) / max(Light.Radius, 1e-5);
+		float Attenuation = 1.0 / (1.0 + D * D);
 
-	return BaseColour * AMBIENT + ((1.0 - AMBIENT) * Lambert * BaseColour + BaseColour * Specular) * LightColour * Attenuation;
+		float Lambert  = max(0.0, dot(Normal, L));
+		float Specular = pow(max(0.0, dot(Normal, H)), 32.0);
+		Contribution += ((1.0 - AMBIENT) * Lambert * BaseColour + BaseColour * Specular) * Light.Colour * Attenuation;
+	}
+	return BaseColour * AMBIENT + Contribution;
 }
 
 // Turns a 2D signed distance field (pixels, negative inside) into the final
@@ -125,8 +138,12 @@ float4 ShadeSDF(float Dist, float2 LocalPos, float2 HalfSize,
 	float  Height = Extrusion * SlopeZ * Bevel;
 
 	float3 Position = float3(LocalPos, Height);
+	point_light PointLights[2] = 
+	{
+		{Uniforms.LightPosition.xyz, Uniforms.LightColour.rgb, Uniforms.LightPosition.w},
+		{float3(200, 200, 10), float3(1, 1, 1), 500},
+	};
 	float3 Lit = ApplyLighting(BaseColour, Position, Normal,
-	                           Uniforms.LightPosition.xyz, Uniforms.LightColour.rgb,
-	                           Uniforms.LightPosition.w);
+	                           PointLights, 2);
 	return float4(Lit, FillAlpha * BaseAlpha);
 }
