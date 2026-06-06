@@ -4,21 +4,34 @@
 
 #define UI_WIDGET_TABLE_SIZE 4096
 
-typedef struct ui_widgget
+
+typedef enum ui_widget_flags
 {
+	UI_LAYOUT_FIXED  = 1 << 0,
+	UI_LAYOUT_FILL   = 1 << 1,
+	UI_LAYOUT_HUG    = 1 << 2,
+	UI_LAYOUT_ROW    = 1 << 3,
+	UI_LAYOUT_COLUMN = 1 << 4,
+}
+ui_widget_flags;
+
+typedef struct ui_widget
+{
+	ui_widget_flags Flags;
 	u64 Key;
 	f32 ActiveAnimation;
 	f32 HoverAnimation;
 	s32 FrameLastTouched;
+
+	v2f Position;
+	v2f Size;
+
+	struct ui_widget *Parent;
+	struct ui_widget *First;
+	struct ui_widget *Last;
+	struct ui_widget *Next;
 }
 ui_widget;
-
-
-typedef struct ui_layout
-{
-
-}
-ui_layout;
 
 typedef struct ui_context
 {
@@ -28,11 +41,28 @@ typedef struct ui_context
 
 	s32 Frame;
 
+	ui_widget LayoutStack[4096];
+	int       LayoutIndex;
 	ui_widget Widgets[UI_WIDGET_TABLE_SIZE];
-} ui_context;
+	int WidgetIndex;
+
+	ui_widget *Root;
+}
+ui_context;
 
 
 b32 UI_Button(ui_context *UI, str8 Name);
 
 void UI_LayoutPop(ui_context *UI);
-void UI_LayoutPush(ui_context *UI, ui_layout Layout);
+void UI_LayoutPush(ui_context *UI, ui_widget Layout);
+
+void UI_AppendAsChild(ui_widget *Parent, ui_widget *Child);
+void UI_AppendAsSibling(ui_widget *OlderSibling, ui_widget *YoungerSibling);
+
+v2f UI_LayoutRow(ui_context *UI, ui_widget *Row);
+v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column);
+
+
+#define UI_PANEL(UI, P, S) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED, .Position = P, .Size = S}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
+#define UI_ROW(UI, LayoutFlag) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_ROW | LayoutFlag}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
+#define UI_COLUMN(UI, LayoutFlag) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | LayoutFlag}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))

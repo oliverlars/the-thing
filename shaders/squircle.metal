@@ -28,5 +28,5 @@ fragment float4 FragmentMain(vertex_output Input [[stage_in]],
 	float Dist = Squircle2D(P, Input.HalfSize, Input.Param);
 	return ShadeSDF(Dist, Input.LocalPos, Input.HalfSize,
 	                Input.Colour, Input.OutlineColour, Input.OutlineThickness,
-	                Input.Extrusion, 24.0, Uniforms);
+	                Input.Extrusion, 8.0, Uniforms);
 }

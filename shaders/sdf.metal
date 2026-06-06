@@ -138,12 +138,13 @@ float4 ShadeSDF(float Dist, float2 LocalPos, float2 HalfSize,
 	float  Height = Extrusion * SlopeZ * Bevel;
 
 	float3 Position = float3(LocalPos, Height);
-	point_light PointLights[2] = 
+	point_light PointLights[3] = 
 	{
 		{Uniforms.LightPosition.xyz, Uniforms.LightColour.rgb, Uniforms.LightPosition.w},
-		{float3(200, 200, 10), float3(1, 1, 1), 500},
+		{float3(Position.xy + 200, 10), float3(1, 1, 1), 500},
+		{float3(Position.xy - 200, 10), float3(1, 1, 1), 500},
 	};
 	float3 Lit = ApplyLighting(BaseColour, Position, Normal,
-	                           PointLights, 2);
+	                           PointLights, 3);
 	return float4(Lit, FillAlpha * BaseAlpha);
 }

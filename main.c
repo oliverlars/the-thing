@@ -90,14 +90,16 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// Flat rounded quad.
 	D_RoundedQuad(&App->Draw, v2f(W * 0.10f, ShapeY),
 		ShapeSize, ShapeSize, 20.0f,
-		.Colour = v4f(0.95f, 0.45f, 0.30f, 1));
+		.Colour = v4f(0.95f, 0.45f, 0.30f, 1),
+		.Extrusion = 1.0);
 
 	// Capsule with an outline, also flat.
 	D_Capsule(&App->Draw, v2f(W * 0.10f + (ShapeSize + ShapeGap), ShapeY),
 		ShapeSize * 2.0f, ShapeSize * 0.55f,
 		.Colour = v4f(0.35f, 0.85f, 0.55f, 1),
 		.OutlineColour = v4f(1, 1, 1, 1),
-		.OutlineThickness = 3.0f);
+		.OutlineThickness = 3.0f,
+		.Extrusion = 1.0);
 
 	// Squircles with varying exponent. The middle one opts into a soft sheen
 	// that tracks the cursor; the others stay flat for comparison.
@@ -110,7 +112,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 			ShapeSize, ShapeSize, Exponents[I],
 			.Colour = v4f(0.55f, 0.65f, 1.0f, 1),
 			.OutlineColour = v4f(0.1f, 0.1f, 0.15f, 1),
-			.OutlineThickness = 2.0f);
+			.OutlineThickness = 0.0f,
+			.Extrusion = 1.0);
 	}
 
 	// Oscillates Extrusion between −1 (recessed) and +1 (raised) on a 2s
@@ -133,9 +136,18 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// it's offset (e.g. flipped vertically) the offset tells us the bug.
 	D_Point(&App->Draw, Mouse, 16.0f, .Colour = v4f(1.0f, 0.0f, 1.0f, 1));
 
-	UI_Button(&App->UI, Str8("Submit"));
 
+	UI_PANEL(&App->UI, v2f(200, 200), v2f(400, 600))
+	{
+		UI_ROW(&App->UI, UI_LAYOUT_FIXED)
+		{
+			UI_Button(&App->UI, Str8("ABC"));
+			UI_Button(&App->UI, Str8("Submit"));
+		}
+		UI_Button(&App->UI, Str8("NEW ROW"));
+	}
 	App->UI.Frame += 1;
+	App->UI.WidgetIndex = 0;
 
 	R_Update(&App->Render, OS_NextDrawable(App->Window));
 }
