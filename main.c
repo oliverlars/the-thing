@@ -57,31 +57,31 @@ static void Frame(void *UserData, v2i ViewportSize)
 	f32 BY  = H * 0.50f;
 	f32 BCY = H * 0.70f;
 
-	D_Quad(&App->Draw, v2f(BX0 - 4, BY - 4), (BX1 - BX0) + 8, (BCY - BY) + 8,
-		.Colour = v4f(0.25f, 0.25f, 0.25f, 1.0f));
+	// D_Quad(&App->Draw, v2f(BX0 - 4, BY - 4), (BX1 - BX0) + 8, (BCY - BY) + 8,
+	// 	.Colour = v4f(0.25f, 0.25f, 0.25f, 1.0f));
 
-	D_Bezier(&App->Draw,
-		v2f(BX0,  BY),
-		v2f(BMid, BCY),
-		v2f(BX1,  BY),
-		6.0f,
-		v4f(1.0f, 0.3f, 0.85f, 1.0f));
+	// D_Bezier(&App->Draw,
+	// 	v2f(BX0,  BY),
+	// 	v2f(BMid, BCY),
+	// 	v2f(BX1,  BY),
+	// 	6.0f,
+	// 	v4f(1.0f, 0.3f, 0.85f, 1.0f));
 
-	int Segments = 32;
-	v2f Prev = v2f(BX0, BY);
-	for (int I = 1; I <= Segments; I++)
-	{
-		f32 T = (f32)I / (f32)Segments;
-		f32 OneMinusT = 1.0f - T;
-		f32 X = OneMinusT*OneMinusT*BX0 + 2*OneMinusT*T*BMid + T*T*BX1;
-		f32 Y = OneMinusT*OneMinusT*BY  + 2*OneMinusT*T*BCY  + T*T*BY;
-		v2f P = v2f(X, Y);
-		D_Line(&App->Draw, Prev, P, 2.0f, v4f(0.3f, 0.95f, 0.4f, 1.0f));
-		Prev = P;
-	}
+	// int Segments = 32;
+	// v2f Prev = v2f(BX0, BY);
+	// for (int I = 1; I <= Segments; I++)
+	// {
+	// 	f32 T = (f32)I / (f32)Segments;
+	// 	f32 OneMinusT = 1.0f - T;
+	// 	f32 X = OneMinusT*OneMinusT*BX0 + 2*OneMinusT*T*BMid + T*T*BX1;
+	// 	f32 Y = OneMinusT*OneMinusT*BY  + 2*OneMinusT*T*BCY  + T*T*BY;
+	// 	v2f P = v2f(X, Y);
+	// 	D_Line(&App->Draw, Prev, P, 2.0f, v4f(0.3f, 0.95f, 0.4f, 1.0f));
+	// 	Prev = P;
+	// }
 
-	D_Point(&App->Draw, v2f(BX0, BY), 20.0f, .Colour = v4f(1, 0.9f, 0.2f, 1));
-	D_Point(&App->Draw, v2f(BX1, BY), 20.0f, .Colour = v4f(0.2f, 0.9f, 1.0f, 1));
+	// D_Point(&App->Draw, v2f(BX0, BY), 20.0f, .Colour = v4f(1, 0.9f, 0.2f, 1));
+	// D_Point(&App->Draw, v2f(BX1, BY), 20.0f, .Colour = v4f(0.2f, 0.9f, 1.0f, 1));
 
 	f32 ShapeY = H * 0.12f;
 	f32 ShapeSize = 96.0f;
@@ -137,7 +137,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	D_Point(&App->Draw, Mouse, 16.0f, .Colour = v4f(1.0f, 0.0f, 1.0f, 1));
 
 
-	UI_PANEL(&App->UI, v2f(200, 200), v2f(400, 600))
+	UI_PANEL(&App->UI, v2f(1000, 1000), v2f(400, 600))
 	{
 		UI_ROW(&App->UI, UI_LAYOUT_FIXED)
 		{
@@ -148,6 +148,10 @@ static void Frame(void *UserData, v2i ViewportSize)
 	}
 	App->UI.Frame += 1;
 	App->UI.WidgetIndex = 0;
+
+	UI_Layout(&App->UI);
+	UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
+	UI_RenderWidgets(&App->UI, App->UI.Root);
 
 	R_Update(&App->Render, OS_NextDrawable(App->Window));
 }

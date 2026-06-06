@@ -43,12 +43,13 @@ ui_widget *GetWidget(ui_context *UI, str8 Name)
 b32 UI_Button(ui_context *UI, str8 Name)
 {
 	ui_widget *Widget = GetWidget(UI, Name);
+	Widget->String = Name;
 	ui_widget *Layout = UI->LayoutStack + UI->LayoutIndex - 1;
 	UI_AppendAsChild(Layout, Widget);
 	b32 Clicked = False;
 	v2f MousePosition = OS_MousePosition(UI->Window);
-	if (MousePosition.X >= 500 && MousePosition.X < 750 &&
-		MousePosition.Y >= 500 && MousePosition.Y <= 600)
+	if (MousePosition.X >= Widget->Position.X && MousePosition.X < (Widget->Position.X + Widget->Size.X) &&
+		MousePosition.Y >= Widget->Position.Y && MousePosition.Y <= (Widget->Position.Y + Widget->Size.Y))
 	{
 		Widget->HoverAnimation = LerpF32(Widget->HoverAnimation, 1.0, 0.1);
 		if(OS_MouseDown(OS_MOUSE_LEFT))
@@ -61,19 +62,8 @@ b32 UI_Button(ui_context *UI, str8 Name)
 	{
 		Widget->HoverAnimation = LerpF32(Widget->HoverAnimation, 0.0, 0.1);
 	}
-	D_Capsule(UI->Draw, v2f(500 - Widget->HoverAnimation*5, 500 - Widget->HoverAnimation*6),
-		250 + Widget->HoverAnimation*10, 100 + Widget->HoverAnimation*10,
-		.Colour = v4f(1.0f, 0.5f, 0.0f, 1),
-		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 0),
-		.OutlineThickness = 0.0f,
-		.Extrusion = 1.0 - Widget->ActiveAnimation);
-	f32 Padding = 10.0f;
-	D_Str8InBox(UI->Draw, Name,
-		v2f(500 + Padding, 500 - Padding), v2f(250 - Padding*2, 100 + Padding*2),
-		D_ALIGN_CENTRE, D_ALIGN_CENTRE,
-		.Font = UI->Font,
-		.HeightInPixels = 50.0f,
-		.Colour = v4f(0.45f, 0.05f, 0.0f, 1));
+	Widget->Size.X = D_Str8WidthFromHeight(UI->Font, Name, 50) + 30;
+	Widget->Size.Y = D_Str8HeightFromHeight(UI->Font, 50) + 30;
 	Widget->ActiveAnimation = LerpF32(Widget->ActiveAnimation, 0.0, 0.1);
 	return Clicked;
 }
@@ -134,7 +124,7 @@ void UI_AppendAsSibling(ui_widget *OlderSibling, ui_widget *YoungerSibling)
 	}
 }
 
-v2f UI_Layout(ui_context *UI)
+void UI_Layout(ui_context *UI)
 {
 	//for(ui_widget *Child = UI->Root->First; Child; Child = Child->Next)
 	{
@@ -146,6 +136,7 @@ v2f UI_Layout(ui_context *UI)
 v2f UI_LayoutRow(ui_context *UI, ui_widget *Row)
 {
 	v2f TotalSize = v2f(0.0, 0.0);
+	f32 Padding = 10.0f;
 	for(ui_widget *Sibling = Row->First; Sibling; Sibling = Sibling->Next)
 	{
 		v2f ChildSize = v2f(0.0, 0.0);
@@ -161,15 +152,17 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row)
 		{
 			ChildSize = Sibling->Size;
 		}
-		TotalSize.X += ChildSize.X;
+		TotalSize.X += ChildSize.X + Padding;
 		TotalSize.Y = Max(TotalSize.Y, ChildSize.Y);
 	}
+	Row->Size = TotalSize;
 	return TotalSize;
 }
 
 v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column)
 {
 	v2f TotalSize = v2f(0.0, 0.0);
+	f32 Padding = 10.0f;
 	for(ui_widget *Sibling = Column->First; Sibling; Sibling = Sibling->Next)
 	{
 		v2f ChildSize = v2f(0.0, 0.0);
@@ -185,8 +178,58 @@ v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column)
 		{
 			ChildSize = Sibling->Size;
 		}
-		TotalSize.Y += ChildSize.Y;
+		TotalSize.Y += ChildSize.Y + Padding;
 		TotalSize.X = Max(TotalSize.X, ChildSize.X);
 	}
+	Column->Size = TotalSize;
 	return TotalSize;
+}
+
+void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position)
+{
+	if(!Widget) return;
+	Widget->Position = Position;
+	f32 Padding = 15.0f;
+	for(ui_widget *Child = Widget->First; Child; Child = Child->Next)
+	{
+		UI_LayoutPositions(UI, Child, Position);
+		if(Widget->Flags & UI_LAYOUT_ROW)         Position.X += Child->Size.X + Padding;
+		else if(Widget->Flags & UI_LAYOUT_COLUMN) Position.Y += Child->Size.Y + Padding;
+	}
+}
+
+void UI_RenderWidgets(ui_context *UI, ui_widget *Widget)
+{
+	if(Widget->Flags & UI_RENDER_BACKGROUND)
+	{
+		D_RoundedQuad(UI->Draw, SubV2F(Widget->Position, v2f(25, 25)), Widget->Size.X + 50, Widget->Size.Y + 50,
+			15.0f,
+			.Colour = v4f(0.2, 0.2, 0.2, 1.0),
+			.OutlineColour = v4f(0.4, 0.4, 0.4, 1.0),
+			.Extrusion = 0.0,
+			.OutlineThickness = 2.0f
+		);
+	}
+
+	if(!(Widget->Flags & UI_LAYOUT_COLUMN) && !(Widget->Flags & UI_LAYOUT_ROW))
+	{
+		D_RoundedQuad(UI->Draw, v2f(Widget->Position.X - Widget->HoverAnimation*5, Widget->Position.Y - Widget->HoverAnimation*6),
+		Widget->Size.X + Widget->HoverAnimation*10, Widget->Size.Y + Widget->HoverAnimation*10, 15.0f,
+		.Colour = v4f(1.0f, 0.5f, 0.0f, 1),
+		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 0),
+		.OutlineThickness = 0.0f,
+		.Extrusion = 1.0 - Widget->ActiveAnimation);
+		f32 Padding = 10.0f;
+		D_Str8InBox(UI->Draw, Widget->String,
+			v2f(Widget->Position.X + Padding, Widget->Position.Y - Padding), v2f(Widget->Size.X - Padding*2, Widget->Size.Y + Padding*2),
+			D_ALIGN_CENTRE, D_ALIGN_CENTRE,
+			.Font = UI->Font,
+			.HeightInPixels = 50.0f,
+			.Colour = v4f(0.45f, 0.05f, 0.0f, 1)
+		);
+	}
+	for(ui_widget *Child = Widget->First; Child; Child = Child->Next)
+	{
+		UI_RenderWidgets(UI, Child);
+	}
 }

@@ -12,12 +12,15 @@ typedef enum ui_widget_flags
 	UI_LAYOUT_HUG    = 1 << 2,
 	UI_LAYOUT_ROW    = 1 << 3,
 	UI_LAYOUT_COLUMN = 1 << 4,
+
+	UI_RENDER_BACKGROUND = 1 << 5
 }
 ui_widget_flags;
 
 typedef struct ui_widget
 {
 	ui_widget_flags Flags;
+	str8 String;
 	u64 Key;
 	f32 ActiveAnimation;
 	f32 HoverAnimation;
@@ -59,10 +62,14 @@ void UI_LayoutPush(ui_context *UI, ui_widget Layout);
 void UI_AppendAsChild(ui_widget *Parent, ui_widget *Child);
 void UI_AppendAsSibling(ui_widget *OlderSibling, ui_widget *YoungerSibling);
 
+void UI_Layout(ui_context *UI);
 v2f UI_LayoutRow(ui_context *UI, ui_widget *Row);
 v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column);
 
+void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position);
+void UI_RenderWidgets(ui_context *UI, ui_widget *Widget);
 
-#define UI_PANEL(UI, P, S) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED, .Position = P, .Size = S}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
+
+#define UI_PANEL(UI, P, S) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_RENDER_BACKGROUND, .Position = P, .Size = S}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
 #define UI_ROW(UI, LayoutFlag) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_ROW | LayoutFlag}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
 #define UI_COLUMN(UI, LayoutFlag) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | LayoutFlag}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
