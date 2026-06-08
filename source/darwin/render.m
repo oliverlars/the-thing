@@ -61,7 +61,9 @@ typedef struct uniforms
 {
 	m44f PVMMatrix;       // 64 bytes
 	v4f  LightPosition;   // 16 bytes — xyz = position, w = falloff radius (same units)
-	v4f  LightColour;     // 16 bytes — rgb = colour*intensity, w unused
+	v4f  LightColour;
+	f32  LightIntensity;
+	f32  Pad[3];
 } uniforms;
 
 void R_UpdateCurves(render_context *Render, v2f *CurvePoints, int CurvePointsCount, int CurvePointsSoFar)
@@ -424,6 +426,7 @@ void R_Update(render_context *R, void *DrawableHandle)
 			.PVMMatrix     = Command->Transform,
 			.LightPosition = v4f(R->LightPosition.X, R->LightPosition.Y, R->LightPosition.Z, R->LightRadius),
 			.LightColour   = v4f(R->LightColour.X,   R->LightColour.Y,   R->LightColour.Z,   0),
+			.LightIntensity = R->LightIntensity,
 		};
 		MemoryCopy((u8*)M->UniformBuffers[ResourceIndex].contents + UniformIndex * sizeof(uniforms),
 		           &U, sizeof(U));

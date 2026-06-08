@@ -93,6 +93,7 @@ typedef struct render_context
 	// contribution — call R_SetLight to enable.
 	v3f LightPosition;
 	v3f LightColour;
+	f32 LightIntensity;
 	f32 LightRadius;
 }
 render_context;
@@ -114,4 +115,4 @@ m44f R_CurrentTransform(render_context *Render);
 
 void R_UpdateCurves(render_context *Render, v2f *CurvePoints, int CurvePointsCount, int CurvePointsSoFar);
 
-void R_SetLight(render_context *Render, v3f Position, v3f Colour, f32 Radius);
+void R_SetLight(render_context *Render, v3f Position, v3f Colour, f32 Intensity, f32 Radius);

@@ -49,7 +49,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// Light follows the mouse cursor; .z hovers it above the screen plane.
 	v2f Mouse = OS_MousePosition(App->Window);
 	v3f LightPos = v3f(Mouse.X, Mouse.Y, 200.0f);
-	R_SetLight(&App->Render, LightPos, v3f(1.0f, 1.0f, 1.0f), 400.0f);
+	R_SetLight(&App->Render, LightPos, v3f(1.0f, 1.0f, 1.0f), 1.0, 400.0f);
 
 	f32 BX0 = W * 0.20f;
 	f32 BX1 = W * 0.80f;
@@ -137,21 +137,22 @@ static void Frame(void *UserData, v2i ViewportSize)
 	D_Point(&App->Draw, Mouse, 16.0f, .Colour = v4f(1.0f, 0.0f, 1.0f, 1));
 
 
-	UI_PANEL(&App->UI, v2f(1000, 1000), v2f(400, 600))
+	UI_Begin(&App->UI);
+	UI_PANEL(&App->UI, v2f(1000, 1000), v2f(400 + 128.0*sin(2*M_PI*(f32)(App->UI.Frame % 128)/128.0), 600))
 	{
 		UI_ROW(&App->UI, UI_LAYOUT_FIXED)
 		{
-			UI_Button(&App->UI, Str8("ABC"));
+			UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
 			UI_Button(&App->UI, Str8("Submit"));
 		}
-		UI_Button(&App->UI, Str8("NEW ROW"));
+		UI_Button(&App->UI, Str8("Fixed size"));
 	}
-	App->UI.Frame += 1;
-	App->UI.WidgetIndex = 0;
 
 	UI_Layout(&App->UI);
 	UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
 	UI_RenderWidgets(&App->UI, App->UI.Root);
+
+	UI_End(&App->UI);
 
 	R_Update(&App->Render, OS_NextDrawable(App->Window));
 }
