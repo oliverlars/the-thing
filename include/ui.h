@@ -81,7 +81,11 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize);
 v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize);
 
 void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position);
+void UI_LayoutRootPosition(ui_context *UI, ui_widget *Widget, v2f Position);
 void UI_RenderWidgets(ui_context *UI, ui_widget *Widget);
+
+
+#define UI_FLAG(UI, Flag) for(int _I_ = ((UI)->Flags |= Flag, 0); _I_ < 1; ((UI)->Flags &= ~UI_LAYOUT_FILL, _I_++))
 
 #define UI_PANEL(UI, P, S) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_RENDER_BACKGROUND, .Position = P, .Size = S}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
 #define UI_ROW(UI, LayoutFlag) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_ROW | LayoutFlag | (UI)->Flags}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))

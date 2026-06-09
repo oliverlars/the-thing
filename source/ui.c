@@ -163,16 +163,20 @@ void UI_AppendAsSibling(ui_widget *OlderSibling, ui_widget *YoungerSibling)
 void UI_Layout(ui_context *UI)
 {
 	//for(ui_widget *Child = UI->Root->First; Child; Child = Child->Next)
+	v2f ChildSize = UI->Root->Size;
+	f32 Padding = 10.0f;
+	ChildSize.X -= Padding;
+	ChildSize.Y -= Padding;
 	{
-		if(UI->Root->Flags & UI_LAYOUT_ROW)    UI_LayoutRow(UI, UI->Root, UI->Root->Size);
-		if(UI->Root->Flags & UI_LAYOUT_COLUMN) UI_LayoutColumn(UI, UI->Root, UI->Root->Size);
+		if(UI->Root->Flags & UI_LAYOUT_ROW)    UI_LayoutRow(UI, UI->Root, ChildSize);
+		if(UI->Root->Flags & UI_LAYOUT_COLUMN) UI_LayoutColumn(UI, UI->Root, ChildSize);
 	}
 }
 
 v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 {
 	v2f TotalSize = v2f(0.0, 0.0);
-	f32 Padding = 10.0f;
+	f32 Padding = 20.0f;
 	for(ui_widget *Sibling = Row->First; Sibling; Sibling = Sibling->Next)
 	{
 		v2f ChildSize = v2f(0.0, 0.0);
@@ -220,7 +224,7 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize)
 {
 	v2f TotalSize = v2f(0.0, 0.0);
-	f32 Padding = 10.0f;
+	f32 Padding = 20.0f;
 	for(ui_widget *Sibling = Column->First; Sibling; Sibling = Sibling->Next)
 	{
 		v2f ChildSize = v2f(0.0, 0.0);
@@ -247,7 +251,7 @@ void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position)
 {
 	if(!Widget) return;
 	Widget->Position = Position;
-	f32 Padding = 15.0f;
+	f32 Padding = 10.0f;
 	for(ui_widget *Child = Widget->First; Child; Child = Child->Next)
 	{
 		UI_LayoutPositions(UI, Child, Position);
@@ -256,11 +260,18 @@ void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position)
 	}
 }
 
+void UI_LayoutRootPosition(ui_context *UI, ui_widget *Widget, v2f Position)
+{
+	if(!Widget) return;
+	UI_LayoutPositions(UI, Widget, AddV2F(Position, v2f(10, 10)));
+	Widget->Position = Position;
+}
+
 void UI_RenderWidgets(ui_context *UI, ui_widget *Widget)
 {
 	if(Widget->Flags & UI_RENDER_BACKGROUND)
 	{
-		D_RoundedQuad(UI->Draw, SubV2F(Widget->Position, v2f(25, 25)), Widget->Size.X + 50, Widget->Size.Y + 50,
+		D_RoundedQuad(UI->Draw, Widget->Position, Widget->Size.X, Widget->Size.Y,
 			25.0f,
 			.Colour = v4f(0.2, 0.2, 0.2, 1.0),
 			.OutlineColour = v4f(0.3, 0.3, 0.3, 1.0),
