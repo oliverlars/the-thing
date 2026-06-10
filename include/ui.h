@@ -33,6 +33,7 @@ typedef struct ui_widget
 	ui_animation HoverAnimation;
 	s32 FrameLastTouched;
 
+	v2f Padding;
 	v2f Position;
 	v2f Size;
 
@@ -52,6 +53,8 @@ typedef struct ui_context
 	s32 Frame;
 
 	ui_widget_flags Flags;
+	v2f       PaddingStack[4096];
+	int       PaddingIndex;
 	ui_widget LayoutStack[4096];
 	int       LayoutIndex;
 	ui_widget Widgets[UI_WIDGET_TABLE_SIZE];
@@ -70,6 +73,8 @@ void UI_End(ui_context *UI);
 
 b32 UI_Button(ui_context *UI, str8 Name);
 
+v2f UI_CurrentPadding(ui_context *UI);
+
 void UI_LayoutPop(ui_context *UI);
 void UI_LayoutPush(ui_context *UI, ui_widget Layout);
 
@@ -84,10 +89,16 @@ void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position);
 void UI_LayoutRootPosition(ui_context *UI, ui_widget *Widget, v2f Position);
 void UI_RenderWidgets(ui_context *UI, ui_widget *Widget);
 
+#define DeferLoop(Start, End) for(int _I_ = ((Start), 0); _I_ < 1; ((End), _I_++))
 
-#define UI_FLAG(UI, Flag) for(int _I_ = ((UI)->Flags |= Flag, 0); _I_ < 1; ((UI)->Flags &= ~UI_LAYOUT_FILL, _I_++))
+#define UI_FLAG(UI, Flag) DeferLoop((UI)->Flags |= (Flag), (UI)->Flags &= ~(Flag))
 
-#define UI_PANEL(UI, P, S) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_RENDER_BACKGROUND, .Position = P, .Size = S}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
-#define UI_ROW(UI, LayoutFlag) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_ROW | LayoutFlag | (UI)->Flags}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
-#define UI_COLUMN(UI, LayoutFlag) for(int _I_ = (UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | LayoutFlag | UI->Flags}), 0); _I_ < 1; (UI_LayoutPop(UI), _I_++))
-#define UI_FILL(UI) for(int _I_ = ((UI)->Flags |= UI_LAYOUT_FILL, 0); _I_ < 1; ( (UI)->Flags &= ~UI_LAYOUT_FILL, _I_++))
+#define UI_PADDING(UI, Pad) DeferLoop((UI)->PaddingStack[(UI)->PaddingIndex++] = v2f(Pad, Pad), (UI)->PaddingStack[--(UI)->PaddingIndex] = v2f(0.0, 0.0))
+
+#define UI_PANEL(UI, P, S) UI_PADDING(UI, 5) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_RENDER_BACKGROUND, .Position = P, .Size = S}), UI_LayoutPop(UI))
+
+#define UI_ROW(UI, LayoutFlag) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_ROW | LayoutFlag | (UI)->Flags}), UI_LayoutPop(UI))
+
+#define UI_COLUMN(UI, LayoutFlag) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | LayoutFlag | (UI)->Flags}), UI_LayoutPop(UI))
+
+#define UI_FILL(UI) DeferLoop((UI)->Flags |= UI_LAYOUT_FILL, (UI)->Flags &= ~UI_LAYOUT_FILL)

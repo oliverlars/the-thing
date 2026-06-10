@@ -138,7 +138,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 
 	UI_Begin(&App->UI);
-	UI_PANEL(&App->UI, v2f(1000, 1000), v2f(400, 600))
+	UI_PANEL(&App->UI, v2f(1000, 1000), v2f(600, 1000))
 	{
 		UI_ROW(&App->UI, UI_LAYOUT_FIXED)
 		{
@@ -149,7 +149,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	}
 
 	UI_Layout(&App->UI);
-	UI_LayoutRootPosition(&App->UI, App->UI.Root, App->UI.Root->Position);
+	UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
 	UI_RenderWidgets(&App->UI, App->UI.Root);
 
 	UI_End(&App->UI);

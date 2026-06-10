@@ -112,6 +112,8 @@ void UI_LayoutPop(ui_context *UI)
 
 void UI_LayoutPush(ui_context *UI, ui_widget Layout)
 {
+	Layout.Padding = UI->PaddingStack[UI->PaddingIndex-1];
+	LogInfo("Padding: ?v2f", Layout.Padding);
 	UI->LayoutStack[UI->LayoutIndex] = Layout;
 	if(UI->LayoutIndex > 0)
 	{
@@ -164,9 +166,6 @@ void UI_Layout(ui_context *UI)
 {
 	//for(ui_widget *Child = UI->Root->First; Child; Child = Child->Next)
 	v2f ChildSize = UI->Root->Size;
-	f32 Padding = 10.0f;
-	ChildSize.X -= Padding;
-	ChildSize.Y -= Padding;
 	{
 		if(UI->Root->Flags & UI_LAYOUT_ROW)    UI_LayoutRow(UI, UI->Root, ChildSize);
 		if(UI->Root->Flags & UI_LAYOUT_COLUMN) UI_LayoutColumn(UI, UI->Root, ChildSize);
@@ -176,7 +175,9 @@ void UI_Layout(ui_context *UI)
 v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 {
 	v2f TotalSize = v2f(0.0, 0.0);
-	f32 Padding = 20.0f;
+	// Offset by Padding, decrease MaxSize by Padding * 2
+	v2f Paddingx2 = MulV2F(Row->Padding, v2f(2, 2));
+	MaxSize = SubV2F(MaxSize, Paddingx2);
 	for(ui_widget *Sibling = Row->First; Sibling; Sibling = Sibling->Next)
 	{
 		v2f ChildSize = v2f(0.0, 0.0);
@@ -192,7 +193,7 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 		{
 			ChildSize = Sibling->Size;
 		}
-		TotalSize.X += ChildSize.X + Padding;
+		TotalSize.X += ChildSize.X;
 		TotalSize.Y = Max(TotalSize.Y, ChildSize.Y);
 	}
 	v2f SpaceLeft = SubV2F(MaxSize, TotalSize);
@@ -217,14 +218,16 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 	}
 	if(NumberOfFillChildren == 0) SpaceLeft = v2f(0, 0);
 	TotalSize.X += SpaceLeft.X;
-	Row->Size = TotalSize;
+	Row->Size = AddV2F(TotalSize, Paddingx2);
 	return TotalSize;
 }
 
 v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize)
 {
 	v2f TotalSize = v2f(0.0, 0.0);
-	f32 Padding = 20.0f;
+	// Offset by Padding, decrease MaxSize by Padding * 2
+	v2f Paddingx2 = MulV2F(Column->Padding, v2f(2, 2));
+	MaxSize = SubV2F(MaxSize, Paddingx2);
 	for(ui_widget *Sibling = Column->First; Sibling; Sibling = Sibling->Next)
 	{
 		v2f ChildSize = v2f(0.0, 0.0);
@@ -240,10 +243,10 @@ v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize)
 		{
 			ChildSize = Sibling->Size;
 		}
-		TotalSize.Y += ChildSize.Y + Padding;
+		TotalSize.Y += ChildSize.Y;
 		TotalSize.X = Max(TotalSize.X, ChildSize.X);
 	}
-	Column->Size = TotalSize;
+	Column->Size = AddV2F(TotalSize, Paddingx2);
 	return TotalSize;
 }
 
@@ -251,20 +254,13 @@ void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position)
 {
 	if(!Widget) return;
 	Widget->Position = Position;
-	f32 Padding = 10.0f;
+	Position = AddV2F(Position, Widget->Padding);
 	for(ui_widget *Child = Widget->First; Child; Child = Child->Next)
 	{
 		UI_LayoutPositions(UI, Child, Position);
-		if(Widget->Flags & UI_LAYOUT_ROW)         Position.X += Child->Size.X + Padding;
-		else if(Widget->Flags & UI_LAYOUT_COLUMN) Position.Y += Child->Size.Y + Padding;
+		if(Widget->Flags & UI_LAYOUT_ROW)         Position.X += Child->Size.X;
+		else if(Widget->Flags & UI_LAYOUT_COLUMN) Position.Y += Child->Size.Y;
 	}
-}
-
-void UI_LayoutRootPosition(ui_context *UI, ui_widget *Widget, v2f Position)
-{
-	if(!Widget) return;
-	UI_LayoutPositions(UI, Widget, AddV2F(Position, v2f(10, 10)));
-	Widget->Position = Position;
 }
 
 void UI_RenderWidgets(ui_context *UI, ui_widget *Widget)
@@ -288,9 +284,8 @@ void UI_RenderWidgets(ui_context *UI, ui_widget *Widget)
 		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 0),
 		.OutlineThickness = 0.0f,
 		.Extrusion = 1.0 - Widget->ActiveAnimation.Value);
-		f32 Padding = 10.0f;
 		D_Str8InBox(UI->Draw, Widget->String,
-			v2f(Widget->Position.X + Padding, Widget->Position.Y - Padding), v2f(Widget->Size.X - Padding*2, Widget->Size.Y + Padding*2),
+			Widget->Position, Widget->Size,
 			D_ALIGN_CENTRE, D_ALIGN_CENTRE,
 			.Font = UI->Font,
 			.HeightInPixels = 50.0f,
