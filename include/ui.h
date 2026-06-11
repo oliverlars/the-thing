@@ -33,6 +33,7 @@ typedef struct ui_widget
 	ui_animation HoverAnimation;
 	s32 FrameLastTouched;
 
+	f32 Gap;
 	v2f Padding;
 	v2f Position;
 	v2f Size;
@@ -53,8 +54,6 @@ typedef struct ui_context
 	s32 Frame;
 
 	ui_widget_flags Flags;
-	v2f       PaddingStack[4096];
-	int       PaddingIndex;
 	ui_widget LayoutStack[4096];
 	int       LayoutIndex;
 	ui_widget Widgets[UI_WIDGET_TABLE_SIZE];
@@ -72,8 +71,6 @@ void UI_Begin(ui_context *UI);
 void UI_End(ui_context *UI);
 
 b32 UI_Button(ui_context *UI, str8 Name);
-
-v2f UI_CurrentPadding(ui_context *UI);
 
 void UI_LayoutPop(ui_context *UI);
 void UI_LayoutPush(ui_context *UI, ui_widget Layout);
@@ -95,7 +92,7 @@ void UI_RenderWidgets(ui_context *UI, ui_widget *Widget);
 
 #define UI_PADDING(UI, Pad) DeferLoop((UI)->PaddingStack[(UI)->PaddingIndex++] = v2f(Pad, Pad), (UI)->PaddingStack[--(UI)->PaddingIndex] = v2f(0.0, 0.0))
 
-#define UI_PANEL(UI, P, S) UI_PADDING(UI, 5) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_RENDER_BACKGROUND, .Position = P, .Size = S}), UI_LayoutPop(UI))
+#define UI_PANEL(UI, P, S) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Gap = 10.0f, .Padding = v2f(25, 25), .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_RENDER_BACKGROUND, .Position = P, .Size = S}), UI_LayoutPop(UI))
 
 #define UI_ROW(UI, LayoutFlag) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_ROW | LayoutFlag | (UI)->Flags}), UI_LayoutPop(UI))
 

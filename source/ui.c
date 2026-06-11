@@ -112,8 +112,6 @@ void UI_LayoutPop(ui_context *UI)
 
 void UI_LayoutPush(ui_context *UI, ui_widget Layout)
 {
-	Layout.Padding = UI->PaddingStack[UI->PaddingIndex-1];
-	LogInfo("Padding: ?v2f", Layout.Padding);
 	UI->LayoutStack[UI->LayoutIndex] = Layout;
 	if(UI->LayoutIndex > 0)
 	{
@@ -166,6 +164,7 @@ void UI_Layout(ui_context *UI)
 {
 	//for(ui_widget *Child = UI->Root->First; Child; Child = Child->Next)
 	v2f ChildSize = UI->Root->Size;
+	ChildSize = SubV2F(ChildSize, UI->Root->Padding);
 	{
 		if(UI->Root->Flags & UI_LAYOUT_ROW)    UI_LayoutRow(UI, UI->Root, ChildSize);
 		if(UI->Root->Flags & UI_LAYOUT_COLUMN) UI_LayoutColumn(UI, UI->Root, ChildSize);
@@ -178,6 +177,7 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 	// Offset by Padding, decrease MaxSize by Padding * 2
 	v2f Paddingx2 = MulV2F(Row->Padding, v2f(2, 2));
 	MaxSize = SubV2F(MaxSize, Paddingx2);
+	int NumberOfChildren = 0;
 	for(ui_widget *Sibling = Row->First; Sibling; Sibling = Sibling->Next)
 	{
 		v2f ChildSize = v2f(0.0, 0.0);
@@ -195,9 +195,9 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 		}
 		TotalSize.X += ChildSize.X;
 		TotalSize.Y = Max(TotalSize.Y, ChildSize.Y);
+		NumberOfChildren++;
 	}
 	v2f SpaceLeft = SubV2F(MaxSize, TotalSize);
-	SpaceLeft.Y = 0.0f;
 	Assert(SpaceLeft.X >= 0.0f);
 	Assert(SpaceLeft.Y >= 0.0f);
 	int NumberOfFillChildren = 0;
@@ -268,7 +268,7 @@ void UI_RenderWidgets(ui_context *UI, ui_widget *Widget)
 	if(Widget->Flags & UI_RENDER_BACKGROUND)
 	{
 		D_RoundedQuad(UI->Draw, Widget->Position, Widget->Size.X, Widget->Size.Y,
-			25.0f,
+			15.0f,
 			.Colour = v4f(0.2, 0.2, 0.2, 1.0),
 			.OutlineColour = v4f(0.3, 0.3, 0.3, 1.0),
 			.Extrusion = 0.0,
@@ -278,7 +278,7 @@ void UI_RenderWidgets(ui_context *UI, ui_widget *Widget)
 
 	if(!(Widget->Flags & UI_LAYOUT_COLUMN) && !(Widget->Flags & UI_LAYOUT_ROW))
 	{
-		D_RoundedQuad(UI->Draw, v2f(Widget->Position.X - Widget->HoverAnimation.Value*5, Widget->Position.Y - Widget->HoverAnimation.Value*6),
+		D_RoundedQuad(UI->Draw, v2f(Widget->Position.X - Widget->HoverAnimation.Value*5, Widget->Position.Y - Widget->HoverAnimation.Value*5),
 		Widget->Size.X + Widget->HoverAnimation.Value*10, Widget->Size.Y + Widget->HoverAnimation.Value*10, 15.0f,
 		.Colour = v4f(1.0f, 0.5f, 0.0f, 1),
 		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 0),
