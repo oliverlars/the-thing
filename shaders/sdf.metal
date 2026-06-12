@@ -25,6 +25,7 @@ struct vertex_input
 	float4 OutlineColour;
 	float  OutlineThickness;
 	float  Extrusion;
+	float4 CornerRadii;
 };
 
 struct vertex_output
@@ -38,6 +39,7 @@ struct vertex_output
 	float4 OutlineColour;
 	float  OutlineThickness;
 	float  Extrusion;
+	float4 CornerRadii;
 };
 
 vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
@@ -54,6 +56,7 @@ vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
 	Output.OutlineColour    = Vertices[VertexID].OutlineColour;
 	Output.OutlineThickness = Vertices[VertexID].OutlineThickness;
 	Output.Extrusion        = Vertices[VertexID].Extrusion;
+	Output.CornerRadii      = Vertices[VertexID].CornerRadii;
 	return Output;
 }
 

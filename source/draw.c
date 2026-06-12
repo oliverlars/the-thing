@@ -365,6 +365,15 @@ static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
 	v2f Min = v2f(Position.X - Pad,         Position.Y - Pad);
 	v2f Max = v2f(Position.X + Width + Pad, Position.Y + Height + Pad);
 
+	// Per-corner radii default to the uniform scalar (Param) when the caller
+	// leaves Options.CornerRadii zeroed, so single-radius shapes are unchanged.
+	v4f CornerRadii = Options.CornerRadii;
+	if (CornerRadii.X == 0.0f && CornerRadii.Y == 0.0f &&
+	    CornerRadii.Z == 0.0f && CornerRadii.W == 0.0f)
+	{
+		CornerRadii = v4f(Param, Param, Param, Param);
+	}
+
 	r_vertex Tmpl = {
 		.Colour           = Options.Colour,
 		.Centre           = Centre,
@@ -373,6 +382,7 @@ static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
 		.OutlineColour    = Options.OutlineColour,
 		.OutlineThickness = Options.OutlineThickness,
 		.Extrusion        = Options.Extrusion,
+		.CornerRadii      = CornerRadii,
 	};
 	PushQuad6(Command.Vertices, Min, Max, Tmpl);
 

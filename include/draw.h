@@ -81,24 +81,16 @@ void D_BaseStr8InBox(draw_context *D_Context, str8 String,
 #define D_Str8InBox(Draw, String, BoxPos, BoxSize, AlignX, AlignY, ...) \
 	D_BaseStr8InBox(Draw, String, BoxPos, BoxSize, AlignX, AlignY, (d_str8_options){ __VA_ARGS__ })
 
-// Options shared by all 2D SDF shapes (rounded quad, capsule, squircle, quad,
-// point).
-// Designed for designated-initializer use via the variadic macros below — any
-// field left zero takes a sensible default.
 typedef struct d_shape_options
 {
 	v4f Colour;
 
-	// Outline rendered just inside the shape's edge. Thickness in pixels;
-	// Thickness <= 0 disables the outline.
 	v4f OutlineColour;
 	f32 OutlineThickness;
 
-	// Bevel depth/direction. 0 (default from zero-init) = fully flat; +1 =
-	// fully raised; -1 = fully recessed. Animatable between any of these.
-	// Pass +1 explicitly to get a raised lip — leaving this unset keeps the
-	// shape flat.
 	f32 Extrusion;
+	
+	v4f CornerRadii;
 }
 d_shape_options;
 
