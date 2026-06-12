@@ -54,6 +54,7 @@ typedef struct ui_context
 	s32 Frame;
 
 	ui_widget_flags Flags;
+	f32 NextGap;
 	ui_widget LayoutStack[4096];
 	int       LayoutIndex;
 	ui_widget Widgets[UI_WIDGET_TABLE_SIZE];
@@ -86,16 +87,22 @@ void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position);
 void UI_LayoutRootPosition(ui_context *UI, ui_widget *Widget, v2f Position);
 void UI_RenderWidgets(ui_context *UI, ui_widget *Widget);
 
+#define UI_DEFAULT_GAP 10.0f
+#define UI_DEFAULT_PADDING 25.0f
+#define UI_DEFAULT_PADDING2 v2f(UI_DEFAULT_PADDING, UI_DEFAULT_PADDING)
+
 #define DeferLoop(Start, End) for(int _I_ = ((Start), 0); _I_ < 1; ((End), _I_++))
 
 #define UI_FLAG(UI, Flag) DeferLoop((UI)->Flags |= (Flag), (UI)->Flags &= ~(Flag))
 
 #define UI_PADDING(UI, Pad) DeferLoop((UI)->PaddingStack[(UI)->PaddingIndex++] = v2f(Pad, Pad), (UI)->PaddingStack[--(UI)->PaddingIndex] = v2f(0.0, 0.0))
 
-#define UI_PANEL(UI, P, S) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Gap = 10.0f, .Padding = v2f(25, 25), .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_RENDER_BACKGROUND, .Position = P, .Size = S}), UI_LayoutPop(UI))
+#define UI_PANEL(UI, P, S) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Gap = UI_DEFAULT_GAP, .Padding = UI_DEFAULT_PADDING2, .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_RENDER_BACKGROUND, .Position = P, .Size = S}), UI_LayoutPop(UI))
 
-#define UI_ROW(UI, LayoutFlag) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_ROW | LayoutFlag | (UI)->Flags}), UI_LayoutPop(UI))
+#define UI_GAP(UI, G) DeferLoop((UI)->NextGap = (G), (UI)->NextGap = UI_DEFAULT_GAP)
 
-#define UI_COLUMN(UI, LayoutFlag) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_COLUMN | LayoutFlag | (UI)->Flags}), UI_LayoutPop(UI))
+#define UI_ROW(UI, LayoutFlag) DeferLoop((UI_LayoutPush(UI, (ui_widget){ .Gap = (UI)->NextGap, .Flags = UI_LAYOUT_ROW | LayoutFlag | (UI)->Flags}), (UI)->NextGap = UI_DEFAULT_GAP), UI_LayoutPop(UI))
+
+#define UI_COLUMN(UI, LayoutFlag) DeferLoop((UI_LayoutPush(UI, (ui_widget){ .Gap = (UI)->NextGap, .Flags = UI_LAYOUT_COLUMN | LayoutFlag | (UI)->Flags}), (UI)->NextGap = UI_DEFAULT_GAP), UI_LayoutPop(UI))
 
 #define UI_FILL(UI) DeferLoop((UI)->Flags |= UI_LAYOUT_FILL, (UI)->Flags &= ~UI_LAYOUT_FILL)

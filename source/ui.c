@@ -9,6 +9,7 @@ void UI_Begin(ui_context *UI)
 {
 	UI->Hover = UI->HoverNext;
 	UI->HoverNext = 0;
+	UI->NextGap = UI_DEFAULT_GAP;
 	for(int WidgetIndex = 0; WidgetIndex < UI_WIDGET_TABLE_SIZE; WidgetIndex++)
 	{
 		ui_widget *Widget = UI->Widgets + WidgetIndex;
@@ -197,6 +198,7 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 		TotalSize.Y = Max(TotalSize.Y, ChildSize.Y);
 		NumberOfChildren++;
 	}
+	if(NumberOfChildren > 1) TotalSize.X += Row->Gap * (f32)(NumberOfChildren - 1);
 	v2f SpaceLeft = SubV2F(MaxSize, TotalSize);
 	Assert(SpaceLeft.X >= 0.0f);
 	Assert(SpaceLeft.Y >= 0.0f);
@@ -228,6 +230,7 @@ v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize)
 	// Offset by Padding, decrease MaxSize by Padding * 2
 	v2f Paddingx2 = MulV2F(Column->Padding, v2f(2, 2));
 	MaxSize = SubV2F(MaxSize, Paddingx2);
+	int NumberOfChildren = 0;
 	for(ui_widget *Sibling = Column->First; Sibling; Sibling = Sibling->Next)
 	{
 		v2f ChildSize = v2f(0.0, 0.0);
@@ -245,7 +248,9 @@ v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize)
 		}
 		TotalSize.Y += ChildSize.Y;
 		TotalSize.X = Max(TotalSize.X, ChildSize.X);
+		NumberOfChildren++;
 	}
+	if(NumberOfChildren > 1) TotalSize.Y += Column->Gap * (f32)(NumberOfChildren - 1);
 	Column->Size = AddV2F(TotalSize, Paddingx2);
 	return TotalSize;
 }
@@ -258,8 +263,8 @@ void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position)
 	for(ui_widget *Child = Widget->First; Child; Child = Child->Next)
 	{
 		UI_LayoutPositions(UI, Child, Position);
-		if(Widget->Flags & UI_LAYOUT_ROW)         Position.X += Child->Size.X;
-		else if(Widget->Flags & UI_LAYOUT_COLUMN) Position.Y += Child->Size.Y;
+		if(Widget->Flags & UI_LAYOUT_ROW)         Position.X += Child->Size.X + Widget->Gap;
+		else if(Widget->Flags & UI_LAYOUT_COLUMN) Position.Y += Child->Size.Y + Widget->Gap;
 	}
 }
 
