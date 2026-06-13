@@ -140,12 +140,18 @@ static void Frame(void *UserData, v2i ViewportSize)
 	UI_Begin(&App->UI);
 	UI_PANEL(&App->UI, v2f(1000, 1000), v2f(600, 1000))
 	{
-		UI_ROW(&App->UI, UI_LAYOUT_FIXED)
-		{
-			UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
-			UI_Button(&App->UI, Str8("Submit"));
-		}
-		UI_Button(&App->UI, Str8("Fixed size"));
+		// UI_ROW(&App->UI, UI_LAYOUT_FIXED)
+		// {
+		// 	UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
+		// 	UI_Button(&App->UI, Str8("Submit"));
+		// }
+		str8 Elements[3] = {
+			Str8("Cat"), 
+			Str8("Dog"),
+			Str8("Meow"),
+		};
+		UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
+		//UI_Button(&App->UI, Str8("Fixed size"));
 	}
 
 	UI_Layout(&App->UI);

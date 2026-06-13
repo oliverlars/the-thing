@@ -1,4 +1,5 @@
 #include "maths.h"
+#include "memory.h"
 #include "misc.h"
 #include "draw.h"
 #include "os.h"
@@ -59,8 +60,6 @@ ui_widget *GetWidget(ui_context *UI, str8 Name)
 	return Widget;
 }
 
-
-
 b32 UI_Button(ui_context *UI, str8 Name)
 {
 	ui_widget *Widget = GetWidget(UI, Name);
@@ -103,6 +102,67 @@ b32 UI_Button(ui_context *UI, str8 Name)
 	Widget->Size.X = D_Str8WidthFromHeight(UI->Font, Name, 50) + 30;
 	Widget->Size.Y = D_Str8HeightFromHeight(UI->Font, 50) + 30;
 	return Clicked;
+}
+
+int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int ActiveElement)
+{
+	ui_widget *Widget = GetWidget(UI, Name);
+	Widget->String = Name;
+	ui_widget *Layout = UI->LayoutStack + UI->LayoutIndex - 1;
+	UI_AppendAsChild(Layout, Widget);
+	int ClickedElement = ActiveElement;
+	v2f MousePosition = OS_MousePosition(UI->Window);
+
+	UI_COLUMN(UI, UI_LAYOUT_FIXED)
+	{
+		UI_Button(UI, Str8PushF(TemporaryArena(), "Active?S", Elements[ActiveElement]));
+
+		f32 MaxWidth = 0;
+		for(int E = 0; E < ElementCount; E++)
+		{
+			MaxWidth = Max(MaxWidth, D_Str8WidthFromHeight(UI->Font, Elements[E], 50) + 30);
+		}
+		Widget->Size.X = MaxWidth;
+		Widget->Size.Y = D_Str8HeightFromHeight(UI->Font, 50) + 30;
+		f32 ElementHeight = Widget->Size.Y;
+
+
+		if(UI->Hover == Widget->Key)
+		{
+			Widget->HoverAnimation.Target = 1.0;
+			if(OS_MouseDown(OS_MOUSE_LEFT))
+			{
+				UI->Active = Widget->Key;
+				Widget->ActiveAnimation.Target = 1.0;
+			}
+		}
+		else
+		{
+			Widget->HoverAnimation.Target = 0.0;
+		}
+
+		if(UI->Active == Widget->Key)
+		{
+			for(int E = 0; E < ElementCount; E++)
+			{
+				UI_Button(UI, Str8PushF(TemporaryArena(), "?S?s32", Elements[E], E));
+			}
+
+			if(OS_MouseReleased(OS_MOUSE_LEFT))
+			{
+				UI->Active = 0;
+				Widget->ActiveAnimation.Target = 0.0;
+			}
+		}
+	}
+
+	if (MousePosition.X >= Widget->Position.X && MousePosition.X < (Widget->Position.X + Widget->Size.X) &&
+		MousePosition.Y >= Widget->Position.Y && MousePosition.Y <= (Widget->Position.Y + Widget->Size.Y))
+	{
+		UI->HoverNext = Widget->Key;
+	}
+
+	return ClickedElement;
 }
 
 void UI_LayoutPop(ui_context *UI)

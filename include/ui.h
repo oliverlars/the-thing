@@ -28,6 +28,7 @@ typedef struct ui_widget
 {
 	ui_widget_flags Flags;
 	str8 String;
+	str8 DisplayString;
 	u64 Key;
 	ui_animation ActiveAnimation;
 	ui_animation HoverAnimation;
@@ -72,6 +73,7 @@ void UI_Begin(ui_context *UI);
 void UI_End(ui_context *UI);
 
 b32 UI_Button(ui_context *UI, str8 Name);
+int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int ActiveElement);
 
 void UI_LayoutPop(ui_context *UI);
 void UI_LayoutPush(ui_context *UI, ui_widget Layout);
