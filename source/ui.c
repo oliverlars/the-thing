@@ -68,6 +68,9 @@ b32 UI_Button(ui_context *UI, str8 Name)
 	UI_AppendAsChild(Layout, Widget);
 	b32 Clicked = False;
 	v2f MousePosition = OS_MousePosition(UI->Window);
+	// OS_MousePosition is in the renderer's bottom-left origin (Y-up) space;
+	// flip Y into the UI's top-left origin (Y-down) space for hit testing.
+	MousePosition.Y = UI->Draw->ViewportSize.Y - MousePosition.Y;
 
 	
 	if(UI->Hover == Widget->Key)
@@ -112,36 +115,43 @@ int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int
 	UI_AppendAsChild(Layout, Widget);
 	int ClickedElement = ActiveElement;
 	v2f MousePosition = OS_MousePosition(UI->Window);
+	// OS_MousePosition is in the renderer's bottom-left origin (Y-up) space;
+	// flip Y into the UI's top-left origin (Y-down) space for hit testing.
+	MousePosition.Y = UI->Draw->ViewportSize.Y - MousePosition.Y;
+
+	f32 MaxWidth = 0;
+	for(int E = 0; E < ElementCount; E++)
+	{
+		MaxWidth = Max(MaxWidth, D_Str8WidthFromHeight(UI->Font, Elements[E], 50) + 30);
+	}
+	Widget->Size.X = MaxWidth;
+	Widget->Size.Y = D_Str8HeightFromHeight(UI->Font, 50) + 30;
+	f32 ElementHeight = Widget->Size.Y;
 
 	UI_COLUMN(UI, UI_LAYOUT_FIXED)
 	{
-		UI_Button(UI, Str8PushF(TemporaryArena(), "Active?S", Elements[ActiveElement]));
-
-		f32 MaxWidth = 0;
-		for(int E = 0; E < ElementCount; E++)
+		if(UI->Active == Widget->Key)
 		{
-			MaxWidth = Max(MaxWidth, D_Str8WidthFromHeight(UI->Font, Elements[E], 50) + 30);
+			if(OS_MouseReleased(OS_MOUSE_LEFT))
+			{
+				if(UI->Hover == Widget->Key)
+				{
+					Widget->Toggled = !Widget->Toggled;
+					Widget->ActiveAnimation.Target = 0.0;
+					UI->Active = 0;
+				}
+			}
 		}
-		Widget->Size.X = MaxWidth;
-		Widget->Size.Y = D_Str8HeightFromHeight(UI->Font, 50) + 30;
-		f32 ElementHeight = Widget->Size.Y;
-
-
-		if(UI->Hover == Widget->Key)
+		else if(UI->Hover == Widget->Key)
 		{
-			Widget->HoverAnimation.Target = 1.0;
 			if(OS_MouseDown(OS_MOUSE_LEFT))
 			{
 				UI->Active = Widget->Key;
-				Widget->ActiveAnimation.Target = 1.0;
+				Widget->HoverAnimation.Target = 1.0;
 			}
 		}
-		else
-		{
-			Widget->HoverAnimation.Target = 0.0;
-		}
 
-		if(UI->Active == Widget->Key)
+		if(Widget->Toggled)
 		{
 			for(int E = 0; E < ElementCount; E++)
 			{
@@ -330,9 +340,15 @@ void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position)
 
 void UI_RenderWidgets(ui_context *UI, ui_widget *Widget)
 {
+	// The UI works in a top-left origin (Y-down) space, but the renderer is
+	// bottom-left origin (Y-up). Flip the widget's top-left position into a
+	// render-space corner here; X is unchanged. Size is orientation-agnostic.
+	v2f RenderPosition = v2f(Widget->Position.X,
+		UI->Draw->ViewportSize.Y - Widget->Position.Y - Widget->Size.Y);
+
 	if(Widget->Flags & UI_RENDER_BACKGROUND)
 	{
-		D_RoundedQuad(UI->Draw, Widget->Position, Widget->Size.X, Widget->Size.Y,
+		D_RoundedQuad(UI->Draw, RenderPosition, Widget->Size.X, Widget->Size.Y,
 			15.0f,
 			.Colour = v4f(0.2, 0.2, 0.2, 1.0),
 			.OutlineColour = v4f(0.3, 0.3, 0.3, 1.0),
@@ -343,14 +359,14 @@ void UI_RenderWidgets(ui_context *UI, ui_widget *Widget)
 
 	if(!(Widget->Flags & UI_LAYOUT_COLUMN) && !(Widget->Flags & UI_LAYOUT_ROW))
 	{
-		D_RoundedQuad(UI->Draw, v2f(Widget->Position.X - Widget->HoverAnimation.Value*5, Widget->Position.Y - Widget->HoverAnimation.Value*5),
+		D_RoundedQuad(UI->Draw, v2f(RenderPosition.X - Widget->HoverAnimation.Value*5, RenderPosition.Y - Widget->HoverAnimation.Value*5),
 		Widget->Size.X + Widget->HoverAnimation.Value*10, Widget->Size.Y + Widget->HoverAnimation.Value*10, 15.0f,
 		.Colour = v4f(1.0f, 0.5f, 0.0f, 1),
 		.OutlineColour = v4f(1.0f, 0.5f, 0.0f, 0),
 		.OutlineThickness = 0.0f,
 		.Extrusion = 1.0 - Widget->ActiveAnimation.Value);
 		D_Str8InBox(UI->Draw, Widget->String,
-			Widget->Position, Widget->Size,
+			RenderPosition, Widget->Size,
 			D_ALIGN_CENTRE, D_ALIGN_CENTRE,
 			.Font = UI->Font,
 			.HeightInPixels = 50.0f,

@@ -34,6 +34,8 @@ typedef struct ui_widget
 	ui_animation HoverAnimation;
 	s32 FrameLastTouched;
 
+	b32 Toggled;
+
 	f32 Gap;
 	v2f Padding;
 	v2f Position;

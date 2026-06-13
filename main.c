@@ -138,7 +138,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 
 	UI_Begin(&App->UI);
-	UI_PANEL(&App->UI, v2f(1000, 1000), v2f(600, 1000))
+	UI_PANEL(&App->UI, v2f(1000, 200), v2f(600, 1000))
 	{
 		// UI_ROW(&App->UI, UI_LAYOUT_FIXED)
 		// {
@@ -151,6 +151,11 @@ static void Frame(void *UserData, v2i ViewportSize)
 			Str8("Meow"),
 		};
 		UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
+
+		if(UI_Button(&App->UI, Str8("Some button")))
+		{
+			LogInfo("Clicked button");
+		}
 		//UI_Button(&App->UI, Str8("Fixed size"));
 	}
 
