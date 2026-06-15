@@ -26,6 +26,7 @@ struct vertex_input
 	float  OutlineThickness;
 	float  Extrusion;
 	float4 CornerRadii;
+	float  ShadowBlur;
 };
 
 struct vertex_output
@@ -40,6 +41,7 @@ struct vertex_output
 	float  OutlineThickness;
 	float  Extrusion;
 	float4 CornerRadii;
+	float  ShadowBlur;
 };
 
 vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
@@ -57,7 +59,16 @@ vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
 	Output.OutlineThickness = Vertices[VertexID].OutlineThickness;
 	Output.Extrusion        = Vertices[VertexID].Extrusion;
 	Output.CornerRadii      = Vertices[VertexID].CornerRadii;
+	Output.ShadowBlur       = Vertices[VertexID].ShadowBlur;
 	return Output;
+}
+
+float4 ShadeShadow(float Dist, float Blur, float4 ShadowColour)
+{
+	float Coverage = 1.0 - smoothstep(-Blur, Blur, Dist);
+	float Alpha = ShadowColour.a * Coverage;
+	if (Alpha <= 0.0) discard_fragment();
+	return float4(ShadowColour.rgb, Alpha);
 }
 
 #define AMBIENT 0.8

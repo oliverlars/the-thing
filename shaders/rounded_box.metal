@@ -24,6 +24,7 @@ fragment float4 FragmentMain(vertex_output Input [[stage_in]],
 {
 	float2 P = Input.LocalPos - Input.Centre;
 	float Dist = DistanceToRoundedBox(P, Input.HalfSize, Input.CornerRadii);
+	if (Input.ShadowBlur > 0.0) return ShadeShadow(Dist, Input.ShadowBlur, Input.Colour);
 	return ShadeSDF(Dist, Input.LocalPos, Input.HalfSize,
 	                Input.Colour, Input.OutlineColour, Input.OutlineThickness,
 	                Input.Extrusion, 10.0, Uniforms);

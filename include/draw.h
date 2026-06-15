@@ -66,8 +66,8 @@ void D_BaseStr8(draw_context *D_Context, str8 String, d_str8_options Options);
 
 typedef enum d_align
 {
-	D_ALIGN_MIN,
 	D_ALIGN_CENTRE,
+	D_ALIGN_MIN,
 	D_ALIGN_MAX,
 } d_align;
 
@@ -89,8 +89,12 @@ typedef struct d_shape_options
 	f32 OutlineThickness;
 
 	f32 Extrusion;
-	
+
 	v4f CornerRadii;
+
+	v4f ShadowColour;
+	v2f ShadowOffset;
+	f32 ShadowBlur;
 }
 d_shape_options;
 

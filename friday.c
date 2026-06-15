@@ -58,9 +58,11 @@ Entry(InputWaveInfo)
 
 		Str8ListAppend(&Arena, &IncludePaths, Str8("include/"));
 		Str8ListAppend(&Arena, &IncludePaths, Str8("external/"));
+		Str8ListAppend(&Arena, &IncludePaths, Str8("build/"));
 
 		// main.c lives at the project root; the rest live in source/.
 		Str8ListAppend(&Shared->Arena, &SourceFiles, Str8("main.c"));
+		Str8ListAppend(&Shared->Arena, &SourceFiles, Str8("build/embedded_fonts.c"));
 		AppendSourceFilesInFolder(&Shared->Arena, &SourceFiles, Str8("source"));
 		AppendSourceFilesInFolder(&Shared->Arena, &SourceFiles, Str8("source/darwin"));
 		AppendSourceFilesInFolder(&Shared->Arena, &SourceFiles, Str8("external"));
@@ -83,6 +85,19 @@ Entry(InputWaveInfo)
 		};
 
 		mkdir("build", 0755);
+
+		{
+			str8_list FontPaths = {0};
+			Str8ListAppend(&Arena, &FontPaths, Str8("fonts/BerkeleyMono-Regular.ttf"));
+			Str8ListAppend(&Arena, &FontPaths, Str8("fonts/lucide.ttf"));
+
+			str8_list FontNames = {0};
+			Str8ListAppend(&Arena, &FontNames, Str8("G_BerkeleyMono"));
+			Str8ListAppend(&Arena, &FontNames, Str8("G_Lucide"));
+
+			GenerateEmbedHeader(&Arena, Str8("build"));
+			EmbedFiles(&Arena, FontPaths, Str8("build/embedded_fonts.c"), FontNames);
+		}
 
 		EmitCompileCommandsJson(&Arena, BuildOptions);
 	}

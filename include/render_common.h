@@ -19,7 +19,8 @@
 	X(v4f, OutlineColour,    OUTLINE_COLOUR,    12) \
 	X(f32, OutlineThickness, OUTLINE_THICKNESS, 13) \
 	X(f32, Extrusion,        EXTRUSION,         14) \
-	X(v4f, CornerRadii,      CORNER_RADII,      15)
+	X(v4f, CornerRadii,      CORNER_RADII,      15) \
+	X(f32, ShadowBlur,       SHADOW_BLUR,       16)
 
 #define X(T, NAME, CAPS_NAME, INDEX) T NAME;
 typedef struct r_vertex { VERTEX_ATTRIBUTE_FIELDS } r_vertex;

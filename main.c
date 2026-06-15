@@ -8,6 +8,8 @@
 #include "draw.h"
 #include "ui.h"
 
+#include "embedded_fonts.h"
+
 #include <math.h>
 
 typedef struct app_state
@@ -18,6 +20,7 @@ typedef struct app_state
 	draw_context Draw;
 	os_window *Window;
 	d_font Font;
+	d_font LucideFont;
 	u64 StartTime;
 
 	ui_context UI;
@@ -87,11 +90,18 @@ static void Frame(void *UserData, v2i ViewportSize)
 	f32 ShapeSize = 96.0f;
 	f32 ShapeGap = 32.0f;
 
+	f32 CardX0 = W * 0.10f - 30.0f;
+	f32 CardX1 = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + 30.0f;
+	D_RoundedQuad(&App->Draw, v2f(CardX0, ShapeY - 30.0f),
+		CardX1 - CardX0, ShapeSize + 60.0f, 24.0f,
+		.Colour = v4f(0.85f, 0.85f, 0.88f, 1));
+
 	// Flat rounded quad.
 	D_RoundedQuad(&App->Draw, v2f(W * 0.10f, ShapeY),
 		ShapeSize, ShapeSize, 20.0f,
 		.Colour = v4f(0.95f, 0.45f, 0.30f, 1),
-		.Extrusion = 1.0);
+		.Extrusion = 1.0,
+		.ShadowOffset = v2f(8, 10), .ShadowBlur = 22.0f);
 
 	// Capsule with an outline, also flat.
 	D_Capsule(&App->Draw, v2f(W * 0.10f + (ShapeSize + ShapeGap), ShapeY),
@@ -99,7 +109,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 		.Colour = v4f(0.35f, 0.85f, 0.55f, 1),
 		.OutlineColour = v4f(1, 1, 1, 1),
 		.OutlineThickness = 3.0f,
-		.Extrusion = 1.0);
+		.Extrusion = 1.0,
+		.ShadowOffset = v2f(8, 10), .ShadowBlur = 22.0f);
 
 	// Squircles with varying exponent. The middle one opts into a soft sheen
 	// that tracks the cursor; the others stay flat for comparison.
@@ -140,11 +151,11 @@ static void Frame(void *UserData, v2i ViewportSize)
 	UI_Begin(&App->UI);
 	UI_PANEL(&App->UI, v2f(1000, 200), v2f(600, 1000))
 	{
-		// UI_ROW(&App->UI, UI_LAYOUT_FIXED)
-		// {
-		// 	UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
-		// 	UI_Button(&App->UI, Str8("Submit"));
-		// }
+		UI_ROW(&App->UI, UI_LAYOUT_FIXED)
+		{
+			UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
+			UI_Button(&App->UI, Str8("Submit"));
+		}
 		str8 Elements[3] = {
 			Str8("Cat"), 
 			Str8("Dog"),
@@ -156,12 +167,21 @@ static void Frame(void *UserData, v2i ViewportSize)
 		{
 			LogInfo("Clicked button");
 		}
-		//UI_Button(&App->UI, Str8("Fixed size"));
 	}
 
 	UI_Layout(&App->UI);
 	UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
-	UI_RenderWidgets(&App->UI, App->UI.Root);
+
+	// Floating layers (combo dropdowns, etc.) are laid out and drawn after the
+	// main tree so they sit on top. Each is its own hug-sized layout root,
+	// positioned at the anchor stored when it was registered.
+	for(int I = 0; I < App->UI.FloatCount; I++)
+	{
+		ui_widget *Float = App->UI.FloatRoots[I];
+		UI_LayoutColumn(&App->UI, Float, App->UI.Draw->ViewportSize);
+		UI_LayoutPositions(&App->UI, Float, Float->Position);
+		UI_RenderWidgets(&App->UI, Float);
+	}
 
 	UI_End(&App->UI);
 
@@ -198,13 +218,14 @@ int main(int ArgCount, char **Args)
 	App.Draw.Arena = Arena;
 	App.Draw.Render = &App.Render;
 
-	str8 FontBytes = OS_LoadEntireFileIntoMemory(Arena, Str8("fonts/BerkeleyMono-Regular.ttf"));
-	App.Font = D_LoadFontFromTTF(&App.Draw, FontBytes.Bytes);
+	App.Font = D_LoadFontFromTTF(&App.Draw, G_BerkeleyMono.Data);
+	App.LucideFont = D_LoadFontFromTTF(&App.Draw, G_Lucide.Data);
 
 	App.StartTime = OS_TimeStampNow();
 
 	App.UI.Draw = &App.Draw;
 	App.UI.Font = App.Font;
+	App.UI.IconFont = App.LucideFont;
 	App.UI.Window = App.Window;
 
 	OS_Run(&Window, Frame, &App);

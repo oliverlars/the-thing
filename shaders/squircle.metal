@@ -26,6 +26,7 @@ fragment float4 FragmentMain(vertex_output Input [[stage_in]],
 {
 	float2 P = Input.LocalPos - Input.Centre;
 	float Dist = Squircle2D(P, Input.HalfSize, Input.Param);
+	if (Input.ShadowBlur > 0.0) return ShadeShadow(Dist, Input.ShadowBlur, Input.Colour);
 	return ShadeSDF(Dist, Input.LocalPos, Input.HalfSize,
 	                Input.Colour, Input.OutlineColour, Input.OutlineThickness,
 	                Input.Extrusion, 8.0, Uniforms);

@@ -126,7 +126,7 @@ fragment float4 FragmentMain(vertex_output Input [[stage_in]],
 	// dst = rgb*a*Alpha + dst*(1 - a*Alpha). Alpha>1 makes (1-a*Alpha)<0 →
 	// negative dst channels → composite `1 - exp(-negative)` produces large
 	// values → whites/artifacts at winding-rule edges.
-	float Alpha = clamp(AlphaSum / 9.0, 0.0, 1.0);
+	float Alpha = clamp(fabs(AlphaSum) / 9.0, 0.0, 1.0);
 	return float4(Input.Colour.rgb, Input.Colour.a * Alpha);
 	//return float4(mix(float3(0, 1, 1), float3(1, 1, 1), Alpha), 1.0);
 }

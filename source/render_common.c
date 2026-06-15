@@ -29,7 +29,7 @@ r_vertex_attributes R_AttributesFromCommandType(r_command_type CommandType)
 		R = R_VA_POSITION | R_VA_COLOUR
 		  | R_VA_THICKNESS | R_VA_CENTRE | R_VA_HALF_SIZE
 		  | R_VA_OUTLINE_COLOUR | R_VA_OUTLINE_THICKNESS
-		  | R_VA_EXTRUSION | R_VA_CORNER_RADII;
+		  | R_VA_EXTRUSION | R_VA_CORNER_RADII | R_VA_SHADOW_BLUR;
 		break;
 	}
 	return R;
