@@ -9,6 +9,19 @@
 #include <float.h>
 #include <math.h>
 
+static f32 LinearFromSRGBChannel(f32 C)
+{
+	return C <= 0.04045f ? C / 12.92f : powf((C + 0.055f) / 1.055f, 2.4f);
+}
+
+v4f LinearFromSRGB(v4f Colour)
+{
+	return v4f(LinearFromSRGBChannel(Colour.X),
+	           LinearFromSRGBChannel(Colour.Y),
+	           LinearFromSRGBChannel(Colour.Z),
+	           Colour.W);
+}
+
 static u32 D_DecodeUTF8(str8 String, s64 *At)
 {
 	u8 *B = (u8*)String.Bytes;
@@ -248,6 +261,7 @@ void D_BaseStr8(draw_context *D, str8 String, d_str8_options Options)
 
 	f32 StartX = Options.Position.X;
 	r_vertex *Out = Command.Vertices;
+	Options.Colour = LinearFromSRGB(Options.Colour);
 
 	assert(Options.HeightInPixels > 0.0f);
 	f32 Scale = stbtt_ScaleForPixelHeight(&Options.Font.Info, Options.HeightInPixels);
@@ -347,7 +361,7 @@ void D_Line(draw_context *D, v2f Start, v2f End, f32 Thickness, v4f Colour)
 	v2f Max = v2f(fmaxf(Start.X, End.X) + Pad, fmaxf(Start.Y, End.Y) + Pad);
 
 	r_vertex Tmpl = {
-		.Colour = Colour,
+		.Colour = LinearFromSRGB(Colour),
 		.Start = Start,
 		.End = End,
 		.Thickness = Thickness,
@@ -373,7 +387,7 @@ void D_Bezier(draw_context *D, v2f Start, v2f Control, v2f End, f32 Thickness, v
 	f32 MaxY = fmaxf(Start.Y, fmaxf(Control.Y, End.Y)) + Pad;
 
 	r_vertex Tmpl = {
-		.Colour = Colour,
+		.Colour = LinearFromSRGB(Colour),
 		.Start = Start,
 		.Control = Control,
 		.End = End,
@@ -428,7 +442,7 @@ static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
 		v2f SMax = v2f(SPos.X + Width + SPad, SPos.Y + Height + SPad);
 
 		r_vertex ShadowTmpl = {
-			.Colour      = ShadowColour,
+			.Colour      = LinearFromSRGB(ShadowColour),
 			.Centre      = v2f(SPos.X + HalfSize.X, SPos.Y + HalfSize.Y),
 			.HalfSize    = HalfSize,
 			.Thickness   = Param,
@@ -445,11 +459,11 @@ static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
 	v2f Max = v2f(Position.X + Width + Pad, Position.Y + Height + Pad);
 
 	r_vertex Tmpl = {
-		.Colour           = Options.Colour,
+		.Colour           = LinearFromSRGB(Options.Colour),
 		.Centre           = Centre,
 		.HalfSize         = HalfSize,
 		.Thickness        = Param,
-		.OutlineColour    = Options.OutlineColour,
+		.OutlineColour    = LinearFromSRGB(Options.OutlineColour),
 		.OutlineThickness = Options.OutlineThickness,
 		.Extrusion        = Options.Extrusion,
 		.CornerRadii      = CornerRadii,

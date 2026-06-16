@@ -305,8 +305,14 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 		GlobalView.wantsLayer = YES;
 		CAMetalLayer *Layer = (CAMetalLayer *)GlobalView.layer;
 		Layer.device          = Device;
-		Layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+		Layer.pixelFormat     = MTLPixelFormatBGRA10_XR_sRGB;
 		Layer.framebufferOnly = YES;
+		// BGRA10_XR_sRGB stores sRGB-encoded values in extended range, so the layer
+		// must be told its contents live in an extended-range sRGB colour space for
+		// the system to composite them correctly.
+		CGColorSpaceRef ColourSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedSRGB);
+		Layer.colorspace = ColourSpace;
+		CGColorSpaceRelease(ColourSpace);
 		// Backs the layer's drawable to the layer's bounds and rescales for
 		// retina automatically — set initial size before the window orders in.
 		CGFloat Scale = [NSScreen mainScreen].backingScaleFactor;

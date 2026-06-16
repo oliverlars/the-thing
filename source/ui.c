@@ -120,8 +120,8 @@ b32 UI_Button(ui_context *UI, str8 Name)
 	Widget->DisplayString = Name;
 
 	Widget->Flags |= UI_DRAW_BACKGROUND | UI_DRAW_TEXT | UI_DRAW_HOT;
-	Widget->Colour = v4f(1.0f, 0.5f, 0.0f, 1.0f);
-	Widget->TextColour = v4f(0.45f, 0.05f, 0.0f, 1.0f);
+	Widget->Colour = v4f(1.0f, 0.44f, 0.14f, 1.0f);
+	Widget->TextColour = v4f(0.9f, 0.87f, 0.83f, 1.0f);
 	Widget->CornerRadius = 15.0f;
 
 	ui_widget *Layout = UI->LayoutStack + UI->LayoutIndex - 1;

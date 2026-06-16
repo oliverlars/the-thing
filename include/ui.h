@@ -162,7 +162,7 @@ void UI_RenderWidgets(ui_context *UI, ui_widget *Widget);
 
 #define UI_PADDING(UI, Pad) DeferLoop((UI)->PaddingStack[(UI)->PaddingIndex++] = v2f(Pad, Pad), (UI)->PaddingStack[--(UI)->PaddingIndex] = v2f(0.0, 0.0))
 
-#define UI_PANEL(UI, P, S) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Gap = UI_DEFAULT_GAP, .Padding = UI_DEFAULT_PADDING2, .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_DRAW_BACKGROUND, .Colour = v4f(0.2, 0.2, 0.2, 1.0), .OutlineColour = v4f(0.3, 0.3, 0.3, 1.0), .OutlineThickness = 2.0f, .CornerRadius = 15.0f, .Position = P, .Size = S}), UI_LayoutPop(UI))
+#define UI_PANEL(UI, P, S) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Gap = UI_DEFAULT_GAP, .Padding = UI_DEFAULT_PADDING2, .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_DRAW_BACKGROUND, .Colour = v4f(0.125, 0.129, 0.14, 1.0), .OutlineColour = v4f(0.3, 0.3, 0.3, 1.0), .OutlineThickness = 2.0f, .CornerRadius = 15.0f, .Position = P, .Size = S}), UI_LayoutPop(UI))
 
 #define UI_GAP(UI, G) DeferLoop((UI)->NextGap = (G), (UI)->NextGap = UI_DEFAULT_GAP)
 

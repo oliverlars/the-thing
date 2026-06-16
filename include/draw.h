@@ -81,6 +81,8 @@ void D_BaseStr8InBox(draw_context *D_Context, str8 String,
 #define D_Str8InBox(Draw, String, BoxPos, BoxSize, AlignX, AlignY, ...) \
 	D_BaseStr8InBox(Draw, String, BoxPos, BoxSize, AlignX, AlignY, (d_str8_options){ __VA_ARGS__ })
 
+v4f LinearFromSRGB(v4f Colour);
+
 typedef struct d_shape_options
 {
 	v4f Colour;

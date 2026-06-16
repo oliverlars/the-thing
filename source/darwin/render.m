@@ -283,7 +283,7 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 		M->CurveBuffers[Index]   = [M->Device newBufferWithLength:MegaBytes(16) options:MTLResourceStorageModeShared];
 	}
 
-	MTLPixelFormat Color = MTLPixelFormatBGRA8Unorm;
+	MTLPixelFormat Color = MTLPixelFormatBGRA10_XR_sRGB;
 	MTLPixelFormat Depth = MTLPixelFormatDepth32Float;
 
 	m_scratch_arena Scratch = ScratchBegin(0, 0);
@@ -452,7 +452,9 @@ void R_Update(render_context *R, void *DrawableHandle)
 	Pass.colorAttachments[0].texture     = Drawable.texture;
 	Pass.colorAttachments[0].loadAction  = MTLLoadActionClear;
 	Pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-	Pass.colorAttachments[0].clearColor  = MTLClearColorMake(0.02, 0.02, 0.03, 1.0);
+	// sRGB target: the clear colour is treated as linear and encoded on store, so
+	// linearise the sRGB values (0.02, 0.02, 0.03) to keep the same dark backdrop.
+	Pass.colorAttachments[0].clearColor  = MTLClearColorMake(0.001548, 0.001548, 0.002322, 1.0);
 	Pass.depthAttachment.texture     = M->DepthTexture;
 	Pass.depthAttachment.loadAction  = MTLLoadActionClear;
 	Pass.depthAttachment.storeAction = MTLStoreActionDontCare;
