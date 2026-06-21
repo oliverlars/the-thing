@@ -206,7 +206,7 @@ int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int
 	Header->DisplayString = Elements[ActiveElement];
 	Header->CustomDraw = UI_ComboHeaderDraw;
 	Header->Icon = Str8("\uE211");
-	Header->Padding = v2f(20.0f, 12.0f);
+	Header->Padding = v2f(10.0f, 12.0f);
 
 	ui_widget *Layout = UI->LayoutStack + UI->LayoutIndex - 1;
 	UI_AppendAsChild(Layout, Header);

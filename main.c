@@ -26,6 +26,80 @@ typedef struct app_state
 	ui_context UI;
 } app_state;
 
+
+// Perspective projection matching Metal's clip-space depth range [0, 1].
+// The shared M44FPerspective is OpenGL-style ([-1, 1]), which would clip the
+// near half of the cube against Metal's z >= 0 plane. Row-vector convention
+// (point is transformed as v * M), camera looking down -Z.
+static m44f PerspectiveMetal(f32 Aspect, f32 FOVDegrees, f32 Near, f32 Far)
+{
+	f32 FOV = (FOVDegrees / 360.0f) * 2.0f * (f32)M_PI;
+	f32 F = 1.0f / tanf(FOV / 2.0f);
+	m44f R = {0};
+	R.E[0][0] = F / Aspect;
+	R.E[1][1] = F;
+	R.E[2][2] = -Far / (Far - Near);
+	R.E[2][3] = -1.0f;
+	R.E[3][2] = -(Far * Near) / (Far - Near);
+	return R;
+}
+
+void ViewportRender(app_state *App, v2f ViewportSize)
+{
+	render_context *R = &App->Render;
+
+	f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
+
+	v3f Corners[8] = {
+		v3f(-0.5f, -0.5f, -0.5f), v3f( 0.5f, -0.5f, -0.5f),
+		v3f( 0.5f,  0.5f, -0.5f), v3f(-0.5f,  0.5f, -0.5f),
+		v3f(-0.5f, -0.5f,  0.5f), v3f( 0.5f, -0.5f,  0.5f),
+		v3f( 0.5f,  0.5f,  0.5f), v3f(-0.5f,  0.5f,  0.5f),
+	};
+
+	struct { int I[4]; v4f Colour; } Faces[6] = {
+		{ { 4, 5, 6, 7 }, v4f(0.95f, 0.30f, 0.30f, 1) }, // +Z front
+		{ { 1, 0, 3, 2 }, v4f(0.30f, 0.85f, 0.45f, 1) }, // -Z back
+		{ { 0, 4, 7, 3 }, v4f(0.30f, 0.55f, 0.95f, 1) }, // -X left
+		{ { 5, 1, 2, 6 }, v4f(0.95f, 0.80f, 0.25f, 1) }, // +X right
+		{ { 3, 7, 6, 2 }, v4f(0.85f, 0.40f, 0.90f, 1) }, // +Y top
+		{ { 0, 1, 5, 4 }, v4f(0.25f, 0.85f, 0.90f, 1) }, // -Y bottom
+	};
+
+	r_vertex *Vertices = ArenaPushArrayZero(TemporaryArena(), r_vertex, 36);
+	int Count = 0;
+	for (int FaceIndex = 0; FaceIndex < 6; FaceIndex++)
+	{
+		int *I = Faces[FaceIndex].I;
+		v4f Colour = LinearFromSRGB(Faces[FaceIndex].Colour);
+		int Tris[6] = { I[0], I[1], I[2], I[0], I[2], I[3] };
+		for (int J = 0; J < 6; J++)
+		{
+			v3f P = Corners[Tris[J]];
+			Vertices[Count].Position = v4f(P.X, P.Y, P.Z, 1.0f);
+			Vertices[Count].Colour   = Colour;
+			Count++;
+		}
+	}
+
+	m44f Model = MulM44FM44F(M44FromYAngle(ElapsedSec * 0.9f),
+	                         M44FromXAngle(ElapsedSec * 0.6f));
+	m44f View  = M44FLookAt(v3f(0, 0, 3), v3f(0, 0, 0), v3f(0, 1, 0));
+	f32 Aspect = ViewportSize.X / ViewportSize.Y;
+	m44f Proj  = PerspectiveMetal(Aspect, 50.0f, 0.1f, 100.0f);
+	m44f PVM   = MulM44FM44F(MulM44FM44F(Model, View), Proj);
+
+	r_command Command = {0};
+	Command.Type          = R_COMMAND_TRIANGLE;
+	Command.Vertices      = Vertices;
+	Command.VerticesCount = Count;
+	Command.Attributes    = R_AttributesFromCommandType(R_COMMAND_TRIANGLE);
+
+	R_PushTransform(R, PVM);
+	R_PushCommand(R, Command);
+	R_PopTransform(R);
+}
+
 static void Frame(void *UserData, v2i ViewportSize)
 {
 	app_state *App = (app_state*)UserData;
@@ -53,6 +127,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 	v2f Mouse = OS_MousePosition(App->Window);
 	v3f LightPos = v3f(Mouse.X, Mouse.Y, 200.0f);
 	R_SetLight(&App->Render, LightPos, v3f(1.0f, 1.0f, 1.0f), 1.0, 400.0f);
+
+	ViewportRender(App, App->Draw.ViewportSize);
 
 	f32 BX0 = W * 0.20f;
 	f32 BX1 = W * 0.80f;
@@ -127,8 +203,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 			.Extrusion = 1.0);
 	}
 
-	// Oscillates Extrusion between −1 (recessed) and +1 (raised) on a 2s
-	// period to make the raise↔recess transition visible at a glance.
 	f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
 	v4f CapsuleColours[2] = { v4f(1.0f, 0.4f, 0.0f, 1), v4f(0.8f, 0.35f, 0.0f, 1) };
 	static b32 Clicked = False;
@@ -141,12 +215,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 		.Position = v3f(W * 0.10f, H * 0.90f, 0),
 		.HeightInPixels = 64.0f,
 		.Colour = v4f(1, 1, 1, 1));
-
-	// DEBUG: render a magenta dot at whatever OS_MousePosition reports. If
-	// this dot sits under the OS cursor the mouse coords are correct; if
-	// it's offset (e.g. flipped vertically) the offset tells us the bug.
-	D_Point(&App->Draw, Mouse, 16.0f, .Colour = v4f(1.0f, 0.0f, 1.0f, 1));
-
 
 	UI_Begin(&App->UI);
 	UI_PANEL(&App->UI, v2f(1000, 200), v2f(600, 1000))
@@ -172,9 +240,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 	UI_Layout(&App->UI);
 	UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
 
-	// Floating layers (combo dropdowns, etc.) are laid out and drawn after the
-	// main tree so they sit on top. Each is its own hug-sized layout root,
-	// positioned at the anchor stored when it was registered.
 	for(int I = 0; I < App->UI.FloatCount; I++)
 	{
 		ui_widget *Float = App->UI.FloatRoots[I];
