@@ -32,6 +32,8 @@ Entry(InputWaveInfo)
 		b32 OptimisedBuild = False;
 		b32 Rebuild = False;
 
+		b32 Carnage = False;
+
 		for(s64 ArgIndex = 1; ArgIndex < Shared->ArgCount; ArgIndex++)
 		{
 			str8 Arg = Str8PushF(&Arena, "%s", Shared->Args[ArgIndex]);
@@ -39,6 +41,7 @@ Entry(InputWaveInfo)
 			else if(Str8Equal(Arg, Str8("release"))) { OptimisedBuild = True; }
 			else if(Str8Equal(Arg, Str8("rebuild"))) { Rebuild = True; }
 			else if(Str8Equal(Arg, Str8("run")))     { ShouldRun = True; }
+			else if(Str8Equal(Arg, Str8("carnage"))) { Carnage = True; }
 			else if(Str8Equal(Arg, Str8("help")))
 			{
 				printf("\nfriday — build system for the-thing\n\n");
@@ -71,7 +74,7 @@ Entry(InputWaveInfo)
 			Str8("-framework Cocoa -framework Metal -framework QuartzCore "));
 
 		BuildOptions = (build_options){
-			.Compiler          = COMPILER_PLATFORM_DEFAULT,
+			.Compiler          = Carnage ? COMPILER_CARNAGE : COMPILER_PLATFORM_DEFAULT,
 			.OutputName        = Str8("the-thing"),
 			.OutputType        = OUTPUT_EXECUTABLE,
 			.SourceFiles       = SourceFiles,

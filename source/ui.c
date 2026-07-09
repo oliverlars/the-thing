@@ -27,7 +27,7 @@ void UI_End(ui_context *UI)
 	UI->WidgetIndex = 0;
 }
 
-ui_widget *GetWidget(ui_context *UI, str8 Name)
+ui_widget *UI_GetWidget(ui_context *UI, str8 Name)
 {
 	u64 Key = M_FNVHashString(M_FNV_HASH_START, Name);
 	ui_widget *Widget = UI->Widgets + (Key % UI_WIDGET_TABLE_SIZE);
@@ -114,7 +114,7 @@ ui_signal UI_Interact(ui_context *UI, ui_widget *Widget)
 
 b32 UI_Button(ui_context *UI, str8 Name)
 {
-	ui_widget *Widget = GetWidget(UI, Name);
+	ui_widget *Widget = UI_GetWidget(UI, Name);
 	Widget->Kind = UI_WIDGET_BUTTON;
 	Widget->String = Name;
 	Widget->DisplayString = Name;
@@ -200,7 +200,7 @@ int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int
 {
 	int ClickedElement = ActiveElement;
 
-	ui_widget *Header = GetWidget(UI, Name);
+	ui_widget *Header = UI_GetWidget(UI, Name);
 	Header->Kind = UI_WIDGET_COMBO_BOX;
 	Header->String = Name;
 	Header->DisplayString = Elements[ActiveElement];
@@ -237,7 +237,7 @@ int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int
 
 	if(Header->Toggled)
 	{
-		ui_widget *List = GetWidget(UI, Str8PushF(TemporaryArena(), "?S_list", Name));
+		ui_widget *List = UI_GetWidget(UI, Str8PushF(TemporaryArena(), "?S_list", Name));
 		List->Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FLOATING;
 		List->Gap = UI_DEFAULT_GAP;
 		List->Padding = v2f(0, 0);
@@ -247,7 +247,7 @@ int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int
 
 		for(int E = 0; E < ElementCount; E++)
 		{
-			ui_widget *Item = GetWidget(UI, Str8PushF(TemporaryArena(), "?S_item?s32", Name, E));
+			ui_widget *Item = UI_GetWidget(UI, Str8PushF(TemporaryArena(), "?S_item?s32", Name, E));
 			Item->Kind = UI_WIDGET_COMBO_BOX;
 			Item->String = Elements[E];
 			Item->DisplayString = Elements[E];

@@ -1,5 +1,6 @@
 #include "misc.h"
 #include "memory.h"
+#include "render_common.h"
 #include "strings.h"
 #include "log.h"
 #include "maths.h"
@@ -44,11 +45,9 @@ static m44f PerspectiveMetal(f32 Aspect, f32 FOVDegrees, f32 Near, f32 Far)
 	return R;
 }
 
-void ViewportRender(app_state *App, v2f ViewportSize)
+void ViewportRender(render_context *Render, v2f ViewportSize)
 {
-	render_context *R = &App->Render;
-
-	f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
+	render_context *R = Render;
 
 	v3f Corners[8] = {
 		v3f(-0.5f, -0.5f, -0.5f), v3f( 0.5f, -0.5f, -0.5f),
@@ -82,8 +81,8 @@ void ViewportRender(app_state *App, v2f ViewportSize)
 		}
 	}
 
-	m44f Model = MulM44FM44F(M44FromYAngle(ElapsedSec * 0.9f),
-	                         M44FromXAngle(ElapsedSec * 0.6f));
+	m44f Model = MulM44FM44F(M44FromYAngle((f32)Render->Frame / 100.0 * 0.9f),
+	                         M44FromXAngle((f32)Render->Frame / 100.0 * 0.6f));
 	m44f View  = M44FLookAt(v3f(0, 0, 3), v3f(0, 0, 0), v3f(0, 1, 0));
 	f32 Aspect = ViewportSize.X / ViewportSize.Y;
 	m44f Proj  = PerspectiveMetal(Aspect, 50.0f, 0.1f, 100.0f);
@@ -128,7 +127,9 @@ static void Frame(void *UserData, v2i ViewportSize)
 	v3f LightPos = v3f(Mouse.X, Mouse.Y, 200.0f);
 	R_SetLight(&App->Render, LightPos, v3f(1.0f, 1.0f, 1.0f), 1.0, 400.0f);
 
-	ViewportRender(App, App->Draw.ViewportSize);
+
+	ui_widget *ViewportWidget = UI_GetWidget(&App->UI, Str8("3D Viewport"));
+
 
 	f32 BX0 = W * 0.20f;
 	f32 BX1 = W * 0.80f;
@@ -230,6 +231,13 @@ static void Frame(void *UserData, v2i ViewportSize)
 			Str8("Meow"),
 		};
 		UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
+
+		UI_FILL(&App->UI)
+		{
+			ui_widget *ViewportWidget = UI_GetWidget(&App->UI, Str8("3D Viewport"));
+			ViewportWidget->Size = v2f(50, 50);
+			ViewportRender(&App->Render, ViewportWidget->Size);
+		}
 
 		if(UI_Button(&App->UI, Str8("Some button")))
 		{

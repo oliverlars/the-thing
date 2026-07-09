@@ -108,6 +108,7 @@ typedef enum compiler
 	COMPILER_PLATFORM_DEFAULT = 0,
 	COMPILER_CLANG = 0,
 	COMPILER_GCC = 1,
+	COMPILER_CARNAGE = 2,
 
 	COMPILER_MSVC = COMPILER_PLATFORM_DEFAULT,
 
@@ -121,6 +122,7 @@ typedef enum compiler
 	COMPILER_PLATFORM_DEFAULT = 0,
 	COMPILER_MSVC = 0,
 	COMPILER_CLANG = 1,
+	COMPILER_CARNAGE = 2, // glep is mac-only; falls back to clang-cl on Windows.
 
 	COMPILER_GCC = COMPILER_PLATFORM_DEFAULT,
 	COMPILER_COUNT,
@@ -442,22 +444,14 @@ b32 ExecuteCommand(memory_arena *Arena, str8 EntireCommandAndArguments, b32 *Fai
 
 str8 CompileCommandFromBuildOptions(memory_arena *Arena, build_options *BuildOptions, str8 HashedFilename, str8 SourceFilename)
 {
-	str8 DebugOrRelease[2] =
-	{
-		Str8("-g -O0"), Str8("-O2")
-	};
-
-	str8 Compilers[2] =
-	{
-		Str8("clang"), Str8("gcc")
-	};
-
-	str8 ObjectiveC[2] =
-	{
-		Str8(""), Str8("-ObjC -fobjc-arc")
-	};
-
 	b32 IsObjectiveCFile = Str8EndsWith(SourceFilename, Str8(".m"));
+
+	// Carnage (glep) can't compile Objective-C — fall back to clang for .m files.
+	compiler EffectiveCompiler = BuildOptions->Compiler;
+	if (IsObjectiveCFile && EffectiveCompiler == COMPILER_CARNAGE)
+	{
+		EffectiveCompiler = COMPILER_CLANG;
+	}
 
 	str8_list IncludePathsWithFlag = {0};
 	for (str8_list_node *Node = BuildOptions->IncludePaths.First; Node != Null; Node = Node->Next)
@@ -465,10 +459,40 @@ str8 CompileCommandFromBuildOptions(memory_arena *Arena, build_options *BuildOpt
 		Str8ListAppend(Arena, &IncludePathsWithFlag, Str8PushF(Arena, "-I%.*s ", Str8ToPrintfArgs(Node->String)));
 	}
 
+	if (EffectiveCompiler == COMPILER_CARNAGE)
+	{
+		// glep uses -debug/-opt instead of -g/-O2, and -o takes a separate argument.
+		str8 DebugOpt[2] = { Str8("-debug"), Str8("-opt") };
+		return Str8PushF(
+			Arena,
+			"glep -c -no-debug-artifacts %.*s %.*s %.*s -o %.*s%.*s %.*s",
+			Str8ToPrintfArgs(SourceFilename),
+			Str8ToPrintfArgs(Str8ListJoin(Arena, BuildOptions->ExtraCompileFlags)),
+			Str8ToPrintfArgs(DebugOpt[BuildOptions->Optimise]),
+			Str8ToPrintfArgs(BuildOptions->OutputPath),
+			Str8ToPrintfArgs(HashedFilename),
+			Str8ToPrintfArgs(Str8ListJoin(Arena, IncludePathsWithFlag)));
+	}
+
+	str8 DebugOrRelease[2] =
+	{
+		Str8("-g -O0"), Str8("-O2")
+	};
+
+	str8 Compilers[3] =
+	{
+		Str8("clang"), Str8("gcc"), Str8("glep")
+	};
+
+	str8 ObjectiveC[2] =
+	{
+		Str8(""), Str8("-ObjC -fobjc-arc")
+	};
+
 	str8 CompileCommand = Str8PushF(
 		Arena,
 		"%.*s %.*s %.*s -c %.*s %.*s -o%.*s%.*s %.*s ",
-		Str8ToPrintfArgs(Compilers[BuildOptions->Compiler]),
+		Str8ToPrintfArgs(Compilers[EffectiveCompiler]),
 		Str8ToPrintfArgs(Str8ListJoin(Arena, BuildOptions->ExtraCompileFlags)),
 		Str8ToPrintfArgs(ObjectiveC[IsObjectiveCFile]),
 		Str8ToPrintfArgs(SourceFilename),
@@ -872,10 +896,11 @@ str8 CompileCommandFromBuildOptions(memory_arena *Arena, build_options *BuildOpt
 		Str8("/Zi /Od"), Str8("/O2")
 	};
 
-	str8 Compilers[2] =
+	str8 Compilers[3] =
 	{
 		Str8("cl.exe"),
-		Str8("clang-cl")
+		Str8("clang-cl"),
+		Str8("clang-cl") // COMPILER_CARNAGE: glep is mac-only, so fall back to clang-cl.
 	};
 
 	str8_list IncludePathsWithFlag = {0};

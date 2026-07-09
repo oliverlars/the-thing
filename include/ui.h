@@ -125,12 +125,16 @@ typedef struct ui_context
 	ui_widget *FloatRoots[64];
 	int FloatCount;
 
+	ui_widget *CurrentWidget;
+
 	ui_widget *Root;
 }
 ui_context;
 
 void UI_Begin(ui_context *UI);
 void UI_End(ui_context *UI);
+
+ui_widget *UI_GetWidget(ui_context *UI, str8 Name);
 
 ui_signal UI_Interact(ui_context *UI, ui_widget *Widget);
 
