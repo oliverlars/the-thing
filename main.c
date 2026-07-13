@@ -128,9 +128,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 	R_SetLight(&App->Render, LightPos, v3f(1.0f, 1.0f, 1.0f), 1.0, 400.0f);
 
 
-	ui_widget *ViewportWidget = UI_GetWidget(&App->UI, Str8("3D Viewport"));
-
-
 	f32 BX0 = W * 0.20f;
 	f32 BX1 = W * 0.80f;
 	f32 BMid = (BX0 + BX1) * 0.5f;
@@ -192,7 +189,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// Squircles with varying exponent. The middle one opts into a soft sheen
 	// that tracks the cursor; the others stay flat for comparison.
 	f32 SquircleStartX = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + ShapeGap;
-	f32 Exponents[] = { 2.5f, 4.0f, 8.0f };
+	f32 Exponents[3] = { 2.5f, 4.0f, 8.0f };
 	for (int I = 0; I < (int)(sizeof(Exponents)/sizeof(Exponents[0])); I++)
 	{
 		f32 X = SquircleStartX + (ShapeSize + ShapeGap) * (f32)I;

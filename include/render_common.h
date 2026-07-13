@@ -51,7 +51,15 @@ typedef enum r_command_type
 	R_COMMAND_BEZIER,
 	R_COMMAND_ROUNDED_BOX,
 	R_COMMAND_SQUIRCLE,
+	R_COMMAND_TEXTURE,
 } r_command_type;
+
+typedef enum r_texture_format {
+	TF_RGBA16,
+	TF_RGBA32,
+} r_texture_format;
+
+typedef u64 r_handle;
 
 typedef struct r_command
 {
@@ -71,6 +79,7 @@ r_command;
 
 #define MAX_TRANSFORMS (4096)
 #define MAX_SCISSORS   (4096)
+#define MAX_TEXTURES   (128)
 
 typedef struct render_context
 {
@@ -88,6 +97,10 @@ typedef struct render_context
 	v4i ScissorStack[MAX_SCISSORS];
 	int ScissorCount;
 
+	r_handle TargetStack[16];
+	int TargetCount;
+
+
 	// Global point light. Position is in the same coordinate space as shape
 	// positions (world / pixel space for the default ortho setup). Radius is
 	// the half-falloff distance in those same units. Default colour is zero,
@@ -104,10 +117,16 @@ r_vertex_attributes R_AttributesFromCommandType(r_command_type CommandType);
 
 void R_TextureFromBytes(render_context *R, u8 *Bytes, s32 Width, s32 Height);
 
+r_handle R_MakeTexture(render_context *R, v2i Size, r_texture_format Format);
+void     R_ReleaseTexture(render_context *R, r_handle Texture);
+
 void R_PushCommand(render_context *R, r_command Command);
 
 void R_PushTransform(render_context *Render, m44f Transform);
 void R_PopTransform(render_context *Render);
+
+void R_PushTarget(render_context *Render, r_handle Texture);
+void R_PopTarget(render_context *Render);
 
 void R_PushScissor(render_context *Render, v4i Scissor);
 void R_PopScissor(render_context *Render);

@@ -12,6 +12,7 @@
 #include "render.h"
 #include "log.h"
 #include "os.h"
+#include "render_common.h"
 
 // <complex.h> (via simd headers) defines I as _Complex_I — collides with any
 // loop variable named I. Drop it.
@@ -45,6 +46,11 @@ typedef struct metal_context
 	id<MTLBuffer>  VertexBuffers [FRAMES_IN_FLIGHT];
 	id<MTLBuffer>  UniformBuffers[FRAMES_IN_FLIGHT];
 	id<MTLBuffer>  CurveBuffers  [FRAMES_IN_FLIGHT];
+
+	id<MTLTexture> Textures[4096];
+	int            TextureCount;
+	int            TextureFreeList[4096];
+	int            TextureFreeListCount;
 
 	id<MTLTexture> DepthTexture;
 
@@ -101,6 +107,54 @@ static int MTLAlignmentFromAttribute(r_vertex_attributes Attribute)
 	int LUT[] = { VERTEX_ATTRIBUTE_FIELDS };
 	#undef X
 	return LUT[Index];
+}
+
+r_handle R_MakeTexture(render_context *R, v2i Size, r_texture_format Format)
+{
+	metal_context *Metal = R->Backend;
+	MTLPixelFormat MetalFormat;
+	switch(Format)
+	{
+		case TF_RGBA16: MetalFormat = MTLPixelFormatRGBA16Float; break;
+		case TF_RGBA32: MetalFormat = MTLPixelFormatRGBA32Float; break;
+	}
+	MTLTextureDescriptor *Desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MetalFormat
+		width:Size.X
+		height:Size.Y
+		mipmapped:NO
+	];
+	Desc.usage = MTLTextureUsageRenderTarget;
+	Desc.storageMode = MTLStorageModePrivate;
+	r_handle Result = 0;
+	if(Metal->TextureFreeListCount > 0)
+	{
+		Result = Metal->TextureFreeList[Metal->TextureFreeListCount--];
+		Metal->Textures[Result] = [Metal->Device newTextureWithDescriptor:Desc];
+	}
+	else if(Metal->TextureCount < 4096 - 1)
+	{
+		Result = Metal->TextureCount++ + 1;
+		Metal->Textures[Result] = [Metal->Device newTextureWithDescriptor:Desc];
+	}
+	else
+	{
+		LogError("Ran out of textures");
+	}
+	return Result;
+}
+
+void R_ReleaseTexture(render_context *R, r_handle Texture)
+{
+	metal_context *Metal = R->Backend;
+	for(int I = 0; I < Metal->TextureFreeListCount; I++)
+	{
+		if(Metal->TextureFreeList[I] == Texture) 
+		{
+			LogError("Texture '?s32' already freed", Texture);
+			return;
+		}
+	}
+	Metal->TextureFreeList[Metal->TextureFreeListCount++] = Texture;
 }
 
 static int MTLSizeFromAttribute(r_vertex_attributes Attribute)

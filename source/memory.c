@@ -6,7 +6,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-per_thread_local per_thread_context __ThreadLocalContext;
+per_thread_local struct per_thread_context __ThreadLocalContext;
 
 m_arena *ArenaInitialise(s64 NumberOfBytes)
 {
