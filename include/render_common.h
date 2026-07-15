@@ -77,6 +77,20 @@ typedef struct r_command
 }
 r_command;
 
+typedef enum r_access {
+	RA_DONT_CARE,
+	RA_READ,
+	RA_WRITE,
+} r_access;	
+
+
+#define R_Pass(Command, Name) DeferLoop(R_PassBegin(Command, Name), R_PassEnd(Command))
+
+typedef struct r_target {
+	r_handle ColourTexture;
+	r_handle DepthTexture;
+} r_target;
+
 #define MAX_TRANSFORMS (4096)
 #define MAX_SCISSORS   (4096)
 #define MAX_TEXTURES   (128)
@@ -97,7 +111,7 @@ typedef struct render_context
 	v4i ScissorStack[MAX_SCISSORS];
 	int ScissorCount;
 
-	r_handle TargetStack[16];
+	r_target TargetStack[16];
 	int TargetCount;
 
 
@@ -112,6 +126,9 @@ typedef struct render_context
 	f32 LightRadius;
 }
 render_context;
+
+void R_PassBegin(render_context *R);
+void R_PassEnd(render_context *R);
 
 r_vertex_attributes R_AttributesFromCommandType(r_command_type CommandType);
 
