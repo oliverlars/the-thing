@@ -57,6 +57,7 @@ typedef enum r_command_type
 typedef enum r_texture_format {
 	TF_RGBA16,
 	TF_RGBA32,
+	RF_DEPTH32,
 } r_texture_format;
 
 typedef u64 r_handle;
@@ -82,9 +83,6 @@ typedef enum r_access {
 	RA_READ,
 	RA_WRITE,
 } r_access;	
-
-
-#define R_Pass(Command, Name) DeferLoop(R_PassBegin(Command, Name), R_PassEnd(Command))
 
 typedef struct r_target {
 	r_handle ColourTexture;
@@ -127,8 +125,39 @@ typedef struct render_context
 }
 render_context;
 
-void R_PassBegin(render_context *R);
-void R_PassEnd(render_context *R);
+typedef struct r_texture {
+	u64 Handle;
+} r_texture;
+
+typedef struct r_texture_options {
+	r_texture_format Format;
+	v2i Size;
+} r_texture_options;
+
+typedef enum r_load_operation {
+	LO_LOAD,
+	LO_CLEAR,
+	LO_DISCARD,
+} r_load_operation;
+
+typedef struct r_pass_options {
+	r_texture Colours[4];
+	r_texture Depth;
+	r_load_operation LoadOp;
+	v4f ClearColour[4];
+	v4f ClearDepth;
+} r_pass_options;
+
+void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options);
+void R_PassEnd(render_context *R, str8 Name);
+#define R_Pass(Renderer, Name, ...) DeferLoop(R_PassBegin(Renderer, Name, &(r_pass_options) { __VA_ARGS__ }), R_PassEnd(Renderer))
+
+void R_FrameBegin(render_context *R);
+void R_FrameEnd(render_context *R);
+#define R_Frame(Command, Name) DeferLoop(R_FrameBegin(Command, Name), R_FrameEnd(Command))
+
+r_texture R_TextureEx(str8 Name, r_texture_options *Options);
+#define R_Texture(Name, ...) R_TextureEx(Name, &(r_texture_options){ __VA_ARGS__ })
 
 r_vertex_attributes R_AttributesFromCommandType(r_command_type CommandType);
 
