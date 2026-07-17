@@ -114,6 +114,9 @@ static void Frame(void *UserData, v2i ViewportSize)
 	App->Render.TransformCount = 0;
 	App->Render.ScissorCount = 0;
 
+
+	r_shader TestShader = R_Shader(&App->Render, Str8("triangle.metal"));
+
 	m44f Ortho = M44FOrthographic(0, ViewportSize.X, ViewportSize.Y, 0, -1000, 1000);
 	R_PushTransform(&App->Render, Ortho);
 	R_PushScissor(&App->Render, v4i(0, 0, ViewportSize.X, ViewportSize.Y));

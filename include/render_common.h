@@ -152,7 +152,7 @@ void R_FrameEnd(render_context *R);
 r_texture R_TextureEx(str8 Name, r_texture_options *Options);
 #define R_Texture(Name, ...) R_TextureEx(Name, &(r_texture_options){ __VA_ARGS__ })
 
-r_shader R_Shader(str8 Name, str8 EntryPoint);
+r_shader R_Shader(render_context *R, str8 Name);
 
 void R_DrawTriangles(render_context *R, s32 Count);
 

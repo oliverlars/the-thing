@@ -22,9 +22,15 @@
 
 typedef struct metal_shader
 {
+	// LEGACY!!!! REMOVE THIS!!!!
 	id<MTLRenderPipelineState> PipelineState;
+
 	id<MTLLibrary> Library;
+	id<MTLFunction> VertexEntry;
+	id<MTLFunction> FragmentEntry;
+	id<MTLFunction> ComputeEntry;
 	u64 TimeStamp;
+	str8 Name;
 } metal_shader;
 
 typedef struct metal_context
@@ -58,6 +64,7 @@ typedef struct metal_context
 	// Single one for now, these should eventually chain if it runs out
 	id<MTLHeap>    PermanentArena;
 
+	metal_shader Shaders[4096];
 
 	id<MTLTexture> DepthTexture;
 
@@ -116,11 +123,70 @@ static str8 LoadShaderFile(m_arena *Arena, str8 ShaderDir, char *Name)
 	return OS_LoadEntireFileIntoMemory(Arena, Path);
 }
 
-r_shader R_Shader(str8 Name, str8 EntryPoint)
+static str8 ResolveShaderIncludes(m_arena *Arena, str8 ShaderDir, str8 Source);
+
+metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name)
 {
-	m_scratch_arena Scratch = ScratchBegin(0, 0);
-	u64 LastModified = OS_LastModified(Str8PushF(Scratch.Arena, "shaders/?S", Name));
-	return (r_shader){};
+	metal_context *Metal = R->Backend;
+	metal_shader Shader = {0};
+	str8 Path = Str8PushF(TemporaryArena(), "shaders/?S", Shader.Name);
+	str8 Source = OS_LoadEntireFileIntoMemory(TemporaryArena(), Path);
+	Source = ResolveShaderIncludes(TemporaryArena(), Str8("shaders/"), Source);
+	NSError *Error = nil;
+	NSString *NSSource = [[NSString alloc] initWithBytes:Source.Bytes length:Source.Size encoding:NSUTF8StringEncoding];
+	Shader.Library = [Metal->Device newLibraryWithSource:NSSource options:nil error:&Error];
+	if (!Shader.Library)
+	{
+		LogError("Shader compile failed: ?cstr",
+			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
+		return (metal_shader){0};
+	}
+
+	Shader.VertexEntry   = [Shader.Library newFunctionWithName:@"VertexMain"];
+	Shader.FragmentEntry = [Shader.Library newFunctionWithName:@"FragmentMain"];
+	Shader.ComputeEntry  = [Shader.Library newFunctionWithName:@"ComputeMain"];
+	Shader.TimeStamp = TimeStamp;
+	return Shader;
+}
+
+metal_shader *MetalShaderFromName(render_context *R, str8 Name)
+{
+	metal_context *Metal = R->Backend;
+	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
+	metal_shader *Shader = Metal->Shaders + (Hash % 4096);
+	u64 TimeStamp = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
+	if(Str8Equal(Shader->Name, Name))
+	{
+		if(TimeStamp > Shader->TimeStamp)
+		{
+			Shader[0] = LoadMetalShader(R, TimeStamp, Name);
+		}
+	}
+	else if(!Shader->Name.Size)
+	{
+		Shader[0] = LoadMetalShader(R, TimeStamp, Name);
+	}
+	else
+	{
+		b32 Found = False;
+		for(int I = 1; I < 4095; I++)
+		{
+			if(Str8Equal(Shader[I].Name, Name))
+			{
+				Shader = Shader + I;
+				Shader[0] = LoadMetalShader(R, TimeStamp, Name);
+			}
+		}
+	}
+	return Shader;
+}
+
+r_shader R_Shader(render_context *R, str8 Name)
+{
+	u64 LastModified = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
+	metal_context *Metal = R->Backend;
+
+	return (r_shader){ MetalShaderFromName(R, Name) - Metal->Shaders };
 }
 
 MTLLoadAction MetalLoadAction(r_load_operation Op)
