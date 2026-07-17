@@ -78,17 +78,6 @@ typedef struct r_command
 }
 r_command;
 
-typedef enum r_access {
-	RA_DONT_CARE,
-	RA_READ,
-	RA_WRITE,
-} r_access;	
-
-typedef struct r_target {
-	r_handle ColourTexture;
-	r_handle DepthTexture;
-} r_target;
-
 #define MAX_TRANSFORMS (4096)
 #define MAX_SCISSORS   (4096)
 #define MAX_TEXTURES   (128)
@@ -109,9 +98,6 @@ typedef struct render_context
 	v4i ScissorStack[MAX_SCISSORS];
 	int ScissorCount;
 
-	r_target TargetStack[16];
-	int TargetCount;
-
 
 	// Global point light. Position is in the same coordinate space as shape
 	// positions (world / pixel space for the default ortho setup). Radius is
@@ -125,9 +111,15 @@ typedef struct render_context
 }
 render_context;
 
+// NEW API BEGIN
+
 typedef struct r_texture {
 	u64 Handle;
 } r_texture;
+
+typedef struct r_shader {
+	u64 Handle;
+} r_shader;
 
 typedef struct r_texture_options {
 	r_texture_format Format;
@@ -142,8 +134,9 @@ typedef enum r_load_operation {
 
 typedef struct r_pass_options {
 	r_texture Colours[4];
+	r_load_operation ColourOps[4];
 	r_texture Depth;
-	r_load_operation LoadOp;
+	r_load_operation DepthOp;
 	v4f ClearColour[4];
 	v4f ClearDepth;
 } r_pass_options;
@@ -158,6 +151,14 @@ void R_FrameEnd(render_context *R);
 
 r_texture R_TextureEx(str8 Name, r_texture_options *Options);
 #define R_Texture(Name, ...) R_TextureEx(Name, &(r_texture_options){ __VA_ARGS__ })
+
+r_shader R_Shader(str8 Name, str8 EntryPoint);
+
+void R_DrawTriangles(render_context *R, s32 Count);
+
+
+// NEW API END
+
 
 r_vertex_attributes R_AttributesFromCommandType(r_command_type CommandType);
 

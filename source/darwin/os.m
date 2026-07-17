@@ -17,6 +17,17 @@ u64 OS_TimeStampNow(void)
 	return mach_absolute_time();
 }
 
+u64 OS_LastModified(str8 Path)
+{
+	struct stat Stat;
+	m_scratch_arena Scratch = ScratchBegin(0, 0);
+	if (stat(CStrFromStr8(Scratch.Arena, Path), &Stat) == 0)
+	{
+		return Stat.st_mtime; 
+	}
+	return 0;
+}
+
 f32 OS_MilliSecondsFromTimeStamp(u64 TimeStamp)
 {
 	static mach_timebase_info_data_t Info = {0};

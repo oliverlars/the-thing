@@ -24,6 +24,7 @@ typedef struct metal_shader
 {
 	id<MTLRenderPipelineState> PipelineState;
 	id<MTLLibrary> Library;
+	u64 TimeStamp;
 } metal_shader;
 
 typedef struct metal_context
@@ -52,12 +53,21 @@ typedef struct metal_context
 	int            TextureFreeList[4096];
 	int            TextureFreeListCount;
 
+	id<MTLHeap>    FrameArenas[FRAMES_IN_FLIGHT];
+
+	// Single one for now, these should eventually chain if it runs out
+	id<MTLHeap>    PermanentArena;
+
+
 	id<MTLTexture> DepthTexture;
 
 	v2f *Curves;
 	int  TotalCurvesSoFar;
 
 	v2i Viewport;
+
+
+	id<MTLRenderCommandEncoder> ActiveRenderEncoder;
 
 	dispatch_semaphore_t InFlightSemaphore;
 }
@@ -99,6 +109,59 @@ void R_TextureFromBytes(render_context *R, u8 *Bytes, s32 Width, s32 Height)
 #define _METAL_SIMD_f32 f32
 #define _METAL_SIMD_u32 u32
 #define MetalSimdType(T) _METAL_SIMD_##T
+
+static str8 LoadShaderFile(m_arena *Arena, str8 ShaderDir, char *Name)
+{
+	str8 Path = Str8PushF(Arena, "?S/?cstr", ShaderDir, Name);
+	return OS_LoadEntireFileIntoMemory(Arena, Path);
+}
+
+r_shader R_Shader(str8 Name, str8 EntryPoint)
+{
+	m_scratch_arena Scratch = ScratchBegin(0, 0);
+	u64 LastModified = OS_LastModified(Str8PushF(Scratch.Arena, "shaders/?S", Name));
+	return (r_shader){};
+}
+
+MTLLoadAction MetalLoadAction(r_load_operation Op)
+{
+	switch(Op)
+	{
+		case LO_LOAD:    return MTLLoadActionLoad;
+		case LO_DISCARD: return MTLLoadActionDontCare;
+		case LO_CLEAR:   return MTLLoadActionClear;
+	}
+}
+
+void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options)
+{
+	metal_context *Metal = R->Backend;
+	MTLRenderPassDescriptor *PassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+	PassDescriptor.colorAttachments[0].texture = Metal->Textures[Options->Colours[0].Handle];
+	PassDescriptor.colorAttachments[0].loadAction = MetalLoadAction(Options->ColourOps[0]);
+	PassDescriptor.colorAttachments[1].texture = Metal->Textures[Options->Colours[1].Handle];
+	PassDescriptor.colorAttachments[1].loadAction = MetalLoadAction(Options->ColourOps[1]);
+	PassDescriptor.colorAttachments[2].texture = Metal->Textures[Options->Colours[2].Handle];
+	PassDescriptor.colorAttachments[2].loadAction = MetalLoadAction(Options->ColourOps[2]);
+	PassDescriptor.colorAttachments[3].texture = Metal->Textures[Options->Colours[3].Handle];
+	PassDescriptor.colorAttachments[3].loadAction = MetalLoadAction(Options->ColourOps[3]);
+	PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle];
+	PassDescriptor.depthAttachment.loadAction = MetalLoadAction(Options->DepthOp);
+
+	id<MTLCommandBuffer> CommandBuffer = [Metal->CommandQueue commandBuffer];
+	Metal->ActiveRenderEncoder = [CommandBuffer renderCommandEncoderWithDescriptor:PassDescriptor];
+	Metal->ActiveRenderEncoder.label = [
+		[NSString alloc] initWithBytes:Name.Bytes
+		length:Name.Size encoding:NSUTF8StringEncoding
+	];
+	[Metal->ActiveRenderEncoder setCullMode:MTLCullModeNone];
+}
+
+void R_PassEnd(render_context *R, str8 Name)
+{
+	metal_context *Metal = R->Backend;
+	[Metal->ActiveRenderEncoder endEncoding];
+}
 
 static int MTLAlignmentFromAttribute(r_vertex_attributes Attribute)
 {
@@ -217,12 +280,6 @@ static int StrideFromAttributes(r_vertex_attributes Attributes)
 		}
 	}
 	return Align(Offset, MaxAlignment ? MaxAlignment : 16);
-}
-
-static str8 LoadShaderFile(m_arena *Arena, str8 ShaderDir, char *Name)
-{
-	str8 Path = Str8PushF(Arena, "?S/?cstr", ShaderDir, Name);
-	return OS_LoadEntireFileIntoMemory(Arena, Path);
 }
 
 // Metal's newLibraryWithSource has no include search path, so we resolve local

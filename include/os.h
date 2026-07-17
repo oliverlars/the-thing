@@ -163,3 +163,4 @@ u64 OS_TimeStampNow(void);
 f32 OS_MilliSecondsFromTimeStamp(u64 TimeStamp);
 
 str8 OS_LoadEntireFileIntoMemory(m_arena *Arena, str8 Filename);
+u64 OS_LastModified(str8 Path);
