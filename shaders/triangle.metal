@@ -16,7 +16,7 @@ struct vertex_input
 
 struct uniforms
 {
-	float4x4 PVMMatrix;
+float4x4 PVMMatrix;
 };
 
 vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],

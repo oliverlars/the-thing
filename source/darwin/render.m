@@ -30,8 +30,17 @@ typedef struct metal_shader
 	id<MTLFunction> FragmentEntry;
 	id<MTLFunction> ComputeEntry;
 	u64 TimeStamp;
+	u64 Hash;
 	str8 Name;
 } metal_shader;
+
+typedef struct metal_texture_entry
+{
+	id<MTLTexture> Texture;
+	r_texture_options Options;
+	u64 Hash;
+}
+metal_texture_entry;
 
 typedef struct metal_context
 {
@@ -54,7 +63,7 @@ typedef struct metal_context
 	id<MTLBuffer>  UniformBuffers[FRAMES_IN_FLIGHT];
 	id<MTLBuffer>  CurveBuffers  [FRAMES_IN_FLIGHT];
 
-	id<MTLTexture> Textures[4096];
+	metal_texture_entry Textures[4096];
 	int            TextureCount;
 	int            TextureFreeList[4096];
 	int            TextureFreeListCount;
@@ -129,7 +138,7 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name)
 {
 	metal_context *Metal = R->Backend;
 	metal_shader Shader = {0};
-	str8 Path = Str8PushF(TemporaryArena(), "shaders/?S", Shader.Name);
+	str8 Path = Str8PushF(TemporaryArena(), "shaders/?S", Name);
 	str8 Source = OS_LoadEntireFileIntoMemory(TemporaryArena(), Path);
 	Source = ResolveShaderIncludes(TemporaryArena(), Str8("shaders/"), Source);
 	NSError *Error = nil;
@@ -147,6 +156,72 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name)
 	Shader.ComputeEntry  = [Shader.Library newFunctionWithName:@"ComputeMain"];
 	Shader.TimeStamp = TimeStamp;
 	return Shader;
+}
+
+// HACK(Oliver): This should eventually use the allocator system
+id<MTLTexture> MakeMetalTexture(render_context *R, str8 Name, v2i Size, r_texture_format Format)
+{
+	metal_context *Metal = R->Backend;
+	MTLPixelFormat MetalFormat;
+	switch(Format)
+	{
+		case TF_RGBA16: MetalFormat = MTLPixelFormatRGBA16Float; break;
+		case TF_RGBA32: MetalFormat = MTLPixelFormatRGBA32Float; break;
+	}
+	MTLTextureDescriptor *Desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MetalFormat
+		width:Size.X
+		height:Size.Y
+		mipmapped:NO
+	];
+	Desc.usage = MTLTextureUsageRenderTarget;
+	Desc.storageMode = MTLStorageModePrivate;
+	id<MTLTexture> Texture = [Metal->Device newTextureWithDescriptor:Desc];
+	Texture.label = [
+		[NSString alloc] initWithBytes:Name.Bytes
+		length:Name.Size encoding:NSUTF8StringEncoding
+	];
+	return Texture;
+}
+
+b32 TextureOptionsEqual(r_texture_options *A, r_texture_options *B)
+{
+	return A->Format == B->Format && A->Size.X == B->Size.X && A->Size.Y && B->Size.Y;
+}
+
+r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
+{
+	metal_context *Metal = R->Backend;
+	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
+	metal_texture_entry *Entry = Metal->Textures + (Hash % 4096);
+	if(Entry->Hash == Hash)
+	{
+		if(!TextureOptionsEqual(&Entry->Options, Options))
+		{
+			Entry->Texture = nil;
+			Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
+		}
+		return (r_texture){Entry - Metal->Textures};
+	}
+	else if(Entry->Texture)
+	{
+		for(int I = 1; I < 4095; I++)
+		{
+			if(Entry[I].Hash == Hash)
+			{
+				if(!TextureOptionsEqual(&Entry->Options, Options))
+				{
+					Entry->Texture = nil;
+					Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
+				}
+				return (r_texture){Entry - Metal->Textures};
+			}
+		}
+	}
+	else
+	{
+		Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
+	}
+	return (r_texture){Entry - Metal->Textures};
 }
 
 metal_shader *MetalShaderFromName(render_context *R, str8 Name)
@@ -181,6 +256,32 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name)
 	return Shader;
 }
 
+void R_DrawTriangles(render_context *R, s32 Count)
+{
+	metal_context *Metal = R->Backend;
+	MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
+	PD.vertexFunction = Metal->Shaders[R->Shader.Handle].VertexEntry;
+	PD.fragmentFunction = Metal->Shaders[R->Shader.Handle].FragmentEntry;
+	PD.colorAttachments[0].pixelFormat = Metal->Textures[R->PassOptions.Colours[0].Handle].Texture.pixelFormat;
+	PD.colorAttachments[0].blendingEnabled = YES;
+	PD.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
+	PD.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
+	PD.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
+	PD.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+	PD.depthAttachmentPixelFormat = Metal->Textures[R->PassOptions.Depth.Handle].Texture.pixelFormat;
+
+	NSError *Error = nil;
+	id<MTLRenderPipelineState> Pipeline = [Metal->Device newRenderPipelineStateWithDescriptor:PD error:&Error];
+	if (!Pipeline)
+	{
+		LogError("Pipeline state failed: ?cstr",
+			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
+	}
+
+	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
+	[Metal->ActiveRenderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:Count];
+}
+
 r_shader R_Shader(render_context *R, str8 Name)
 {
 	u64 LastModified = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
@@ -203,15 +304,15 @@ void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options)
 {
 	metal_context *Metal = R->Backend;
 	MTLRenderPassDescriptor *PassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-	PassDescriptor.colorAttachments[0].texture = Metal->Textures[Options->Colours[0].Handle];
+	PassDescriptor.colorAttachments[0].texture = Metal->Textures[Options->Colours[0].Handle].Texture;
 	PassDescriptor.colorAttachments[0].loadAction = MetalLoadAction(Options->ColourOps[0]);
-	PassDescriptor.colorAttachments[1].texture = Metal->Textures[Options->Colours[1].Handle];
+	PassDescriptor.colorAttachments[1].texture = Metal->Textures[Options->Colours[1].Handle].Texture;
 	PassDescriptor.colorAttachments[1].loadAction = MetalLoadAction(Options->ColourOps[1]);
-	PassDescriptor.colorAttachments[2].texture = Metal->Textures[Options->Colours[2].Handle];
+	PassDescriptor.colorAttachments[2].texture = Metal->Textures[Options->Colours[2].Handle].Texture;
 	PassDescriptor.colorAttachments[2].loadAction = MetalLoadAction(Options->ColourOps[2]);
-	PassDescriptor.colorAttachments[3].texture = Metal->Textures[Options->Colours[3].Handle];
+	PassDescriptor.colorAttachments[3].texture = Metal->Textures[Options->Colours[3].Handle].Texture;
 	PassDescriptor.colorAttachments[3].loadAction = MetalLoadAction(Options->ColourOps[3]);
-	PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle];
+	PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle].Texture;
 	PassDescriptor.depthAttachment.loadAction = MetalLoadAction(Options->DepthOp);
 
 	id<MTLCommandBuffer> CommandBuffer = [Metal->CommandQueue commandBuffer];
@@ -236,40 +337,6 @@ static int MTLAlignmentFromAttribute(r_vertex_attributes Attribute)
 	int LUT[] = { VERTEX_ATTRIBUTE_FIELDS };
 	#undef X
 	return LUT[Index];
-}
-
-r_handle R_MakeTexture(render_context *R, v2i Size, r_texture_format Format)
-{
-	metal_context *Metal = R->Backend;
-	MTLPixelFormat MetalFormat;
-	switch(Format)
-	{
-		case TF_RGBA16: MetalFormat = MTLPixelFormatRGBA16Float; break;
-		case TF_RGBA32: MetalFormat = MTLPixelFormatRGBA32Float; break;
-	}
-	MTLTextureDescriptor *Desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MetalFormat
-		width:Size.X
-		height:Size.Y
-		mipmapped:NO
-	];
-	Desc.usage = MTLTextureUsageRenderTarget;
-	Desc.storageMode = MTLStorageModePrivate;
-	r_handle Result = 0;
-	if(Metal->TextureFreeListCount > 0)
-	{
-		Result = Metal->TextureFreeList[Metal->TextureFreeListCount--];
-		Metal->Textures[Result] = [Metal->Device newTextureWithDescriptor:Desc];
-	}
-	else if(Metal->TextureCount < 4096 - 1)
-	{
-		Result = Metal->TextureCount++ + 1;
-		Metal->Textures[Result] = [Metal->Device newTextureWithDescriptor:Desc];
-	}
-	else
-	{
-		LogError("Ran out of textures");
-	}
-	return Result;
 }
 
 void R_ReleaseTexture(render_context *R, r_handle Texture)
@@ -463,15 +530,13 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 	MTLPixelFormat Color = MTLPixelFormatBGRA10_XR_sRGB;
 	MTLPixelFormat Depth = MTLPixelFormatDepth32Float;
 
-	m_scratch_arena Scratch = ScratchBegin(0, 0);
-	M->TriangleShader   = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "triangle.metal"),    R_COMMAND_TRIANGLE,    Color, Depth);
-	M->GlyphShader      = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "glyph.metal"),       R_COMMAND_GLYPH,       Color, Depth);
-	M->PointShader      = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "point.metal"),       R_COMMAND_POINTS,      Color, Depth);
-	M->LineShader       = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "line.metal"),        R_COMMAND_LINES,       Color, Depth);
-	M->BezierShader     = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "bezier.metal"),      R_COMMAND_BEZIER,      Color, Depth);
-	M->RoundedBoxShader = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "rounded_box.metal"), R_COMMAND_ROUNDED_BOX, Color, Depth);
-	M->SquircleShader   = MakeShader(M, LoadShaderSource(Scratch.Arena, Options.ShaderDir, "squircle.metal"),    R_COMMAND_SQUIRCLE,    Color, Depth);
-	ScratchEnd(Scratch);
+	M->TriangleShader   = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "triangle.metal"),    R_COMMAND_TRIANGLE,    Color, Depth);
+	M->GlyphShader      = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "glyph.metal"),       R_COMMAND_GLYPH,       Color, Depth);
+	M->PointShader      = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "point.metal"),       R_COMMAND_POINTS,      Color, Depth);
+	M->LineShader       = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "line.metal"),        R_COMMAND_LINES,       Color, Depth);
+	M->BezierShader     = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "bezier.metal"),      R_COMMAND_BEZIER,      Color, Depth);
+	M->RoundedBoxShader = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "rounded_box.metal"), R_COMMAND_ROUNDED_BOX, Color, Depth);
+	M->SquircleShader   = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "squircle.metal"),    R_COMMAND_SQUIRCLE,    Color, Depth);
 
 	// Two depth states — triangles/points test+write depth, the SDF primitives
 	// and glyphs disable depth so transparent edges don't punch holes in things

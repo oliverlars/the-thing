@@ -82,35 +82,6 @@ r_command;
 #define MAX_SCISSORS   (4096)
 #define MAX_TEXTURES   (128)
 
-typedef struct render_context
-{
-	m_arena *Arena;
-	r_command *CommandsFirst;
-	r_command *CommandsLast;
-
-	int Frame;
-
-	void *Backend;
-
-	m44f TransformStack[MAX_TRANSFORMS];
-	int TransformCount;
-
-	v4i ScissorStack[MAX_SCISSORS];
-	int ScissorCount;
-
-
-	// Global point light. Position is in the same coordinate space as shape
-	// positions (world / pixel space for the default ortho setup). Radius is
-	// the half-falloff distance in those same units. Default colour is zero,
-	// which makes shapes render as pure base colour with no lighting
-	// contribution — call R_SetLight to enable.
-	v3f LightPosition;
-	v3f LightColour;
-	f32 LightIntensity;
-	f32 LightRadius;
-}
-render_context;
-
 // NEW API BEGIN
 
 typedef struct r_texture {
@@ -141,16 +112,48 @@ typedef struct r_pass_options {
 	v4f ClearDepth;
 } r_pass_options;
 
+typedef struct render_context
+{
+	m_arena *Arena;
+	r_command *CommandsFirst;
+	r_command *CommandsLast;
+
+	int Frame;
+
+	void *Backend;
+
+	m44f TransformStack[MAX_TRANSFORMS];
+	int TransformCount;
+
+	v4i ScissorStack[MAX_SCISSORS];
+	int ScissorCount;
+
+	r_pass_options PassOptions;
+	r_shader Shader;
+
+
+	// Global point light. Position is in the same coordinate space as shape
+	// positions (world / pixel space for the default ortho setup). Radius is
+	// the half-falloff distance in those same units. Default colour is zero,
+	// which makes shapes render as pure base colour with no lighting
+	// contribution — call R_SetLight to enable.
+	v3f LightPosition;
+	v3f LightColour;
+	f32 LightIntensity;
+	f32 LightRadius;
+}
+render_context;
+
 void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options);
 void R_PassEnd(render_context *R, str8 Name);
-#define R_Pass(Renderer, Name, ...) DeferLoop(R_PassBegin(Renderer, Name, &(r_pass_options) { __VA_ARGS__ }), R_PassEnd(Renderer))
+#define R_Pass(Renderer, Name, ...) DeferLoop(R_PassBegin(Renderer, Name, &(r_pass_options) { __VA_ARGS__ }), R_PassEnd(Renderer, Name))
 
 void R_FrameBegin(render_context *R);
 void R_FrameEnd(render_context *R);
 #define R_Frame(Command, Name) DeferLoop(R_FrameBegin(Command, Name), R_FrameEnd(Command))
 
-r_texture R_TextureEx(str8 Name, r_texture_options *Options);
-#define R_Texture(Name, ...) R_TextureEx(Name, &(r_texture_options){ __VA_ARGS__ })
+r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options);
+#define R_Texture(Render, Name, ...) R_TextureEx(Render, Name, &(r_texture_options){ __VA_ARGS__ })
 
 r_shader R_Shader(render_context *R, str8 Name);
 

@@ -115,7 +115,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 	App->Render.ScissorCount = 0;
 
 
-	r_shader TestShader = R_Shader(&App->Render, Str8("triangle.metal"));
 
 	m44f Ortho = M44FOrthographic(0, ViewportSize.X, ViewportSize.Y, 0, -1000, 1000);
 	R_PushTransform(&App->Render, Ortho);
@@ -162,6 +161,13 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 	// D_Point(&App->Draw, v2f(BX0, BY), 20.0f, .Colour = v4f(1, 0.9f, 0.2f, 1));
 	// D_Point(&App->Draw, v2f(BX1, BY), 20.0f, .Colour = v4f(0.2f, 0.9f, 1.0f, 1));
+
+	r_shader TestShader = R_Shader(&App->Render, Str8("triangle.metal"));
+	r_texture TestTexture = R_Texture(&App->Render, Str8("Test Texture"), .Size = v2i(100, 100), .Format = TF_RGBA16);
+	R_Pass(&App->Render, Str8("Pass test"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(1, 0, 0, 0))
+	{
+		//R_DrawTriangles(&App->Render, 3);
+	}
 
 	f32 ShapeY = H * 0.12f;
 	f32 ShapeSize = 96.0f;
