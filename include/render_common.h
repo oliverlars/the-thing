@@ -88,6 +88,10 @@ typedef struct r_texture {
 	u64 Handle;
 } r_texture;
 
+typedef struct r_buffer {
+	u64 Handle;
+} r_buffer;
+
 typedef struct r_shader {
 	u64 Handle;
 } r_shader;
@@ -96,6 +100,12 @@ typedef struct r_texture_options {
 	r_texture_format Format;
 	v2i Size;
 } r_texture_options;
+
+
+typedef struct r_buffer_options {
+	s32 SizeInBytes;
+	u8 *Data;
+} r_buffer_options;
 
 typedef enum r_load_operation {
 	LO_LOAD,
@@ -155,7 +165,13 @@ void R_FrameEnd(render_context *R);
 r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options);
 #define R_Texture(Render, Name, ...) R_TextureEx(Render, Name, &(r_texture_options){ __VA_ARGS__ })
 
+r_buffer R_BufferEx(render_context *R, str8 Name, r_buffer_options *Options);
+#define R_Buffer(Render, Name, ...) R_BufferEx(Render, Name, &(r_buffer_options){ __VA_ARGS__ })
+
 r_shader R_Shader(render_context *R, str8 Name);
+
+void R_BindBuffer(render_context *R, r_buffer Buffer);
+void R_BindShader(render_context *R, r_shader Shader);
 
 void R_DrawTriangles(render_context *R, s32 Count);
 

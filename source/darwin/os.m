@@ -48,12 +48,25 @@ str8 OS_LoadEntireFileIntoMemory(m_arena *Arena, str8 Filename)
 	}
 
 	struct stat St;
-	fstat(Fd, &St);
+	if (fstat(Fd, &St) < 0 || !S_ISREG(St.st_mode))
+	{
+		// open() happily opens directories read-only, but read() on them fails.
+		LogError("Not a regular file: ?cstr", Path);
+		close(Fd);
+		ScratchEnd(Scratch);
+		return (str8){0};
+	}
 
 	u8 *Buffer = ArenaPush(Arena, St.st_size + 1);
-	read(Fd, Buffer, St.st_size);
-	Buffer[St.st_size] = 0;
+	ssize_t BytesRead = read(Fd, Buffer, St.st_size);
 	close(Fd);
+	if (BytesRead != St.st_size)
+	{
+		LogError("Could not read file: ?cstr", Path);
+		ScratchEnd(Scratch);
+		return (str8){0};
+	}
+	Buffer[St.st_size] = 0;
 	ScratchEnd(Scratch);
 
 	return (str8){ .Size = St.st_size, .Bytes = Buffer };

@@ -42,6 +42,14 @@ typedef struct metal_texture_entry
 }
 metal_texture_entry;
 
+typedef struct metal_buffer_entry
+{
+	id<MTLBuffer> Buffer;
+	r_buffer_options Options;
+	u64 Hash;
+}
+metal_buffer_entry;
+
 typedef struct metal_context
 {
 	id<MTLDevice>        Device;
@@ -68,6 +76,8 @@ typedef struct metal_context
 	int            TextureFreeList[4096];
 	int            TextureFreeListCount;
 
+	metal_buffer_entry Buffers[4096];
+
 	id<MTLHeap>    FrameArenas[FRAMES_IN_FLIGHT];
 
 	// Single one for now, these should eventually chain if it runs out
@@ -82,8 +92,11 @@ typedef struct metal_context
 
 	v2i Viewport;
 
-
+	r_buffer BoundBuffers[16];
+	int BoundBuffersCount;
 	id<MTLRenderCommandEncoder> ActiveRenderEncoder;
+
+	id<MTLCommandBuffer>        CommandBuffer;
 
 	dispatch_semaphore_t InFlightSemaphore;
 }
@@ -138,6 +151,8 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name)
 {
 	metal_context *Metal = R->Backend;
 	metal_shader Shader = {0};
+	Shader.Name = Str8Copy(R->Arena, Name);
+	Shader.TimeStamp = TimeStamp;
 	str8 Path = Str8PushF(TemporaryArena(), "shaders/?S", Name);
 	str8 Source = OS_LoadEntireFileIntoMemory(TemporaryArena(), Path);
 	Source = ResolveShaderIncludes(TemporaryArena(), Str8("shaders/"), Source);
@@ -148,13 +163,14 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name)
 	{
 		LogError("Shader compile failed: ?cstr",
 			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
-		return (metal_shader){0};
+		// Keep Name/TimeStamp so the cache doesn't retry (and re-log) every
+		// lookup — the next reload happens when the file is modified again.
+		return Shader;
 	}
 
 	Shader.VertexEntry   = [Shader.Library newFunctionWithName:@"VertexMain"];
 	Shader.FragmentEntry = [Shader.Library newFunctionWithName:@"FragmentMain"];
 	Shader.ComputeEntry  = [Shader.Library newFunctionWithName:@"ComputeMain"];
-	Shader.TimeStamp = TimeStamp;
 	return Shader;
 }
 
@@ -224,6 +240,52 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 	return (r_texture){Entry - Metal->Textures};
 }
 
+id<MTLBuffer> MakeMetalBuffer(render_context *R, str8 Name, r_buffer_options *Options)
+{
+	metal_context *Metal = R->Backend;
+	id<MTLBuffer> Buffer;
+	if(Options->Data)
+	{
+		Buffer = [Metal->Device newBufferWithBytes:Options->Data length:Options->SizeInBytes options:MTLResourceStorageModePrivate];
+	}
+	else
+	{
+		Buffer = [Metal->Device newBufferWithLength:Options->SizeInBytes options:MTLResourceStorageModePrivate];
+	}
+
+	Buffer.label = [
+		[NSString alloc] initWithBytes:Name.Bytes
+		length:Name.Size encoding:NSUTF8StringEncoding
+	];
+	return Buffer;
+}
+
+r_buffer R_BufferEx(render_context *R, str8 Name, r_buffer_options *Options)
+{
+	metal_context *Metal = R->Backend;
+	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
+	metal_buffer_entry *Entry = Metal->Buffers + (Hash % 4096);
+	if(Entry->Hash == Hash)
+	{
+		return (r_buffer){Entry - Metal->Buffers};
+	}
+	else if(Entry->Buffer)
+	{
+		for(int I = 1; I < 4095; I++)
+		{
+			if(Entry[I].Hash == Hash)
+			{
+				return (r_buffer){Entry - Metal->Buffers};
+			}
+		}
+	}
+	else
+	{
+		Entry->Buffer = MakeMetalBuffer(R, Name, Options);
+	}
+	return (r_buffer){Entry - Metal->Buffers};
+}
+
 metal_shader *MetalShaderFromName(render_context *R, str8 Name)
 {
 	metal_context *Metal = R->Backend;
@@ -234,7 +296,11 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name)
 	{
 		if(TimeStamp > Shader->TimeStamp)
 		{
-			Shader[0] = LoadMetalShader(R, TimeStamp, Name);
+			// Keep the last working shader if the reload failed to compile;
+			// bump the timestamp so we only retry once the file changes again.
+			metal_shader New = LoadMetalShader(R, TimeStamp, Name);
+			if(New.Library) Shader[0] = New;
+			else Shader->TimeStamp = TimeStamp;
 		}
 	}
 	else if(!Shader->Name.Size)
@@ -249,19 +315,42 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name)
 			if(Str8Equal(Shader[I].Name, Name))
 			{
 				Shader = Shader + I;
-				Shader[0] = LoadMetalShader(R, TimeStamp, Name);
+				if(TimeStamp > Shader->TimeStamp)
+				{
+					metal_shader New = LoadMetalShader(R, TimeStamp, Name);
+					if(New.Library) Shader[0] = New;
+					else Shader->TimeStamp = TimeStamp;
+				}
+				break;
 			}
 		}
 	}
 	return Shader;
 }
 
+void R_BindBuffer(render_context *R, r_buffer Buffer)
+{
+	metal_context *Metal = R->Backend;
+	Metal->BoundBuffers[Metal->BoundBuffersCount++] = Buffer;
+}
+
+void R_BindShader(render_context *R, r_shader Shader)
+{
+	R->Shader = Shader;
+}
+
 void R_DrawTriangles(render_context *R, s32 Count)
 {
 	metal_context *Metal = R->Backend;
+	metal_shader *Shader = Metal->Shaders + R->Shader.Handle;
+	if (!Shader->VertexEntry)
+	{
+		// Shader never compiled successfully — nothing valid to draw with.
+		return;
+	}
 	MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
-	PD.vertexFunction = Metal->Shaders[R->Shader.Handle].VertexEntry;
-	PD.fragmentFunction = Metal->Shaders[R->Shader.Handle].FragmentEntry;
+	PD.vertexFunction = Shader->VertexEntry;
+	PD.fragmentFunction = Shader->FragmentEntry;
 	PD.colorAttachments[0].pixelFormat = Metal->Textures[R->PassOptions.Colours[0].Handle].Texture.pixelFormat;
 	PD.colorAttachments[0].blendingEnabled = YES;
 	PD.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
@@ -276,8 +365,14 @@ void R_DrawTriangles(render_context *R, s32 Count)
 	{
 		LogError("Pipeline state failed: ?cstr",
 			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
+		return;
 	}
-
+	for(int I = 0; I < Metal->BoundBuffersCount; I++)
+	{
+		id<MTLBuffer> Buffer = Metal->Buffers[Metal->BoundBuffers[I].Handle].Buffer;
+		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer offset:0 atIndex:I];
+	}
+	Metal->BoundBuffersCount = 0;
 	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
 	[Metal->ActiveRenderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:Count];
 }
@@ -300,34 +395,63 @@ MTLLoadAction MetalLoadAction(r_load_operation Op)
 	}
 }
 
+MTLClearColor MetalClearColour(v4f Colour)
+{
+	MTLClearColor Result;
+	Result.red = Colour.X;
+	Result.green = Colour.Y;
+	Result.blue = Colour.Z;
+	Result.alpha = Colour.W;
+
+	return Result;
+}
+
 void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options)
 {
 	metal_context *Metal = R->Backend;
+	// Draws inside the pass build their pipeline state (attachment pixel
+	// formats) from this.
+	R->PassOptions = *Options;
 	MTLRenderPassDescriptor *PassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+	// Default storeAction is DontCare, which lets the GPU discard the pass's
+	// tile memory instead of writing it back to the texture — store explicitly.
 	PassDescriptor.colorAttachments[0].texture = Metal->Textures[Options->Colours[0].Handle].Texture;
 	PassDescriptor.colorAttachments[0].loadAction = MetalLoadAction(Options->ColourOps[0]);
+	PassDescriptor.colorAttachments[0].clearColor = MetalClearColour(Options->ClearColour[0]);
+	PassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
 	PassDescriptor.colorAttachments[1].texture = Metal->Textures[Options->Colours[1].Handle].Texture;
 	PassDescriptor.colorAttachments[1].loadAction = MetalLoadAction(Options->ColourOps[1]);
+	PassDescriptor.colorAttachments[1].clearColor = MetalClearColour(Options->ClearColour[1]);
+	PassDescriptor.colorAttachments[1].storeAction = MTLStoreActionStore;
 	PassDescriptor.colorAttachments[2].texture = Metal->Textures[Options->Colours[2].Handle].Texture;
 	PassDescriptor.colorAttachments[2].loadAction = MetalLoadAction(Options->ColourOps[2]);
+	PassDescriptor.colorAttachments[2].clearColor = MetalClearColour(Options->ClearColour[2]);
+	PassDescriptor.colorAttachments[2].storeAction = MTLStoreActionStore;
 	PassDescriptor.colorAttachments[3].texture = Metal->Textures[Options->Colours[3].Handle].Texture;
 	PassDescriptor.colorAttachments[3].loadAction = MetalLoadAction(Options->ColourOps[3]);
-	PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle].Texture;
-	PassDescriptor.depthAttachment.loadAction = MetalLoadAction(Options->DepthOp);
+	PassDescriptor.colorAttachments[3].clearColor = MetalClearColour(Options->ClearColour[3]);
+	PassDescriptor.colorAttachments[3].storeAction = MTLStoreActionStore;
+	if(Options->Depth.Handle)
+	{
+		PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle].Texture;
+		PassDescriptor.depthAttachment.loadAction = MetalLoadAction(Options->DepthOp);
+	}
 
-	id<MTLCommandBuffer> CommandBuffer = [Metal->CommandQueue commandBuffer];
-	Metal->ActiveRenderEncoder = [CommandBuffer renderCommandEncoderWithDescriptor:PassDescriptor];
+	Metal->ActiveRenderEncoder = [Metal->CommandBuffer renderCommandEncoderWithDescriptor:PassDescriptor];
 	Metal->ActiveRenderEncoder.label = [
 		[NSString alloc] initWithBytes:Name.Bytes
 		length:Name.Size encoding:NSUTF8StringEncoding
 	];
 	[Metal->ActiveRenderEncoder setCullMode:MTLCullModeNone];
+
 }
 
 void R_PassEnd(render_context *R, str8 Name)
 {
 	metal_context *Metal = R->Backend;
 	[Metal->ActiveRenderEncoder endEncoding];
+	Metal->ActiveRenderEncoder = nil;
+	R->PassOptions = (r_pass_options){0};
 }
 
 static int MTLAlignmentFromAttribute(r_vertex_attributes Attribute)
@@ -561,6 +685,8 @@ void R_BeginFrame(render_context *R, v2i ViewportSize)
 	metal_context *M = R->Backend;
 	M->Viewport = ViewportSize;
 
+	M->CommandBuffer = [M->CommandQueue commandBuffer];
+
 	if (!M->DepthTexture ||
 	    [M->DepthTexture width]  != (NSUInteger)ViewportSize.X ||
 	    [M->DepthTexture height] != (NSUInteger)ViewportSize.Y)
@@ -626,7 +752,6 @@ void R_Update(render_context *R, void *DrawableHandle)
 	dispatch_semaphore_wait(M->InFlightSemaphore, DISPATCH_TIME_FOREVER);
 
 	int ResourceIndex = R->Frame % FRAMES_IN_FLIGHT;
-	id<MTLCommandBuffer> CommandBuffer = [M->CommandQueue commandBuffer];
 
 	if (M->TotalCurvesSoFar > 0)
 	{
@@ -702,7 +827,7 @@ void R_Update(render_context *R, void *DrawableHandle)
 	Pass.depthAttachment.storeAction = MTLStoreActionDontCare;
 	Pass.depthAttachment.clearDepth  = 1.0;
 
-	id<MTLRenderCommandEncoder> E = [CommandBuffer renderCommandEncoderWithDescriptor:Pass];
+	id<MTLRenderCommandEncoder> E = [M->CommandBuffer renderCommandEncoderWithDescriptor:Pass];
 	[E setCullMode:MTLCullModeNone];
 
 	for (int I = 0; I < DrawCount; I++)
@@ -741,13 +866,13 @@ void R_Update(render_context *R, void *DrawableHandle)
 
 	[E endEncoding];
 
-	[CommandBuffer presentDrawable:Drawable];
+	[M->CommandBuffer presentDrawable:Drawable];
 
 	__block dispatch_semaphore_t BlockSem = M->InFlightSemaphore;
-	[CommandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _) {
+	[M->CommandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _) {
 		dispatch_semaphore_signal(BlockSem);
 	}];
-	[CommandBuffer commit];
+	[M->CommandBuffer commit];
 
 	ScratchEnd(Scratch);
 
