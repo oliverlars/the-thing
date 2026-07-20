@@ -13,6 +13,7 @@
 #include "log.h"
 #include "os.h"
 #include "render_common.h"
+#include "strings.h"
 
 // <complex.h> (via simd headers) defines I as _Complex_I — collides with any
 // loop variable named I. Drop it.
@@ -78,7 +79,7 @@ typedef struct metal_context
 
 	metal_buffer_entry Buffers[4096];
 
-	id<MTLHeap>    FrameArenas[FRAMES_IN_FLIGHT];
+	id<MTLBuffer>  FrameArenas[FRAMES_IN_FLIGHT];
 
 	// Single one for now, these should eventually chain if it runs out
 	id<MTLHeap>    PermanentArena;
@@ -339,18 +340,29 @@ void R_BindShader(render_context *R, r_shader Shader)
 	R->Shader = Shader;
 }
 
-void R_DrawTriangles(render_context *R, s32 Count)
+void R_UniformF32(render_context *R, str8 Name, f32 Value)
+{
+	Str8ListAppend(TemporaryArena(), &R->UniformDeclarations, Str8PushF(TemporaryArena(), "float ?S", Name));
+	metal_context *Metal = R->Backend;
+
+	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float1));
+	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float1));
+	MemoryCopy(
+		Metal->FrameArenas[R->Frame % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		&Value,
+		sizeof(f32)
+	);
+	R->UniformBytesCursor += sizeof(simd_float1);
+}
+
+void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 {
 	metal_context *Metal = R->Backend;
-	metal_shader *Shader = Metal->Shaders + R->Shader.Handle;
-	if (!Shader->VertexEntry)
-	{
-		// Shader never compiled successfully — nothing valid to draw with.
-		return;
-	}
+	r_shader Shader = R_Shader(R, ShaderName);
+	metal_shader *MetalShader = Metal->Shaders + Shader.Handle;
 	MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
-	PD.vertexFunction = Shader->VertexEntry;
-	PD.fragmentFunction = Shader->FragmentEntry;
+	PD.vertexFunction = MetalShader->VertexEntry;
+	PD.fragmentFunction = MetalShader->FragmentEntry;
 	PD.colorAttachments[0].pixelFormat = Metal->Textures[R->PassOptions.Colours[0].Handle].Texture.pixelFormat;
 	PD.colorAttachments[0].blendingEnabled = YES;
 	PD.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
@@ -375,6 +387,9 @@ void R_DrawTriangles(render_context *R, s32 Count)
 	Metal->BoundBuffersCount = 0;
 	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
 	[Metal->ActiveRenderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:Count];
+	R->UniformDeclarations.First = 0;
+	R->UniformDeclarations.Last = 0;
+	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, R->LargestUniformAlignment);
 }
 
 r_shader R_Shader(render_context *R, str8 Name)

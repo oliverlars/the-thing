@@ -141,6 +141,13 @@ typedef struct render_context
 	r_pass_options PassOptions;
 	r_shader Shader;
 
+	// We generate a list of uniform declarations here, .e.g 'float Time'
+	// which is reset after each dispatch/draw
+	str8_list UniformDeclarations;
+
+	s32 UniformStartOffset;
+	s32 UniformBytesCursor;
+	s32 LargestUniformAlignment;
 
 	// Global point light. Position is in the same coordinate space as shape
 	// positions (world / pixel space for the default ortho setup). Radius is
@@ -173,7 +180,7 @@ r_shader R_Shader(render_context *R, str8 Name);
 void R_BindBuffer(render_context *R, r_buffer Buffer);
 void R_BindShader(render_context *R, r_shader Shader);
 
-void R_DrawTriangles(render_context *R, s32 Count);
+void R_DrawTriangles(render_context *R, str8 Shader, s32 Count);
 
 
 // NEW API END

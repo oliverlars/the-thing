@@ -13,13 +13,13 @@ vertex vertex_output VertexMain(constant float4 *Positions [[buffer(0)]],
 {
 	float4 Colours[3] =
 	{
-		float4(1, 0, 0, 1),
 		float4(0, 1, 0, 1),
-		float4(0, 0, 1, 1),
+		float4(0, 1, 0, 1),
+		float4(0, 1, 0, 1),
 	};
 	vertex_output Output;
 	Output.Position = Positions[VertexID];
-	Output.Colour = Colours[VertexID];
+	Output.Colour = Colours[(VertexID + 1) % 3];
 	return Output;
 }
 

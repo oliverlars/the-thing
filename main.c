@@ -162,7 +162,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 	// D_Point(&App->Draw, v2f(BX0, BY), 20.0f, .Colour = v4f(1, 0.9f, 0.2f, 1));
 	// D_Point(&App->Draw, v2f(BX1, BY), 20.0f, .Colour = v4f(0.2f, 0.9f, 1.0f, 1));
 
-	r_shader TestShader = R_Shader(&App->Render, Str8("triangle2.metal"));
+
+
 	r_texture TestTexture = R_Texture(&App->Render, Str8("Test Texture"), .Size = v2i(100, 100), .Format = TF_RGBA16);
 
 	v4f Positions[3] = {
@@ -175,9 +176,23 @@ static void Frame(void *UserData, v2i ViewportSize)
 	R_Pass(&App->Render, Str8("Pass test"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(1, 0, 0, 0))
 	{
 		R_BindBuffer(&App->Render, Vertices);
-		R_BindShader(&App->Render, TestShader);
-		R_DrawTriangles(&App->Render, 3);
+		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 3);
 	}
+
+	v4f Positions2[3] = {
+		v4f(-0.2, .8, 0.5, 1),
+		v4f(0.1, -0.4, 0.5, 1),
+		v4f(1, 1, 0.5, 1),
+	};
+	r_buffer Vertices2 = R_Buffer(&App->Render, Str8("Some Other Vertex Data"), .SizeInBytes = 4 * sizeof(f32) * 3, .Data = Positions2);
+
+	R_Pass(&App->Render, Str8("Another Pass"), .Colours[0] = TestTexture, .ColourOps[0] = LO_LOAD)
+	{
+		R_BindBuffer(&App->Render, Vertices2);
+		R_UniformMat4x4(&App->Render, "PVMMatrix");
+		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 3);
+	}
+
 
 	f32 ShapeY = H * 0.12f;
 	f32 ShapeSize = 96.0f;

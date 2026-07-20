@@ -14,18 +14,13 @@ struct vertex_input
 	float4 Colour;
 };
 
-struct uniforms
-{
-float4x4 PVMMatrix;
-};
-
 vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
 								constant uniforms &Uniforms [[buffer(1)]],
 								uint VertexID [[vertex_id]])
 {
 	vertex_output Output;
 	Output.Position = Uniforms.PVMMatrix * Vertices[VertexID].Position;
-	Output.Colour = Vertices[VertexID].Colour;
+	Output.Colour = float4(0, 1, 0, 1);
 	return Output;
 }
 
