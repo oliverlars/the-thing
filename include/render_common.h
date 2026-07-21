@@ -57,7 +57,7 @@ typedef enum r_command_type
 typedef enum r_texture_format {
 	TF_RGBA16,
 	TF_RGBA32,
-	RF_DEPTH32,
+	TF_DEPTH32,
 } r_texture_format;
 
 typedef u64 r_handle;
@@ -178,10 +178,12 @@ r_buffer R_BufferEx(render_context *R, str8 Name, r_buffer_options *Options);
 r_shader R_Shader(render_context *R, str8 Name);
 
 void R_BindBuffer(render_context *R, r_buffer Buffer);
+void R_BindTexture(render_context *R, r_texture Texture);
 void R_BindShader(render_context *R, r_shader Shader);
 
 void R_UniformF32(render_context *R, str8 Name, f32 Value);
 void R_UniformM44F(render_context *R, str8 Name, m44f Value);
+void R_UniformV2F(render_context *R, str8 Name, v2f Value);
 
 void R_DrawTriangles(render_context *R, str8 Shader, s32 Count);
 

@@ -93,6 +93,9 @@ typedef struct metal_context
 
 	v2i Viewport;
 
+	r_texture BoundTextures[16];
+	int BoundTexturesCount;
+
 	r_buffer BoundBuffers[16];
 	int BoundBuffersCount;
 	id<MTLRenderCommandEncoder> ActiveRenderEncoder;
@@ -189,14 +192,15 @@ id<MTLTexture> MakeMetalTexture(render_context *R, str8 Name, v2i Size, r_textur
 	{
 		case TF_RGBA16: MetalFormat = MTLPixelFormatRGBA16Float; break;
 		case TF_RGBA32: MetalFormat = MTLPixelFormatRGBA32Float; break;
+		case TF_DEPTH32: MetalFormat = MTLPixelFormatDepth32Float; break;
 	}
 	MTLTextureDescriptor *Desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MetalFormat
 		width:Size.X
 		height:Size.Y
 		mipmapped:NO
 	];
-	Desc.usage = MTLTextureUsageRenderTarget;
-	Desc.storageMode = MTLStorageModePrivate;
+	Desc.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
+	Desc.storageMode = MTLStorageModeShared;
 	id<MTLTexture> Texture = [Metal->Device newTextureWithDescriptor:Desc];
 	Texture.label = [
 		[NSString alloc] initWithBytes:Name.Bytes
@@ -252,7 +256,7 @@ id<MTLBuffer> MakeMetalBuffer(render_context *R, str8 Name, r_buffer_options *Op
 	id<MTLBuffer> Buffer;
 	if(Options->Data)
 	{
-		Buffer = [Metal->Device newBufferWithBytes:Options->Data length:Options->SizeInBytes options:MTLResourceStorageModePrivate];
+		Buffer = [Metal->Device newBufferWithBytes:Options->Data length:Options->SizeInBytes options:MTLResourceStorageModeShared];
 	}
 	else
 	{
@@ -340,6 +344,12 @@ void R_BindBuffer(render_context *R, r_buffer Buffer)
 	Metal->BoundBuffers[Metal->BoundBuffersCount++] = Buffer;
 }
 
+void R_BindTexture(render_context *R, r_texture Texture)
+{
+	metal_context *Metal = R->Backend;
+	Metal->BoundTextures[Metal->BoundTexturesCount++] = Texture;
+}
+
 void R_BindShader(render_context *R, r_shader Shader)
 {
 	R->Shader = Shader;
@@ -375,6 +385,21 @@ void R_UniformM44F(render_context *R, str8 Name, m44f Value)
 	R->UniformBytesCursor += sizeof(simd_float4x4);
 }
 
+void R_UniformV2F(render_context *R, str8 Name, v2f Value)
+{
+	Str8ListAppend(TemporaryArena(), &R->UniformDeclarations, Str8PushF(TemporaryArena(), "metal::float2 ?S", Name));
+	metal_context *Metal = R->Backend;
+
+	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float2));
+	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float2));
+	MemoryCopy(
+		Metal->FrameArenas[(R->Frame + 1) % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		&Value,
+		sizeof(simd_float2)
+	);
+	R->UniformBytesCursor += sizeof(simd_float2);
+}
+
 void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 {
 	metal_context *Metal = R->Backend;
@@ -405,7 +430,13 @@ void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 		id<MTLBuffer> Buffer = Metal->Buffers[Metal->BoundBuffers[I].Handle].Buffer;
 		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer offset:0 atIndex:1 + I];
 	}
+	for(int I = 0; I < Metal->BoundTexturesCount; I++)
+	{
+		id<MTLTexture> Texture = Metal->Textures[Metal->BoundTextures[I].Handle].Texture;
+		[Metal->ActiveRenderEncoder setFragmentTexture:Texture atIndex:I];
+	}
 	Metal->BoundBuffersCount = 0;
+	Metal->BoundTexturesCount = 0;
 	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
 	[Metal->ActiveRenderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:Count];
 	R->UniformDeclarations.First = 0;

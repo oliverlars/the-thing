@@ -111,6 +111,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 
 	r_texture TestTexture = R_Texture(&App->Render, Str8("Test Texture"), .Size = v2i(100, 100), .Format = TF_RGBA16);
+	r_texture TestDepth   = R_Texture(&App->Render, Str8("Test Depth"), .Size = v2i(100, 100), .Format = TF_DEPTH32);
 
 	// R_Pass(&App->Render, Str8("Pass test"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(1, 0, 0, 0))
 	// {
@@ -163,7 +164,11 @@ static void Frame(void *UserData, v2i ViewportSize)
 	m44f PVM   = MulM44FM44F(MulM44FM44F(Model, View), Proj);
 
 
-	R_Pass(&App->Render, Str8("Cube Pass"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 1))
+
+	R_Pass(&App->Render, Str8("Cube Pass"), 
+		.Depth = TestDepth, .DepthOp = LO_CLEAR, .ClearDepth = 0.0,
+		.Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 1)
+	)
 	{
 		R_BindBuffer(&App->Render, CubeVertexPositionsBuffer);
 		R_BindBuffer(&App->Render, CubeVertexColoursBuffer);
@@ -171,6 +176,15 @@ static void Frame(void *UserData, v2i ViewportSize)
 		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 36);
 	}
 
+	r_texture BlitTexture = R_Texture(&App->Render, Str8("Blit Texture"), .Size = v2i(200, 200), .Format = TF_RGBA16);
+	R_Pass(&App->Render, Str8("Blit"), .Colours[0] = BlitTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 1))
+	{
+		R_UniformM44F(&App->Render, Str8("PVMMatrix"), Ortho);
+		R_UniformV2F(&App->Render, Str8("Position"), v2f(100, 100));
+		R_UniformV2F(&App->Render, Str8("Size"), v2f(100, 100));
+		R_BindTexture(&App->Render, BlitTexture);
+		R_DrawTriangles(&App->Render, Str8("textured_quad.metal"), 6);
+	}
 
 	f32 ShapeY = H * 0.12f;
 	f32 ShapeSize = 96.0f;
