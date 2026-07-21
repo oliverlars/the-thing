@@ -11,17 +11,12 @@ struct vertex_output
 vertex vertex_output VertexMain(
 	constant uniforms &Uniforms [[buffer(0)]],
 	constant float4 *Positions [[buffer(1)]],
+	constant float4 *Colours [[buffer(2)]],
 	uint VertexID [[vertex_id]])
 {
-	float4 Colours[3] =
-	{
-		float4(0, Uniforms.SomeUniform, 1, 1),
-		float4(0, Uniforms.SomeUniform, 1, 1),
-		float4(0, Uniforms.SomeUniform, 1, 1),
-	};
 	vertex_output Output;
-	Output.Position = Positions[VertexID];
-	Output.Colour = Colours[(VertexID + 1) % 3];
+	Output.Position = Uniforms.PVMMatrix * Positions[VertexID];
+	Output.Colour = Colours[VertexID];
 	return Output;
 }
 

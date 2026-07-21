@@ -45,60 +45,6 @@ static m44f PerspectiveMetal(f32 Aspect, f32 FOVDegrees, f32 Near, f32 Far)
 	return R;
 }
 
-void ViewportRender(render_context *Render, v2f ViewportSize)
-{
-	render_context *R = Render;
-
-	v3f Corners[8] = {
-		v3f(-0.5f, -0.5f, -0.5f), v3f( 0.5f, -0.5f, -0.5f),
-		v3f( 0.5f,  0.5f, -0.5f), v3f(-0.5f,  0.5f, -0.5f),
-		v3f(-0.5f, -0.5f,  0.5f), v3f( 0.5f, -0.5f,  0.5f),
-		v3f( 0.5f,  0.5f,  0.5f), v3f(-0.5f,  0.5f,  0.5f),
-	};
-
-	struct { int I[4]; v4f Colour; } Faces[6] = {
-		{ { 4, 5, 6, 7 }, v4f(0.95f, 0.30f, 0.30f, 1) }, // +Z front
-		{ { 1, 0, 3, 2 }, v4f(0.30f, 0.85f, 0.45f, 1) }, // -Z back
-		{ { 0, 4, 7, 3 }, v4f(0.30f, 0.55f, 0.95f, 1) }, // -X left
-		{ { 5, 1, 2, 6 }, v4f(0.95f, 0.80f, 0.25f, 1) }, // +X right
-		{ { 3, 7, 6, 2 }, v4f(0.85f, 0.40f, 0.90f, 1) }, // +Y top
-		{ { 0, 1, 5, 4 }, v4f(0.25f, 0.85f, 0.90f, 1) }, // -Y bottom
-	};
-
-	r_vertex *Vertices = ArenaPushArrayZero(TemporaryArena(), r_vertex, 36);
-	int Count = 0;
-	for (int FaceIndex = 0; FaceIndex < 6; FaceIndex++)
-	{
-		int *I = Faces[FaceIndex].I;
-		v4f Colour = LinearFromSRGB(Faces[FaceIndex].Colour);
-		int Tris[6] = { I[0], I[1], I[2], I[0], I[2], I[3] };
-		for (int J = 0; J < 6; J++)
-		{
-			v3f P = Corners[Tris[J]];
-			Vertices[Count].Position = v4f(P.X, P.Y, P.Z, 1.0f);
-			Vertices[Count].Colour   = Colour;
-			Count++;
-		}
-	}
-
-	m44f Model = MulM44FM44F(M44FromYAngle((f32)Render->Frame / 100.0 * 0.9f),
-	                         M44FromXAngle((f32)Render->Frame / 100.0 * 0.6f));
-	m44f View  = M44FLookAt(v3f(0, 0, 3), v3f(0, 0, 0), v3f(0, 1, 0));
-	f32 Aspect = ViewportSize.X / ViewportSize.Y;
-	m44f Proj  = PerspectiveMetal(Aspect, 50.0f, 0.1f, 100.0f);
-	m44f PVM   = MulM44FM44F(MulM44FM44F(Model, View), Proj);
-
-	r_command Command = {0};
-	Command.Type          = R_COMMAND_TRIANGLE;
-	Command.Vertices      = Vertices;
-	Command.VerticesCount = Count;
-	Command.Attributes    = R_AttributesFromCommandType(R_COMMAND_TRIANGLE);
-
-	R_PushTransform(R, PVM);
-	R_PushCommand(R, Command);
-	R_PopTransform(R);
-}
-
 static void Frame(void *UserData, v2i ViewportSize)
 {
 	app_state *App = (app_state*)UserData;
@@ -166,32 +112,63 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 	r_texture TestTexture = R_Texture(&App->Render, Str8("Test Texture"), .Size = v2i(100, 100), .Format = TF_RGBA16);
 
-	v4f Positions[3] = {
-		v4f(-1, -1, 0.5, 1),
-		v4f(1, -1, 0.5, 1),
-		v4f(1, 1, 0.5, 1),
-	};
-	r_buffer Vertices = R_Buffer(&App->Render, Str8("Some Vertex Data"), .SizeInBytes = 4 * sizeof(f32) * 3, .Data = Positions);
+	// R_Pass(&App->Render, Str8("Pass test"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(1, 0, 0, 0))
+	// {
+	// 	R_BindBuffer(&App->Render, Vertices);
+	// 	R_UniformF32(&App->Render, Str8("SomeUniform"), 0.0);
+	// 	R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 3);
+	// }
 
-	R_Pass(&App->Render, Str8("Pass test"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(1, 0, 0, 0))
+	v3f Corners[8] = {
+		v3f(-0.5f, -0.5f, -0.5f), v3f( 0.5f, -0.5f, -0.5f),
+		v3f( 0.5f,  0.5f, -0.5f), v3f(-0.5f,  0.5f, -0.5f),
+		v3f(-0.5f, -0.5f,  0.5f), v3f( 0.5f, -0.5f,  0.5f),
+		v3f( 0.5f,  0.5f,  0.5f), v3f(-0.5f,  0.5f,  0.5f),
+	};
+
+	struct { int I[4]; v4f Colour; } Faces[6] = {
+		{ { 4, 5, 6, 7 }, v4f(0.95f, 0.30f, 0.30f, 1) }, // +Z front
+		{ { 1, 0, 3, 2 }, v4f(0.30f, 0.85f, 0.45f, 1) }, // -Z back
+		{ { 0, 4, 7, 3 }, v4f(0.30f, 0.55f, 0.95f, 1) }, // -X left
+		{ { 5, 1, 2, 6 }, v4f(0.95f, 0.80f, 0.25f, 1) }, // +X right
+		{ { 3, 7, 6, 2 }, v4f(0.85f, 0.40f, 0.90f, 1) }, // +Y top
+		{ { 0, 1, 5, 4 }, v4f(0.25f, 0.85f, 0.90f, 1) }, // -Y bottom
+	};
+
+	v4f *CubeVertexPositions = ArenaPushArrayZero(TemporaryArena(), v4f, 36);
+	v4f *CubeVertexColours = ArenaPushArrayZero(TemporaryArena(), v4f, 36);
+	int Count = 0;
+	for (int FaceIndex = 0; FaceIndex < 6; FaceIndex++)
 	{
-		R_BindBuffer(&App->Render, Vertices);
-		R_UniformF32(&App->Render, Str8("SomeUniform"), 0.0);
-		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 3);
+		int *I = Faces[FaceIndex].I;
+		v4f Colour = LinearFromSRGB(Faces[FaceIndex].Colour);
+		int Tris[6] = { I[0], I[1], I[2], I[0], I[2], I[3] };
+		for (int J = 0; J < 6; J++)
+		{
+			v3f P = Corners[Tris[J]];
+			CubeVertexPositions[Count] = v4f(P.X, P.Y, P.Z, 1.0f);
+			CubeVertexColours[Count]   = Colour;
+			Count++;
+		}
 	}
 
-	v4f Positions2[3] = {
-		v4f(-0.2, .8, 0.5, 1),
-		v4f(0.1, -0.4, 0.5, 1),
-		v4f(1, 1, 0.5, 1),
-	};
-	r_buffer Vertices2 = R_Buffer(&App->Render, Str8("Some Other Vertex Data"), .SizeInBytes = 4 * sizeof(f32) * 3, .Data = Positions2);
+	r_buffer CubeVertexPositionsBuffer = R_Buffer(&App->Render, Str8("Cube Positions"), .SizeInBytes = sizeof(v4f) * 36, .Data = CubeVertexPositions);
+	r_buffer CubeVertexColoursBuffer = R_Buffer(&App->Render, Str8("Cube Colours"), .SizeInBytes = sizeof(v4f) * 36, .Data = CubeVertexColours);
 
-	R_Pass(&App->Render, Str8("Another Pass"), .Colours[0] = TestTexture, .ColourOps[0] = LO_LOAD)
+	m44f Model = MulM44FM44F(M44FromYAngle((f32)App->Render.Frame / 100.0 * 0.9f),
+	                         M44FromXAngle((f32)App->Render.Frame / 100.0 * 0.6f));
+	m44f View  = M44FLookAt(v3f(0, 0, 3), v3f(0, 0, 0), v3f(0, 1, 0));
+	f32 Aspect = ViewportSize.X / ViewportSize.Y;
+	m44f Proj  = PerspectiveMetal(Aspect, 50.0f, 0.1f, 100.0f);
+	m44f PVM   = MulM44FM44F(MulM44FM44F(Model, View), Proj);
+
+
+	R_Pass(&App->Render, Str8("Cube Pass"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 1))
 	{
-		R_BindBuffer(&App->Render, Vertices2);
-		R_UniformF32(&App->Render, Str8("SomeUniform"), 1.0);
-		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 3);
+		R_BindBuffer(&App->Render, CubeVertexPositionsBuffer);
+		R_BindBuffer(&App->Render, CubeVertexColoursBuffer);
+		R_UniformM44F(&App->Render, Str8("PVMMatrix"), PVM);
+		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 36);
 	}
 
 
@@ -268,7 +245,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 		{
 			ui_widget *ViewportWidget = UI_GetWidget(&App->UI, Str8("3D Viewport"));
 			ViewportWidget->Size = v2f(50, 50);
-			ViewportRender(&App->Render, ViewportWidget->Size);
 		}
 
 		if(UI_Button(&App->UI, Str8("Some button")))

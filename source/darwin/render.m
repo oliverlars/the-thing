@@ -360,6 +360,21 @@ void R_UniformF32(render_context *R, str8 Name, f32 Value)
 	R->UniformBytesCursor += sizeof(simd_float1);
 }
 
+void R_UniformM44F(render_context *R, str8 Name, m44f Value)
+{
+	Str8ListAppend(TemporaryArena(), &R->UniformDeclarations, Str8PushF(TemporaryArena(), "metal::float4x4 ?S", Name));
+	metal_context *Metal = R->Backend;
+
+	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float4x4));
+	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float4x4));
+	MemoryCopy(
+		Metal->FrameArenas[(R->Frame + 1) % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		&Value,
+		sizeof(simd_float4x4)
+	);
+	R->UniformBytesCursor += sizeof(simd_float4x4);
+}
+
 void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 {
 	metal_context *Metal = R->Backend;
