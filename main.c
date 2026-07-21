@@ -176,6 +176,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	R_Pass(&App->Render, Str8("Pass test"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(1, 0, 0, 0))
 	{
 		R_BindBuffer(&App->Render, Vertices);
+		R_UniformF32(&App->Render, Str8("SomeUniform"), 0.0);
 		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 3);
 	}
 
@@ -189,7 +190,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	R_Pass(&App->Render, Str8("Another Pass"), .Colours[0] = TestTexture, .ColourOps[0] = LO_LOAD)
 	{
 		R_BindBuffer(&App->Render, Vertices2);
-		R_UniformMat4x4(&App->Render, "PVMMatrix");
+		R_UniformF32(&App->Render, Str8("SomeUniform"), 1.0);
 		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 3);
 	}
 

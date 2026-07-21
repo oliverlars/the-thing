@@ -148,14 +148,19 @@ static str8 LoadShaderFile(m_arena *Arena, str8 ShaderDir, char *Name)
 
 static str8 ResolveShaderIncludes(m_arena *Arena, str8 ShaderDir, str8 Source);
 
-metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name)
+metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name, str8 UniformStruct)
 {
 	metal_context *Metal = R->Backend;
 	metal_shader Shader = {0};
 	Shader.Name = Str8Copy(R->Arena, Name);
 	Shader.TimeStamp = TimeStamp;
 	str8 Path = Str8PushF(TemporaryArena(), "shaders/?S", Name);
-	str8 Source = OS_LoadEntireFileIntoMemory(TemporaryArena(), Path);
+	str8 SourceNoPrelude = OS_LoadEntireFileIntoMemory(TemporaryArena(), Path);
+	str8_list SourceAndPrelude = {0};
+	Str8ListAppend(TemporaryArena(), &SourceAndPrelude, UniformStruct);
+	Str8ListAppend(TemporaryArena(), &SourceAndPrelude, Str8("\n"));
+	Str8ListAppend(TemporaryArena(), &SourceAndPrelude, SourceNoPrelude);
+	str8 Source = Str8ListJoin(TemporaryArena(), &SourceAndPrelude);
 	Source = ResolveShaderIncludes(TemporaryArena(), Str8("shaders/"), Source);
 	NSError *Error = nil;
 	NSString *NSSource = [[NSString alloc] initWithBytes:Source.Bytes length:Source.Size encoding:NSUTF8StringEncoding];
@@ -287,7 +292,7 @@ r_buffer R_BufferEx(render_context *R, str8 Name, r_buffer_options *Options)
 	return (r_buffer){Entry - Metal->Buffers};
 }
 
-metal_shader *MetalShaderFromName(render_context *R, str8 Name)
+metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStruct)
 {
 	metal_context *Metal = R->Backend;
 	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
@@ -299,14 +304,14 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name)
 		{
 			// Keep the last working shader if the reload failed to compile;
 			// bump the timestamp so we only retry once the file changes again.
-			metal_shader New = LoadMetalShader(R, TimeStamp, Name);
+			metal_shader New = LoadMetalShader(R, TimeStamp, Name, UniformStruct);
 			if(New.Library) Shader[0] = New;
 			else Shader->TimeStamp = TimeStamp;
 		}
 	}
 	else if(!Shader->Name.Size)
 	{
-		Shader[0] = LoadMetalShader(R, TimeStamp, Name);
+		Shader[0] = LoadMetalShader(R, TimeStamp, Name, UniformStruct);
 	}
 	else
 	{
@@ -318,7 +323,7 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name)
 				Shader = Shader + I;
 				if(TimeStamp > Shader->TimeStamp)
 				{
-					metal_shader New = LoadMetalShader(R, TimeStamp, Name);
+					metal_shader New = LoadMetalShader(R, TimeStamp, Name, UniformStruct);
 					if(New.Library) Shader[0] = New;
 					else Shader->TimeStamp = TimeStamp;
 				}
@@ -348,7 +353,7 @@ void R_UniformF32(render_context *R, str8 Name, f32 Value)
 	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float1));
 	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float1));
 	MemoryCopy(
-		Metal->FrameArenas[R->Frame % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		Metal->FrameArenas[(R->Frame + 1) % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
 		&Value,
 		sizeof(f32)
 	);
@@ -379,25 +384,38 @@ void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
 		return;
 	}
+	[Metal->ActiveRenderEncoder setVertexBuffer:Metal->FrameArenas[R->Frame% FRAMES_IN_FLIGHT] offset:R->UniformStartOffset atIndex:0];
 	for(int I = 0; I < Metal->BoundBuffersCount; I++)
 	{
 		id<MTLBuffer> Buffer = Metal->Buffers[Metal->BoundBuffers[I].Handle].Buffer;
-		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer offset:0 atIndex:I];
+		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer offset:0 atIndex:1 + I];
 	}
 	Metal->BoundBuffersCount = 0;
 	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
 	[Metal->ActiveRenderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:Count];
 	R->UniformDeclarations.First = 0;
 	R->UniformDeclarations.Last = 0;
-	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, R->LargestUniformAlignment);
+	if(R->LargestUniformAlignment > 0)
+	{
+		R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, R->LargestUniformAlignment);
+	}
+	R->UniformStartOffset = R->UniformBytesCursor;
 }
 
 r_shader R_Shader(render_context *R, str8 Name)
 {
+	str8_list UniformStruct = {0};
+	Str8ListAppend(TemporaryArena(), &UniformStruct, Str8("struct uniforms\n{ \n"));
+	for(str8_list_node *Node = R->UniformDeclarations.First; Node; Node = Node->Next)
+	{
+		Str8ListAppend(TemporaryArena(), &UniformStruct, Node->String);
+		Str8ListAppend(TemporaryArena(), &UniformStruct, Str8(";"));
+	}
+	Str8ListAppend(TemporaryArena(), &UniformStruct, Str8("};\n"));
 	u64 LastModified = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
 	metal_context *Metal = R->Backend;
 
-	return (r_shader){ MetalShaderFromName(R, Name) - Metal->Shaders };
+	return (r_shader){ MetalShaderFromName(R, Name, Str8ListJoin(TemporaryArena(), &UniformStruct)) - Metal->Shaders };
 }
 
 MTLLoadAction MetalLoadAction(r_load_operation Op)
@@ -664,7 +682,10 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 		M->VertexBuffers[Index]  = [M->Device newBufferWithLength:MegaBytes(64) options:MTLResourceStorageModeShared];
 		M->UniformBuffers[Index] = [M->Device newBufferWithLength:MegaBytes(4)  options:MTLResourceStorageModeShared];
 		M->CurveBuffers[Index]   = [M->Device newBufferWithLength:MegaBytes(16) options:MTLResourceStorageModeShared];
+
+		M->FrameArenas[Index]    = [M->Device newBufferWithLength:MegaBytes(32) options:MTLResourceStorageModeShared];
 	}
+
 
 	MTLPixelFormat Color = MTLPixelFormatBGRA10_XR_sRGB;
 	MTLPixelFormat Depth = MTLPixelFormatDepth32Float;
@@ -699,6 +720,11 @@ void R_BeginFrame(render_context *R, v2i ViewportSize)
 {
 	metal_context *M = R->Backend;
 	M->Viewport = ViewportSize;
+
+	R->UniformBytesCursor = 0;
+	R->UniformStartOffset = 0;
+	R->UniformDeclarations = (str8_list){0};
+	R->LargestUniformAlignment = 0;
 
 	M->CommandBuffer = [M->CommandQueue commandBuffer];
 

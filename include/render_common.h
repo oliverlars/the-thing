@@ -180,6 +180,8 @@ r_shader R_Shader(render_context *R, str8 Name);
 void R_BindBuffer(render_context *R, r_buffer Buffer);
 void R_BindShader(render_context *R, r_shader Shader);
 
+void R_UniformF32(render_context *R, str8 Name, f32 Value);
+
 void R_DrawTriangles(render_context *R, str8 Shader, s32 Count);
 
 

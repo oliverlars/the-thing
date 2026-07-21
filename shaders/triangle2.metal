@@ -8,14 +8,16 @@ struct vertex_output
 	float4 Colour;
 };
 
-vertex vertex_output VertexMain(constant float4 *Positions [[buffer(0)]],
-								uint VertexID [[vertex_id]])
+vertex vertex_output VertexMain(
+	constant uniforms &Uniforms [[buffer(0)]],
+	constant float4 *Positions [[buffer(1)]],
+	uint VertexID [[vertex_id]])
 {
 	float4 Colours[3] =
 	{
-		float4(0, 1, 0, 1),
-		float4(0, 1, 0, 1),
-		float4(0, 1, 0, 1),
+		float4(0, Uniforms.SomeUniform, 1, 1),
+		float4(0, Uniforms.SomeUniform, 1, 1),
+		float4(0, Uniforms.SomeUniform, 1, 1),
 	};
 	vertex_output Output;
 	Output.Position = Positions[VertexID];
