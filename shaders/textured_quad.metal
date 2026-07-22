@@ -36,12 +36,11 @@ vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
 
 
 	vertex_output Output;
-	Output.Position = Uniforms.PVMMatrix * float4(Positions[VertexID], 0, 1);
+	Output.Position = Uniforms.PVMMatrix * float4(Positions[VertexID], -1.0, 1);
 	Output.UV = UVs[VertexID];
 
 	return Output;
 }
-
 
 fragment float4 FragmentMain(
 	vertex_output Input [[stage_in]],
@@ -50,5 +49,5 @@ fragment float4 FragmentMain(
 {
 	sampler Sampler(mag_filter::linear, min_filter::linear);
 
-	return Texture.sample(Sampler, Input.UV);
+	return float4(Texture.sample(Sampler, Input.UV).xyz, 1.0);
 }

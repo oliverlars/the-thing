@@ -58,6 +58,7 @@ typedef enum r_texture_format {
 	TF_RGBA16,
 	TF_RGBA32,
 	TF_DEPTH32,
+	TF_BGRA10_SRGB,
 } r_texture_format;
 
 typedef u64 r_handle;
@@ -168,6 +169,8 @@ void R_PassEnd(render_context *R, str8 Name);
 void R_FrameBegin(render_context *R);
 void R_FrameEnd(render_context *R);
 #define R_Frame(Command, Name) DeferLoop(R_FrameBegin(Command, Name), R_FrameEnd(Command))
+
+r_texture R_BackBuffer();
 
 r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options);
 #define R_Texture(Render, Name, ...) R_TextureEx(Render, Name, &(r_texture_options){ __VA_ARGS__ })

@@ -72,10 +72,11 @@ typedef struct metal_context
 	id<MTLBuffer>  UniformBuffers[FRAMES_IN_FLIGHT];
 	id<MTLBuffer>  CurveBuffers  [FRAMES_IN_FLIGHT];
 
-	metal_texture_entry Textures[4096];
-	int            TextureCount;
-	int            TextureFreeList[4096];
-	int            TextureFreeListCount;
+	// Backbuffer lives at 4097
+	metal_texture_entry Textures[4098];
+	int                 TextureCount;
+	int                 TextureFreeList[4096];
+	int                 TextureFreeListCount;
 
 	metal_buffer_entry Buffers[4096];
 
@@ -214,16 +215,25 @@ b32 TextureOptionsEqual(r_texture_options *A, r_texture_options *B)
 	return A->Format == B->Format && A->Size.X == B->Size.X && A->Size.Y && B->Size.Y;
 }
 
+r_texture R_BackBuffer()
+{
+	return (r_texture){ 4097 };
+}
+
 r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 {
 	metal_context *Metal = R->Backend;
 	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
-	metal_texture_entry *Entry = Metal->Textures + (Hash % 4096);
+	// Slot 0 is reserved as the nil "no texture" sentinel (an unset .Depth /
+	// .Colours[n] defaults to handle 0), and slot 4097 holds the backbuffer,
+	// so hashed textures live in [1, 4096].
+	metal_texture_entry *Entry = Metal->Textures + 1 + (Hash % 4096);
 	if(Entry->Hash == Hash)
 	{
 		if(!TextureOptionsEqual(&Entry->Options, Options))
 		{
 			Entry->Texture = nil;
+			Entry->Options = Options[0];
 			Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 		}
 		return (r_texture){Entry - Metal->Textures};
@@ -232,11 +242,12 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 	{
 		for(int I = 1; I < 4095; I++)
 		{
-			if(Entry[I].Hash == Hash)
+			if(Entry[I % 4096].Hash == Hash)
 			{
 				if(!TextureOptionsEqual(&Entry->Options, Options))
 				{
 					Entry->Texture = nil;
+					Entry->Options = Options[0];
 					Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 				}
 				return (r_texture){Entry - Metal->Textures};
@@ -245,9 +256,10 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 	}
 	else
 	{
+		Entry->Options = Options[0];
 		Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 	}
-	return (r_texture){Entry - Metal->Textures};
+	return (r_texture){Entry - Metal->Textures };
 }
 
 id<MTLBuffer> MakeMetalBuffer(render_context *R, str8 Name, r_buffer_options *Options)
@@ -363,7 +375,7 @@ void R_UniformF32(render_context *R, str8 Name, f32 Value)
 	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float1));
 	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float1));
 	MemoryCopy(
-		Metal->FrameArenas[(R->Frame + 1) % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		Metal->FrameArenas[R->Frame % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
 		&Value,
 		sizeof(f32)
 	);
@@ -378,7 +390,7 @@ void R_UniformM44F(render_context *R, str8 Name, m44f Value)
 	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float4x4));
 	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float4x4));
 	MemoryCopy(
-		Metal->FrameArenas[(R->Frame + 1) % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		Metal->FrameArenas[R->Frame % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
 		&Value,
 		sizeof(simd_float4x4)
 	);
@@ -393,7 +405,7 @@ void R_UniformV2F(render_context *R, str8 Name, v2f Value)
 	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float2));
 	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float2));
 	MemoryCopy(
-		Metal->FrameArenas[(R->Frame + 1) % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		Metal->FrameArenas[R->Frame % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
 		&Value,
 		sizeof(simd_float2)
 	);
@@ -414,7 +426,10 @@ void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 	PD.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
 	PD.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
 	PD.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-	PD.depthAttachmentPixelFormat = Metal->Textures[R->PassOptions.Depth.Handle].Texture.pixelFormat;
+	if(Metal->Textures[R->PassOptions.Depth.Handle].Texture)
+	{
+		PD.depthAttachmentPixelFormat = Metal->Textures[R->PassOptions.Depth.Handle].Texture.pixelFormat;
+	}
 
 	NSError *Error = nil;
 	id<MTLRenderPipelineState> Pipeline = [Metal->Device newRenderPipelineStateWithDescriptor:PD error:&Error];
@@ -510,7 +525,7 @@ void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options)
 	PassDescriptor.colorAttachments[3].loadAction = MetalLoadAction(Options->ColourOps[3]);
 	PassDescriptor.colorAttachments[3].clearColor = MetalClearColour(Options->ClearColour[3]);
 	PassDescriptor.colorAttachments[3].storeAction = MTLStoreActionStore;
-	if(Options->Depth.Handle)
+	if(Metal->Textures[Options->Depth.Handle].Texture)
 	{
 		PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle].Texture;
 		PassDescriptor.depthAttachment.loadAction = MetalLoadAction(Options->DepthOp);
@@ -712,7 +727,7 @@ static metal_shader MakeShader(metal_context *M, str8 Source, r_command_type Typ
 	return Shader;
 }
 
-void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
+void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options, void *DrawableHandle)
 {
 	metal_context *M = ArenaPushArrayZero(Arena, metal_context, 1);
 	R->Backend = M;
@@ -758,6 +773,13 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 		D.depthWriteEnabled = NO;
 		M->DepthOff = [M->Device newDepthStencilStateWithDescriptor:D];
 	}
+
+	id<CAMetalDrawable> Drawable = (__bridge id<CAMetalDrawable>)DrawableHandle;
+	
+	r_texture_options DrawableOptions;
+	DrawableOptions.Format = TF_BGRA10_SRGB;
+	DrawableOptions.Size = v2i(Drawable.texture.width, Drawable.texture.height);
+	M->Textures[4097] = (metal_texture_entry){ Drawable.texture, DrawableOptions, 0 };
 
 	M->InFlightSemaphore = dispatch_semaphore_create(FRAMES_IN_FLIGHT);
 }
@@ -835,6 +857,10 @@ void R_Update(render_context *R, void *DrawableHandle)
 	metal_context *M = R->Backend;
 	id<CAMetalDrawable> Drawable = (__bridge id<CAMetalDrawable>)DrawableHandle;
 	if (!Drawable) return;
+	r_texture_options DrawableOptions;
+	DrawableOptions.Format = TF_BGRA10_SRGB;
+	DrawableOptions.Size = v2i(Drawable.texture.width, Drawable.texture.height);
+	M->Textures[4097] = (metal_texture_entry){ Drawable.texture, DrawableOptions, 0 };
 
 	dispatch_semaphore_wait(M->InFlightSemaphore, DISPATCH_TIME_FOREVER);
 
