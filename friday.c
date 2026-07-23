@@ -26,6 +26,7 @@ Entry(InputWaveInfo)
 	build_options BuildOptions = {0};
 	b32 PrintHelpMenu = False;
 	b32 ShouldRun = False;
+	b32 GpuLogging = False;
 
 	if(WaveIsFirstLane(WaveInfo))
 	{
@@ -41,12 +42,14 @@ Entry(InputWaveInfo)
 			else if(Str8Equal(Arg, Str8("release"))) { OptimisedBuild = True; }
 			else if(Str8Equal(Arg, Str8("rebuild"))) { Rebuild = True; }
 			else if(Str8Equal(Arg, Str8("run")))     { ShouldRun = True; }
+			else if(Str8Equal(Arg, Str8("gpu-log"))) { GpuLogging = True; }
 			else if(Str8Equal(Arg, Str8("carnage"))) { Carnage = True; }
 			else if(Str8Equal(Arg, Str8("help")))
 			{
 				printf("\nfriday — build system for the-thing\n\n");
 				printf("Flags:\n");
 				printf("  run       build, then launch the binary\n");
+				printf("  gpu-log   with run: enable GPU shader logging at runtime\n");
 				printf("  release   optimised build (-O2)\n");
 				printf("  rebuild   force full rebuild (ignore object cache)\n");
 				printf("  help      print this menu\n\n");
@@ -121,6 +124,10 @@ Entry(InputWaveInfo)
 			Str8ToPrintfArgs(BuildOptions.OutputPath),
 			Str8ToPrintfArgs(BuildOptions.OutputName));
 		printf("\nStarting the-thing...\n\n");
+		// Runtime signal to the renderer: compile shaders with logging enabled.
+		// Inherited by the child via posix_spawnp's `environ`. Not set on a bare
+		// `friday run` or an Xcode launch, so those stay capture-friendly.
+		if(GpuLogging) { setenv("GPU_LOGGING", "1", 1); }
 		b32 Outcome = False;
 		ExecuteCommand(&Arena, PathToExecutable, &Outcome);
 	}

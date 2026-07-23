@@ -34,6 +34,8 @@ vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
 		float2(0, 1),
 	};
 
+	os_log_default.log_error("ABC\n");
+
 
 	vertex_output Output;
 	Output.Position = Uniforms.PVMMatrix * float4(Positions[VertexID], 1);

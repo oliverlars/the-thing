@@ -144,13 +144,13 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name, str8 U
 	Source = ResolveShaderIncludes(TemporaryArena(), Str8("shaders/"), Source);
 	NSError *Error = nil;
 	NSString *NSSource = [[NSString alloc] initWithBytes:Source.Bytes length:Source.Size encoding:NSUTF8StringEncoding];
-	Shader.Library = [Metal->Device newLibraryWithSource:NSSource options:nil error:&Error];
+	MTLCompileOptions *CompileOptions = [MTLCompileOptions new];
+	CompileOptions.enableLogging = (getenv("GPU_LOGGING") != NULL);
+	Shader.Library = [Metal->Device newLibraryWithSource:NSSource options:CompileOptions error:&Error];
 	if (!Shader.Library)
 	{
 		LogError("Shader compile failed: ?cstr",
 			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
-		// Keep Name/TimeStamp so the cache doesn't retry (and re-log) every
-		// lookup — the next reload happens when the file is modified again.
 		return Shader;
 	}
 
@@ -659,7 +659,22 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 
 	M->Device = (__bridge id<MTLDevice>)Options.Device;
 	M->Layer = (__bridge CAMetalLayer*)Options.Layer;
-	M->CommandQueue = [M->Device newCommandQueue];
+		MTLLogStateDescriptor *logDesc = [MTLLogStateDescriptor new];
+
+	logDesc.level = MTLLogLevelDebug;
+	logDesc.bufferSize = 64 * 1024;
+
+	NSError *err = nil;
+	id<MTLLogState> Logger = [M->Device newLogStateWithDescriptor:logDesc
+														error:&err];
+
+	[Logger addLogHandler:^(NSString *SubSystem, NSString *Category,
+							MTLLogLevel Level, NSString *Message) {
+		NSLog(@"[GPU] %@", Message);
+	}];
+	MTLCommandQueueDescriptor *QueueDesc = [MTLCommandQueueDescriptor new];
+	QueueDesc.logState = Logger;
+	M->CommandQueue = [M->Device newCommandQueueWithDescriptor:QueueDesc];
 	M->Viewport = Size;
 
 	// One transient heap per in-flight frame; R_BufferFrame and the uniform
@@ -678,8 +693,11 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 	{
 		str8 BlitSource = LoadShaderSource(TemporaryArena(), Options.ShaderDir, "blit.metal");
 		NSError *Error = nil;
-		NSString *NSSource = [[NSString alloc] initWithBytes:BlitSource.Bytes length:BlitSource.Size encoding:NSUTF8StringEncoding];
-		id<MTLLibrary> Library = [M->Device newLibraryWithSource:NSSource options:nil error:&Error];
+		NSString *NSSource = [[NSString alloc] initWithBytes:BlitSource.Bytes length:BlitSource.Size encoding:NSUTF8StringEncoding];	
+		MTLCompileOptions *CompileOptions = [MTLCompileOptions new];
+		
+		CompileOptions.enableLogging = (getenv("GPU_LOGGING") != NULL);
+		id<MTLLibrary> Library = [M->Device newLibraryWithSource:NSSource options:CompileOptions error:&Error];
 		if (!Library)
 		{
 			LogError("Blit shader compile failed: ?cstr",
