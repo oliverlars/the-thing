@@ -636,15 +636,18 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 	logDesc.bufferSize = 64 * 1024;
 
 	NSError *err = nil;
-	id<MTLLogState> Logger = [M->Device newLogStateWithDescriptor:logDesc
-														error:&err];
-
-	[Logger addLogHandler:^(NSString *SubSystem, NSString *Category,
-							MTLLogLevel Level, NSString *Message) {
-		NSLog(@"[GPU] %@", Message);
-	}];
 	MTLCommandQueueDescriptor *QueueDesc = [MTLCommandQueueDescriptor new];
-	QueueDesc.logState = Logger;
+	if(Options.Logging)
+	{
+		id<MTLLogState> Logger = [M->Device newLogStateWithDescriptor:logDesc
+															error:&err];
+
+		[Logger addLogHandler:^(NSString *SubSystem, NSString *Category,
+								MTLLogLevel Level, NSString *Message) {
+			NSLog(@"[GPU] %@", Message);
+		}];
+		QueueDesc.logState = Logger;
+	}
 	M->CommandQueue = [M->Device newCommandQueueWithDescriptor:QueueDesc];
 	M->Viewport = Size;
 

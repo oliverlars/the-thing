@@ -11,6 +11,7 @@ typedef struct r_init_options
 	void *Layer;        // CAMetalLayer (opaque to non-Metal callers)
 	void *Device;       // id<MTLDevice>
 	str8 ShaderDir;
+	b32 Logging;
 } r_init_options;
 
 void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options);

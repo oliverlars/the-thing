@@ -179,7 +179,24 @@ static void Frame(void *UserData, v2i ViewportSize)
 		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 36);
 	}
 
-	r_texture Screen = R_Texture(&App->Render, Str8("Screen"),
+	r_texture Temp = R_Texture(&App->Render, Str8("Temp Texture"), .Size = v2i(400, 400), .Format = TF_RGBA16);
+	R_Pass(&App->Render, Str8("Cube Horizontal Blur"), .Colours[0] = Temp, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 0))
+	{
+		R_UniformV2F(&App->Render, Str8("Direction"), v2f(1, 0));
+		R_UniformF32(&App->Render, Str8("Radius"), 20);
+		R_BindTexture(&App->Render, TestTexture);
+		R_DrawTriangles(&App->Render, Str8("blur.metal"), 6);
+	}
+
+	R_Pass(&App->Render, Str8("Cube Vertical Blur"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour = v4f(0, 0, 0, 0))
+	{
+		R_UniformV2F(&App->Render, Str8("Direction"), v2f(0, 1));
+		R_UniformF32(&App->Render, Str8("Radius"), 5);
+		R_BindTexture(&App->Render, Temp);
+		R_DrawTriangles(&App->Render, Str8("blur.metal"), 6);
+	}
+
+	r_texture Screen = R_Texture(&App->Render, Str8("Screen Texture"),
 		.Size = ViewportSize, .Format = TF_BGRA10_SRGB);
 	R_Pass(&App->Render, Str8("Screen"), .Colours[0] = Screen, .ColourOps[0] = LO_CLEAR,
 		.ClearColour[0] = v4f(0.001548f, 0.001548f, 0.002322f, 1.0f))
@@ -277,8 +294,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 int main(int ArgCount, char **Args)
 {
-	(void)ArgCount; (void)Args;
-
 	m_arena *Arena = ArenaInitialise(GigaBytes(4));
 	per_thread_context *Ctx = GetThreadLocalContext();
 	Ctx->ScratchArenas[0] = ArenaInitialise(GigaBytes(1));
@@ -295,10 +310,20 @@ int main(int ArgCount, char **Args)
 	os_window Window = OS_MakeWindow(Str8("the-thing"), 1280, 800);
 	App.Window = &Window;
 
+	b32 GPULogging = False;
+	for(int I = 0; I < ArgCount; I++)
+	{
+		if(strcmp(Args[I], "gpu-log") == 0)
+		{
+			GPULogging = True;
+		}
+	}
+
 	r_init_options Opts = {
 		.Device = Window.Device,
 		.Layer = Window.Layer,
 		.ShaderDir = Str8("shaders"),
+		.Logging = GPULogging,
 	};
 	R_Init(&App.Render, Arena, v2i(Window.Width, Window.Height), Opts);
 

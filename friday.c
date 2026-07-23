@@ -120,14 +120,14 @@ Entry(InputWaveInfo)
 
 	if(WaveIsFirstLane(WaveInfo) && ShouldRun && !FailedToBuild)
 	{
-		str8 PathToExecutable = Str8PushF(&Arena, "%.*s%.*s",
+		str8 GPULoggingArgument = Str8("");
+		if(GpuLogging) GPULoggingArgument = Str8("gpu-log");
+		str8 PathToExecutable = Str8PushF(&Arena, "%.*s%.*s %.*s",
 			Str8ToPrintfArgs(BuildOptions.OutputPath),
-			Str8ToPrintfArgs(BuildOptions.OutputName));
+			Str8ToPrintfArgs(BuildOptions.OutputName),
+			Str8ToPrintfArgs(GPULoggingArgument)
+		);
 		printf("\nStarting the-thing...\n\n");
-		// Runtime signal to the renderer: compile shaders with logging enabled.
-		// Inherited by the child via posix_spawnp's `environ`. Not set on a bare
-		// `friday run` or an Xcode launch, so those stay capture-friendly.
-		if(GpuLogging) { setenv("GPU_LOGGING", "1", 1); }
 		b32 Outcome = False;
 		ExecuteCommand(&Arena, PathToExecutable, &Outcome);
 	}
