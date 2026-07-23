@@ -62,27 +62,16 @@ typedef struct metal_context
 	int                 TextureFreeList[4096];
 	int                 TextureFreeListCount;
 
-	// Copies the caller's final Source texture onto the drawable in R_Update.
 	id<MTLRenderPipelineState> BlitPipeline;
 
 	metal_buffer_entry Buffers[4096];
 
-	// One transient heap per in-flight frame. R_BufferFrame (and the per-frame
-	// uniform scratch) sub-allocate from FrameHeaps[Frame % FRAMES_IN_FLIGHT];
-	// the semaphore guarantees a slot's previous frame has completed before we
-	// reuse it, so its allocations are safe to release and overwrite.
 	id<MTLHeap>    FrameHeaps[FRAMES_IN_FLIGHT];
-
-	// This frame's uniform scratch buffer (bump-allocated by R_Uniform*),
-	// allocated from the current frame's heap in R_BeginFrame.
 	id<MTLBuffer>  FrameUniforms;
 
-	// Buffers allocated from the current frame's heap via R_BufferFrame. Handle
-	// of a transient r_buffer indexes this; reset each frame.
 	id<MTLBuffer>  FrameBuffers[256];
 	int            FrameBufferCount;
 
-	// Single one for now, these should eventually chain if it runs out
 	id<MTLHeap>    PermanentArena;
 
 	metal_shader Shaders[4096];
@@ -251,8 +240,6 @@ id<MTLBuffer> MakeMetalBuffer(render_context *R, str8 Name, r_buffer_options *Op
 	return Buffer;
 }
 
-// Permanent: cached by name, lives across frames, written once (via .Data) or
-// appended to. Safe as a single copy only because you never overwrite live bytes.
 r_buffer R_BufferPermanentEx(render_context *R, str8 Name, r_buffer_options *Options)
 {
 	metal_context *Metal = R->Backend;
@@ -279,10 +266,6 @@ r_buffer R_BufferPermanentEx(render_context *R, str8 Name, r_buffer_options *Opt
 	return (r_buffer){Entry - Metal->Buffers};
 }
 
-// Per-frame: a fresh buffer sub-allocated from this frame's heap on every call.
-// Not cached — Name is only a debug label. Contents are not preserved across
-// frames, so the caller must refill it each frame; it's race-free because the
-// bytes come from a heap slot whose previous frame the semaphore proved complete.
 r_buffer R_BufferFrameEx(render_context *R, str8 Name, r_buffer_options *Options)
 {
 	metal_context *Metal = R->Backend;
@@ -298,8 +281,6 @@ r_buffer R_BufferFrameEx(render_context *R, str8 Name, r_buffer_options *Options
 	return (r_buffer){ .Handle = Index, .Transient = True };
 }
 
-// CPU-writable pointer to write into now. For a frame buffer this is the copy
-// allocated for the current frame.
 void *R_BufferData(render_context *R, r_buffer Buffer)
 {
 	metal_context *Metal = R->Backend;
@@ -317,8 +298,6 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStru
 	{
 		if(TimeStamp > Shader->TimeStamp)
 		{
-			// Keep the last working shader if the reload failed to compile;
-			// bump the timestamp so we only retry once the file changes again.
 			metal_shader New = LoadMetalShader(R, TimeStamp, Name, UniformStruct);
 			if(New.Library) Shader[0] = New;
 			else Shader->TimeStamp = TimeStamp;
@@ -469,15 +448,12 @@ void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
 		return;
 	}
-	// The generated `uniforms` block lives at buffer(0) on both stages.
 	[Metal->ActiveRenderEncoder setVertexBuffer:Metal->FrameUniforms   offset:R->UniformStartOffset atIndex:0];
 	[Metal->ActiveRenderEncoder setFragmentBuffer:Metal->FrameUniforms offset:R->UniformStartOffset atIndex:0];
 	for(int I = 0; I < Metal->BoundBuffersCount; I++)
 	{
 		r_buffer BB = Metal->BoundBuffers[I];
 		id<MTLBuffer> Buffer = BB.Transient ? Metal->FrameBuffers[BB.Handle] : Metal->Buffers[BB.Handle].Buffer;
-		// Bound to both stages at buffer(1 + I); a stage that doesn't declare it
-		// simply ignores it (e.g. glyph curves are read by the fragment shader).
 		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer   offset:0 atIndex:1 + I];
 		[Metal->ActiveRenderEncoder setFragmentBuffer:Buffer offset:0 atIndex:1 + I];
 	}
@@ -596,10 +572,6 @@ void R_ReleaseTexture(render_context *R, r_handle Texture)
 	Metal->TextureFreeList[Metal->TextureFreeListCount++] = Texture;
 }
 
-// Metal's newLibraryWithSource has no include search path, so we resolve local
-// #include "file" directives ourselves: each is replaced by the (recursively
-// resolved) contents of that file from the shader dir. #include <...> is left
-// untouched for the Metal compiler.
 static str8 ResolveShaderIncludes(m_arena *Arena, str8 ShaderDir, str8 Source)
 {
 	str8_list Parts = {0};
@@ -635,7 +607,6 @@ static str8 ResolveShaderIncludes(m_arena *Arena, str8 ShaderDir, str8 Source)
 		}
 		else
 		{
-			// Re-emit the original line, including its trailing newline (if any).
 			s64 EmitSize = (I < Source.Size) ? (LineSize + 1) : LineSize;
 			Str8ListAppend(Arena, &Parts, (str8){ EmitSize, Bytes });
 		}
@@ -677,8 +648,6 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 	M->CommandQueue = [M->Device newCommandQueueWithDescriptor:QueueDesc];
 	M->Viewport = Size;
 
-	// One transient heap per in-flight frame; R_BufferFrame and the uniform
-	// scratch sub-allocate from the current frame's heap.
 	for (int Index = 0; Index < FRAMES_IN_FLIGHT; Index++)
 	{
 		MTLHeapDescriptor *HeapDesc = [[MTLHeapDescriptor alloc] init];
@@ -688,8 +657,6 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 		M->FrameHeaps[Index] = [M->Device newHeapWithDescriptor:HeapDesc];
 	}
 
-	// Fullscreen-triangle pipeline that copies the caller's final Source texture
-	// onto the drawable at the end of R_Update.
 	{
 		str8 BlitSource = LoadShaderSource(TemporaryArena(), Options.ShaderDir, "blit.metal");
 		NSError *Error = nil;
@@ -731,13 +698,8 @@ void R_BeginFrame(render_context *R, v2i ViewportSize)
 	R->UniformDeclarations = (str8_list){0};
 	R->LargestUniformAlignment = 0;
 
-	// Block until the frame that last used this heap slot (Frame - FRAMES_IN_FLIGHT)
-	// has finished on the GPU, so its heap allocations are safe to release and
-	// overwrite. This must happen before any uniform / R_BufferFrame writes.
 	dispatch_semaphore_wait(M->InFlightSemaphore, DISPATCH_TIME_FOREVER);
 
-	// Drop last cycle's transient buffers (their command buffers still retain
-	// them until the GPU is done) and reclaim this slot's heap.
 	int Slot = R->Frame % FRAMES_IN_FLIGHT;
 	for (int I = 0; I < M->FrameBufferCount; I++) M->FrameBuffers[I] = nil;
 	M->FrameBufferCount = 0;
@@ -745,7 +707,6 @@ void R_BeginFrame(render_context *R, v2i ViewportSize)
 
 	M->CommandBuffer = [M->CommandQueue commandBuffer];
 
-	// This frame's uniform scratch, sub-allocated from the frame's heap.
 	M->FrameUniforms = [M->FrameHeaps[Slot] newBufferWithLength:MegaBytes(8) options:MTLResourceStorageModeShared];
 	M->FrameUniforms.label = @"Frame Uniforms";
 }
@@ -755,10 +716,6 @@ void R_Update(render_context *R, void *DrawableHandle, r_texture Source)
 	metal_context *M = R->Backend;
 	id<CAMetalDrawable> Drawable = (__bridge id<CAMetalDrawable>)DrawableHandle;
 
-	// (The semaphore wait that gates heap reuse happens in R_BeginFrame.) The
-	// caller's immediate passes already rendered into Source; here we copy it
-	// onto the drawable. If there's no drawable this frame we still commit so the
-	// completion handler balances R_BeginFrame's wait and the heap gets reclaimed.
 	if (Drawable)
 	{
 		MTLRenderPassDescriptor *BlitPass = [MTLRenderPassDescriptor renderPassDescriptor];

@@ -1,11 +1,5 @@
 #include "sdf.metal"
 
-// Apple-style squircle = superellipse: |x/a|^n + |y/b|^n = 1.
-// n=2 ellipse, n=4 classic squircle, n≈5 iOS icon, n→∞ rectangle.
-//
-// Approximate 2D signed distance, in pixels. The raw field |x/a|^n+|y/b|^n-1 is
-// not a distance — its iso-lines are scaled squircles — so we divide by the
-// analytic gradient magnitude (a first-order distance estimate).
 float Squircle2D(float2 P, float2 HalfSize, float N)
 {
 	float n = clamp(N, 2.0, 32.0);

@@ -98,8 +98,6 @@ typedef struct ui_context
 	ui_widget_flags Flags;
 	f32 NextGap;
 	
-	ui_widget  LayoutStack[4096];
-	int        LayoutCount;
 	ui_widget *CurrentLayout;
 	ui_widget Widgets[UI_WIDGET_TABLE_SIZE];
 	int WidgetIndex;
@@ -131,7 +129,7 @@ int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int
 void UI_Texture(ui_context *UI, str8 Name, r_texture Texture);
 
 void UI_LayoutPop(ui_context *UI);
-void UI_LayoutPush(ui_context *UI, ui_widget Layout);
+void UI_LayoutPush(ui_context *UI, ui_widget Layout, u64 Seed);
 
 void UI_AppendAsChild(ui_widget *Parent, ui_widget *Child);
 void UI_AppendAsSibling(ui_widget *OlderSibling, ui_widget *YoungerSibling);
@@ -156,14 +154,16 @@ void UI_RenderWidgets(ui_context *UI, ui_widget *Widget);
 
 #define UI_PADDING(UI, Pad) DeferLoop((UI)->PaddingStack[(UI)->PaddingIndex++] = v2f(Pad, Pad), (UI)->PaddingStack[--(UI)->PaddingIndex] = v2f(0.0, 0.0))
 
-#define UI_PANEL(UI, P, S) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Gap = UI_DEFAULT_GAP, .Padding = UI_DEFAULT_PADDING2, .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_DRAW_BACKGROUND, .Colour = v4f(0.125, 0.129, 0.14, 1.0), .OutlineColour = v4f(0.3, 0.3, 0.3, 1.0), .OutlineThickness = 2.0f, .CornerRadius = 15.0f, .Position = P, .Size = S}), UI_LayoutPop(UI))
+#define UI_PANEL(UI, P, S) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Gap = UI_DEFAULT_GAP, .Padding = UI_DEFAULT_PADDING2, .Flags = UI_LAYOUT_COLUMN | UI_LAYOUT_FIXED | UI_DRAW_BACKGROUND, .Colour = v4f(0.125, 0.129, 0.14, 1.0), .OutlineColour = v4f(0.3, 0.3, 0.3, 1.0), .OutlineThickness = 2.0f, .CornerRadius = 15.0f, .Position = P, .Size = S}, (u64)__LINE__), UI_LayoutPop(UI))
 
 #define UI_GAP(UI, G) DeferLoop((UI)->NextGap = (G), (UI)->NextGap = UI_DEFAULT_GAP)
 
-#define UI_ROW(UI, LayoutFlag) DeferLoop((UI_LayoutPush(UI, (ui_widget){ .Gap = (UI)->NextGap, .Flags = UI_LAYOUT_ROW | LayoutFlag | (UI)->Flags}), (UI)->NextGap = UI_DEFAULT_GAP), UI_LayoutPop(UI))
+#define UI_ROW(UI, LayoutFlag) DeferLoop((UI_LayoutPush(UI, (ui_widget){ .Gap = (UI)->NextGap, .Flags = UI_LAYOUT_ROW | LayoutFlag | (UI)->Flags}, (u64)__LINE__), (UI)->NextGap = UI_DEFAULT_GAP), UI_LayoutPop(UI))
 
-#define UI_COLUMN(UI, LayoutFlag) DeferLoop((UI_LayoutPush(UI, (ui_widget){ .Gap = (UI)->NextGap, .Flags = UI_LAYOUT_COLUMN | LayoutFlag | (UI)->Flags}), (UI)->NextGap = UI_DEFAULT_GAP), UI_LayoutPop(UI))
+#define UI_COLUMN(UI, LayoutFlag) DeferLoop((UI_LayoutPush(UI, (ui_widget){ .Gap = (UI)->NextGap, .Flags = UI_LAYOUT_COLUMN | LayoutFlag | (UI)->Flags}, (u64)__LINE__), (UI)->NextGap = UI_DEFAULT_GAP), UI_LayoutPop(UI))
 
 #define UI_FILL(UI) DeferLoop((UI)->Flags |= UI_LAYOUT_FILL, (UI)->Flags &= ~UI_LAYOUT_FILL)
 
-#define UI_CENTRE(UI) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_CENTRE | UI_LAYOUT_FILL | (UI)->Flags }), UI_LayoutPop(UI))
+#define UI_CENTRE(UI) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_CENTRE | UI_LAYOUT_FILL | (UI)->Flags }, (u64)__LINE__), UI_LayoutPop(UI))
+
+#define UI_BACKDROP(UI, Col) DeferLoop(UI_LayoutPush(UI, (ui_widget){ .Flags = UI_LAYOUT_CENTRE | UI_LAYOUT_FILL | UI_DRAW_BACKGROUND | (UI)->Flags, .Colour = (Col), .CornerRadius = 15.0f }, (u64)__LINE__), UI_LayoutPop(UI))

@@ -9,10 +9,10 @@ typedef struct os_window
 	int Width;
 	int Height;
 
-	os_handle Handle;   // NSWindow*
-	os_handle MetalView; // MTKView*
-	os_handle Layer;    // CAMetalLayer*
-	os_handle Device;   // id<MTLDevice>
+	os_handle Handle;
+	os_handle MetalView;
+	os_handle Layer;
+	os_handle Device;
 
 	str8 Title;
 }
@@ -31,13 +31,10 @@ typedef enum os_event_type
 	OS_EVENT_CLOSE,
 } os_event_type;
 
-// Mouse button number for MOUSE_DOWN/MOUSE_UP events (stored in KeyCode).
-// Matches NSEvent.buttonNumber: 0=left, 1=right, 2=middle.
 #define OS_MOUSE_LEFT   0
 #define OS_MOUSE_RIGHT  1
 #define OS_MOUSE_MIDDLE 2
 
-// Named macOS virtual key codes (kVK_*). KeyCode in os_event uses these.
 #define OS_KEY_A             0
 #define OS_KEY_S             1
 #define OS_KEY_D             2
@@ -104,15 +101,9 @@ typedef struct os_event
 {
 	os_event_type Type;
 
-	// For KEY_DOWN/KEY_UP: virtual key code (macOS kVK_* constants).
-	// For MOUSE_DOWN/MOUSE_UP: button number (OS_MOUSE_LEFT etc).
 	int KeyCode;
-
-	// Set for every event that has a meaningful pointer location.
 	v2f MousePosition;
 
-	// Set for OS_EVENT_SCROLL — vertical scroll lives in Y, horizontal in X
-	// (both in unspecified "scroll units", same sign convention as Cocoa).
 	v2f Scroll;
 } os_event;
 
@@ -126,34 +117,13 @@ void *OS_NextDrawable(os_window *Window); // CAMetalDrawable* (autoreleased)
 int OS_WindowWidth(os_window *Window);
 int OS_WindowHeight(os_window *Window);
 
-// Cursor position relative to the window's content view, top-left origin, in
-// the same pixel-space units the renderer uses for ViewportSize (so retina-
-// scaled). Returns coordinates even when the cursor is outside the window.
 v2f OS_MousePosition(os_window *Window);
 
-// Pop the next event from the queue into *Out. Returns true if an event was
-// returned, false if the queue is empty. Typical use inside the frame:
-//
-//   os_event E;
-//   while (OS_NextEvent(Window, &E)) {
-//       switch (E.Type) {
-//           case OS_EVENT_MOUSE_DOWN: ... break;
-//           case OS_EVENT_KEY_DOWN:   ... break;
-//           ...
-//       }
-//   }
-//
-// The queue is drained event-at-a-time and is refilled by the host run loop
-// between frames. It has finite capacity; overflow events are dropped.
 b32 OS_NextEvent(os_window *Window, os_event *Out);
 
-// State polling — true while the key or button is currently held.
 b32 OS_KeyDown    (int Key);
 b32 OS_MouseDown  (int Button);
 
-// Transition polling — true on the single frame the key/button transitioned
-// to down (Pressed) or up (Released). Reset at the start of each frame, so
-// you'll only ever see one Pressed per physical press.
 b32 OS_KeyPressed (int Key);
 b32 OS_KeyReleased(int Key);
 b32 OS_MousePressed (int Button);

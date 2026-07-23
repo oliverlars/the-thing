@@ -42,9 +42,6 @@ struct point_light
 	float Radius;
 };
 
-// Plain Blinn-Phong on a position + normal. Radius is the distance at which the
-// non-ambient contribution falls to half — falloff is 1 / (1 + (d/R)^2) so the
-// units of Radius must match Position / LightPos.
 float3 ApplyLighting(
 	float3 BaseColour,
 	float3 Position,

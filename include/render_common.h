@@ -83,11 +83,6 @@ typedef struct render_context
 	s32 UniformBytesCursor;
 	s32 LargestUniformAlignment;
 
-	// Global point light. Position is in the same coordinate space as shape
-	// positions (world / pixel space for the default ortho setup). Radius is
-	// the half-falloff distance in those same units. Default colour is zero,
-	// which makes shapes render as pure base colour with no lighting
-	// contribution — call R_SetLight to enable.
 	v3f LightPosition;
 	v3f LightColour;
 	f32 LightIntensity;

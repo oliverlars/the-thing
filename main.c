@@ -247,7 +247,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 			};
 			UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
 
-			UI_CENTRE(&App->UI)
+			UI_BACKDROP(&App->UI, v4f(0.08f, 0.09f, 0.12f, 1.0f))
 			{
 				UI_Texture(&App->UI, Str8("Cube widget"), TestTexture);
 			}

@@ -164,10 +164,6 @@ b32 OS_NextEvent(os_window *Window, os_event *Out)
 	return True;
 }
 
-// Polling-layer state. Held bits persist across frames (cleared on UP);
-// Pressed/Released are edge-triggered, set when a transition happens and
-// cleared at the start of the next frame. Both are updated in lockstep with
-// the event queue inside OS_Run.
 #define OS_KEY_BIT_COUNT 256
 static u64 GlobalKeyHeld     [OS_KEY_BIT_COUNT / 64];
 static u64 GlobalKeyPressed  [OS_KEY_BIT_COUNT / 64];
@@ -229,8 +225,6 @@ b32 OS_MouseDown    (int Button) { return (Button >= 0 && Button < 32) ? (b32)((
 b32 OS_MousePressed (int Button) { return (Button >= 0 && Button < 32) ? (b32)((GlobalMousePressed  >> Button) & 1U) : False; }
 b32 OS_MouseReleased(int Button) { return (Button >= 0 && Button < 32) ? (b32)((GlobalMouseReleased >> Button) & 1U) : False; }
 
-// Convert a window-base NSPoint (Cocoa, points) into the renderer's pixel-
-// space, top-left origin coordinates — same convention as OS_MousePosition.
 static v2f WindowPointToRender(NSPoint WindowPt, NSWindow *NSWin, NSView *View)
 {
 	NSPoint LocView = [View convertPoint:WindowPt fromView:nil];
@@ -238,8 +232,6 @@ static v2f WindowPointToRender(NSPoint WindowPt, NSWindow *NSWin, NSView *View)
 	return v2f((f32)(LocView.x * Scale), (f32)(LocView.y * Scale));
 }
 
-// Classify a Cocoa NSEvent into the equivalent os_event. Returns Type=NONE
-// for events we don't care about, which the run loop should skip pushing.
 static os_event OS_EventFromNSEvent(NSEvent *E, NSWindow *NSWin, NSView *View)
 {
 	os_event Out = {0};
@@ -276,8 +268,6 @@ static os_event OS_EventFromNSEvent(NSEvent *E, NSWindow *NSWin, NSView *View)
 			break;
 
 		case NSEventTypeKeyDown:
-			// Skip auto-repeats so the host gets a clean down/up pair per
-			// physical press. Hosts that want repeats can poll instead.
 			if (E.isARepeat) break;
 			Out.Type    = OS_EVENT_KEY_DOWN;
 			Out.KeyCode = (int)E.keyCode;
@@ -319,8 +309,6 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 		GlobalWindowDelegate = [[WindowDelegate alloc] init];
 		[Window setDelegate:GlobalWindowDelegate];
 
-		// We want continuous OS_EVENT_MOUSE_MOVE events even when no button
-		// is held; Cocoa only delivers those when this flag is set.
 		[Window setAcceptsMouseMovedEvents:YES];
 
 		id<MTLDevice> Device = MTLCreateSystemDefaultDevice();
@@ -331,14 +319,9 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 		Layer.device          = Device;
 		Layer.pixelFormat     = MTLPixelFormatBGRA10_XR_sRGB;
 		Layer.framebufferOnly = YES;
-		// BGRA10_XR_sRGB stores sRGB-encoded values in extended range, so the layer
-		// must be told its contents live in an extended-range sRGB colour space for
-		// the system to composite them correctly.
 		CGColorSpaceRef ColourSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedSRGB);
 		Layer.colorspace = ColourSpace;
 		CGColorSpaceRelease(ColourSpace);
-		// Backs the layer's drawable to the layer's bounds and rescales for
-		// retina automatically — set initial size before the window orders in.
 		CGFloat Scale = [NSScreen mainScreen].backingScaleFactor;
 		Layer.contentsScale = Scale;
 		Layer.drawableSize  = CGSizeMake(Width * Scale, Height * Scale);
@@ -377,11 +360,6 @@ v2f OS_MousePosition(os_window *Window)
 	NSWindow *NSWin = (__bridge NSWindow*)Window->Handle;
 	NSView   *View  = (__bridge NSView*)Window->MetalView;
 	if (!NSWin || !View) return v2f(0, 0);
-
-	// Empirically, `convertPoint:fromView:nil` on this layer-hosted MetalView
-	// returns coordinates already in top-left origin (Y increases downward),
-	// in points. So we just scale to backing pixels with no flip — the
-	// result matches the renderer's pixel-space coordinate system directly.
 	NSPoint MouseInWindow = [NSWin mouseLocationOutsideOfEventStream];
 	NSPoint MouseInView   = [View convertPoint:MouseInWindow fromView:nil];
 	CGFloat Scale         = NSWin.backingScaleFactor;
@@ -407,9 +385,6 @@ void OS_Run(os_window *Window, os_frame_fn FrameFn, void *UserData)
 		while (True)
 		{
 			@autoreleasepool {
-				// Clear last frame's edge bits so OS_KeyPressed / Released
-				// only fire on transitions that happen between here and the
-				// next frame call.
 				OS_ResetTransitions();
 
 				NSEvent *Event;
@@ -424,9 +399,7 @@ void OS_Run(os_window *Window, os_frame_fn FrameFn, void *UserData)
 						OS_PushEvent(Mapped);
 						OS_UpdateInputState(Mapped);
 					}
-
-					// Still send to NSApp so default behaviour (window
-					// drag, key focus, etc.) keeps working.
+					
 					[NSApp sendEvent:Event];
 				}
 

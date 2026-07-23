@@ -168,15 +168,11 @@ d_atlas_glyph *D_GlyphFromCodePoint(draw_context *D, d_font Font, u32 CodePoint)
 	return Result;
 }
 
-// Defined further down; Quad/Point route through it so they pick up the same
-// outline + extrusion + lighting as the rounded shapes.
 static void PushSDFBox(draw_context *D, str8 Shader, v2f Position,
                        f32 Width, f32 Height, f32 Param, d_shape_options Options);
 
 void D_BaseQuad(draw_context *D, v2f Position, f32 Width, f32 Height, d_shape_options Options)
 {
-	// Corner radius 0 → sharp rectangle, but flowing through the SDF path means it
-	// inherits outline + extrusion + lighting like the rounded shapes.
 	PushSDFBox(D, Str8("rounded_box.metal"), Position, Width, Height, 0.0f, Options);
 }
 
@@ -248,9 +244,6 @@ void D_BaseStr8InBox(draw_context *D, str8 String,
 	D_BaseStr8(D, String, Options);
 }
 
-// Copy a glyph's curves into this frame's curve buffer (allocated lazily on the
-// first glyph of the frame), returning the offset. Deduplicated per frame, so a
-// repeated letter is packed once; glyphs not drawn this frame cost nothing.
 static int D_PackGlyphCurves(draw_context *D, d_atlas_glyph *Glyph)
 {
 	render_context *R = D->Render;
@@ -393,8 +386,6 @@ static void PushSDFBox(draw_context *D, str8 Shader, v2f Position,
 	v2f HalfSize = v2f(Width * 0.5f, Height * 0.5f);
 	v2f Centre   = v2f(Position.X + HalfSize.X, Position.Y + HalfSize.Y);
 
-	// Per-corner radii default to the uniform scalar (Param) when the caller
-	// leaves Options.CornerRadii zeroed, so single-radius shapes are unchanged.
 	v4f CornerRadii = Options.CornerRadii;
 	if (CornerRadii.X == 0.0f && CornerRadii.Y == 0.0f &&
 	    CornerRadii.Z == 0.0f && CornerRadii.W == 0.0f)
@@ -424,8 +415,6 @@ static void PushSDFBox(draw_context *D, str8 Shader, v2f Position,
 			CornerRadii, Options.ShadowBlur);
 	}
 
-	// Pad enough for AA on the edge plus the outline (drawn just inside, but
-	// AA can spill 1px outside).
 	f32 Pad = 1.0f + fmaxf(0.0f, Options.OutlineThickness);
 	v2f Min = v2f(Position.X - Pad,         Position.Y - Pad);
 	v2f Max = v2f(Position.X + Width + Pad, Position.Y + Height + Pad);
@@ -455,8 +444,6 @@ void D_BaseSquircle(draw_context *D, v2f Position, f32 Width, f32 Height, f32 N,
 
 void D_BasePoint(draw_context *D, v2f Position, f32 Size, d_shape_options Options)
 {
-	// A rounded box whose corner radius equals its half-size is a circle.
-	// PushSDFBox expects the top-left corner; D_Point's Position is the centre.
 	f32 Half = Size * 0.5f;
 	v2f Corner = v2f(Position.X - Half, Position.Y - Half);
 	PushSDFBox(D, Str8("rounded_box.metal"), Corner, Size, Size, Half, Options);

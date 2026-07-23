@@ -13,7 +13,6 @@ void UI_Begin(ui_context *UI)
 	UI->HoverNextLayer = 0;
 	UI->FloatCount = 0;
 	UI->NextGap = UI_DEFAULT_GAP;
-	UI->LayoutCount = 0;
 	UI->CurrentLayout = 0;
 	for(int WidgetIndex = 0; WidgetIndex < UI_WIDGET_TABLE_SIZE; WidgetIndex++)
 	{
@@ -61,6 +60,34 @@ ui_widget *UI_GetWidget(ui_context *UI, str8 Name)
 	Widget->Last = 0;
 	Widget->Next = 0;
 	Widget->Parent = 0;
+	return Widget;
+}
+
+ui_widget *UI_GetWidgetByKey(ui_context *UI, u64 Key)
+{
+	ui_widget *Widget = UI->Widgets + (Key % UI_WIDGET_TABLE_SIZE);
+	if(Widget->Key == 0)
+	{
+		MemoryZero(Widget, sizeof(ui_widget));
+		Widget->Key = Key;
+	}
+	else if(Widget->Key != Key)
+	{
+		if(Widget->FrameLastTouched < UI->Frame)
+		{
+			MemoryZero(Widget, sizeof(ui_widget));
+			Widget->Key = Key;
+		}
+		else
+		{
+			for(int I = 1; I < UI_WIDGET_TABLE_SIZE; I++)
+			{
+				Widget = UI->Widgets + ((Key % UI_WIDGET_TABLE_SIZE) + I) % UI_WIDGET_TABLE_SIZE;
+				if(Widget->Key == Key) break;
+			}
+		}
+	}
+	Widget->FrameLastTouched = UI->Frame;
 	return Widget;
 }
 
@@ -303,10 +330,31 @@ void UI_LayoutPop(ui_context *UI)
 	UI->CurrentLayout = UI->CurrentLayout->Parent;
 }
 
-void UI_LayoutPush(ui_context *UI, ui_widget Layout)
+void UI_LayoutPush(ui_context *UI, ui_widget Layout, u64 Seed)
 {
-	ui_widget *Pushed = UI->LayoutStack + UI->LayoutCount++;
+	u64 ParentKey = UI->CurrentLayout ? UI->CurrentLayout->Key : 0;
+	u64 Key = M_FNVHashBytes(M_FNV_HASH_START, (u8*)&Seed, sizeof(Seed));
+	Key = M_FNVHashBytes(Key, (u8*)&ParentKey, sizeof(ParentKey));
+	if(Key == 0) Key = 1;
+
+	ui_widget *Pushed = UI_GetWidgetByKey(UI, Key);
+
+	v2f          KeepPos    = Pushed->Position;
+	v2f          KeepSize   = Pushed->Size;
+	ui_animation KeepActive = Pushed->ActiveAnimation;
+	ui_animation KeepHover  = Pushed->HoverAnimation;
+
 	*Pushed = Layout;
+	Pushed->Key              = Key;
+	Pushed->FrameLastTouched = UI->Frame;
+	Pushed->ActiveAnimation  = KeepActive;
+	Pushed->HoverAnimation   = KeepHover;
+	if(!(Layout.Flags & UI_LAYOUT_FIXED))
+	{
+		Pushed->Position = KeepPos;
+		Pushed->Size     = KeepSize;
+	}
+
 	if(UI->CurrentLayout)
 	{
 		UI_AppendAsChild(UI->CurrentLayout, Pushed);
@@ -362,11 +410,8 @@ void UI_AppendAsSibling(ui_widget *OlderSibling, ui_widget *YoungerSibling)
 void UI_Layout(ui_context *UI)
 {
 	v2f ChildSize = UI->Root->Size;
-	ChildSize = SubV2F(ChildSize, UI->Root->Padding);
-	{
-		if(UI->Root->Flags & UI_LAYOUT_ROW)    UI_LayoutRow(UI, UI->Root, ChildSize);
-		if(UI->Root->Flags & UI_LAYOUT_COLUMN) UI_LayoutColumn(UI, UI->Root, ChildSize);
-	}
+	if(UI->Root->Flags & UI_LAYOUT_ROW)    UI_LayoutRow(UI, UI->Root, ChildSize);
+	if(UI->Root->Flags & UI_LAYOUT_COLUMN) UI_LayoutColumn(UI, UI->Root, ChildSize);
 }
 
 v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)

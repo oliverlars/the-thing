@@ -116,25 +116,16 @@ void D_BaseSquircle   (draw_context *D, v2f Position, f32 Width, f32 Height, f32
 #define D_RoundedQuad(D, Pos, W, H, Radius, ...) \
 	D_BaseRoundedQuad(D, Pos, W, H, Radius, (d_shape_options){ __VA_ARGS__ })
 
-// A capsule is just a rounded rectangle whose corner radius is half the short
-// side, so this is a convenience wrapper around D_RoundedQuad.
 #define D_Capsule(D, Pos, W, H, ...) \
 	D_BaseCapsule(D, Pos, W, H, (d_shape_options){ __VA_ARGS__ })
 
-// Apple-style squircle (superellipse). Exponent N: 2 = ellipse, 4 = classic
-// squircle, ~5 matches the iOS app-icon shape, higher → more rectangular.
 #define D_Squircle(D, Pos, W, H, N, ...) \
 	D_BaseSquircle(D, Pos, W, H, N, (d_shape_options){ __VA_ARGS__ })
 
-// Hard-edged rectangle. Routed through the rounded-box SDF with corner radius 0,
-// so it supports the same outline / extrusion options as the rounded shapes.
 void D_BaseQuad(draw_context *D, v2f Position, f32 Width, f32 Height, d_shape_options Options);
 #define D_Quad(D, Pos, W, H, ...) \
 	D_BaseQuad(D, Pos, W, H, (d_shape_options){ __VA_ARGS__ })
 
-// Filled circle centred on Position (Size = diameter). A rounded box whose
-// corner radius equals its half-size is a circle, so this also inherits the
-// outline / extrusion options.
 void D_BasePoint(draw_context *D, v2f Position, f32 Size, d_shape_options Options);
 #define D_Point(D, Pos, Size, ...) \
 	D_BasePoint(D, Pos, Size, (d_shape_options){ __VA_ARGS__ })
