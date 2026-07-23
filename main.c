@@ -108,9 +108,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 
 
-	r_texture TestTexture = R_Texture(&App->Render, Str8("Test Texture"), .Size = v2i(100, 100), .Format = TF_RGBA16);
-	r_texture TestDepth   = R_Texture(&App->Render, Str8("Test Depth"), .Size = v2i(100, 100), .Format = TF_DEPTH32);
-
 	// R_Pass(&App->Render, Str8("Pass test"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(1, 0, 0, 0))
 	// {
 	// 	R_BindBuffer(&App->Render, Vertices);
@@ -161,11 +158,19 @@ static void Frame(void *UserData, v2i ViewportSize)
 	m44f Proj  = PerspectiveMetal(Aspect, 50.0f, 0.1f, 100.0f);
 	m44f PVM   = MulM44FM44F(MulM44FM44F(Model, View), Proj);
 
+	f32 ShapeY = H * 0.12f;
+	f32 ShapeSize = 96.0f;
+	f32 ShapeGap = 32.0f;
 
+	f32 CardX0 = W * 0.10f - 30.0f;
+	f32 CardX1 = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + 30.0f;
+
+	r_texture TestTexture = R_Texture(&App->Render, Str8("Test Texture"), .Size = v2i(400, 400), .Format = TF_RGBA16);
+	r_texture TestDepth   = R_Texture(&App->Render, Str8("Test Depth"), .Size = v2i(400, 400), .Format = TF_DEPTH32);
 
 	R_Pass(&App->Render, Str8("Cube Pass"), 
 		.Depth = TestDepth, .DepthOp = LO_CLEAR, .ClearDepth = 1.0,
-		.Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 1)
+		.Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 0)
 	)
 	{
 		R_BindBuffer(&App->Render, CubeVertexPositionsBuffer);
@@ -174,115 +179,99 @@ static void Frame(void *UserData, v2i ViewportSize)
 		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 36);
 	}
 
-	f32 ShapeY = H * 0.12f;
-	f32 ShapeSize = 96.0f;
-	f32 ShapeGap = 32.0f;
-
-	f32 CardX0 = W * 0.10f - 30.0f;
-	f32 CardX1 = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + 30.0f;
-
 	r_texture Screen = R_Texture(&App->Render, Str8("Screen"),
 		.Size = ViewportSize, .Format = TF_BGRA10_SRGB);
 	R_Pass(&App->Render, Str8("Screen"), .Colours[0] = Screen, .ColourOps[0] = LO_CLEAR,
 		.ClearColour[0] = v4f(0.001548f, 0.001548f, 0.002322f, 1.0f))
 	{
-	D_RoundedQuad(&App->Draw, v2f(CardX0, ShapeY - 30.0f),
-		CardX1 - CardX0, ShapeSize + 60.0f, 24.0f,
-		.Colour = v4f(0.85f, 0.85f, 0.88f, 1));
+		D_RoundedQuad(&App->Draw, v2f(CardX0, ShapeY - 30.0f),
+			CardX1 - CardX0, ShapeSize + 60.0f, 24.0f,
+			.Colour = v4f(0.85f, 0.85f, 0.88f, 1));
 
-	// Flat rounded quad.
-	D_RoundedQuad(&App->Draw, v2f(W * 0.10f, ShapeY),
-		ShapeSize, ShapeSize, 20.0f,
-		.Colour = v4f(0.95f, 0.45f, 0.30f, 1),
-		.Extrusion = 1.0,
-		.ShadowOffset = v2f(8, 10), .ShadowBlur = 22.0f);
+		// Flat rounded quad.
+		D_RoundedQuad(&App->Draw, v2f(W * 0.10f, ShapeY),
+			ShapeSize, ShapeSize, 20.0f,
+			.Colour = v4f(0.95f, 0.45f, 0.30f, 1),
+			.Extrusion = 1.0,
+			.ShadowOffset = v2f(8, 10), .ShadowBlur = 22.0f);
 
-	// Capsule with an outline, also flat.
-	D_Capsule(&App->Draw, v2f(W * 0.10f + (ShapeSize + ShapeGap), ShapeY),
-		ShapeSize * 2.0f, ShapeSize * 0.55f,
-		.Colour = v4f(0.35f, 0.85f, 0.55f, 1),
-		.OutlineColour = v4f(1, 1, 1, 1),
-		.OutlineThickness = 3.0f,
-		.Extrusion = 1.0,
-		.ShadowOffset = v2f(8, 10), .ShadowBlur = 22.0f);
+		// Capsule with an outline, also flat.
+		D_Capsule(&App->Draw, v2f(W * 0.10f + (ShapeSize + ShapeGap), ShapeY),
+			ShapeSize * 2.0f, ShapeSize * 0.55f,
+			.Colour = v4f(0.35f, 0.85f, 0.55f, 1),
+			.OutlineColour = v4f(1, 1, 1, 1),
+			.OutlineThickness = 3.0f,
+			.Extrusion = 1.0,
+			.ShadowOffset = v2f(8, 10), .ShadowBlur = 22.0f);
 
-	// Squircles with varying exponent. The middle one opts into a soft sheen
-	// that tracks the cursor; the others stay flat for comparison.
-	f32 SquircleStartX = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + ShapeGap;
-	f32 Exponents[3] = { 2.5f, 4.0f, 8.0f };
-	for (int I = 0; I < (int)(sizeof(Exponents)/sizeof(Exponents[0])); I++)
-	{
-		f32 X = SquircleStartX + (ShapeSize + ShapeGap) * (f32)I;
-		D_Squircle(&App->Draw, v2f(X, ShapeY),
-			ShapeSize, ShapeSize, Exponents[I],
-			.Colour = v4f(0.55f, 0.65f, 1.0f, 1),
-			.OutlineColour = v4f(0.1f, 0.1f, 0.15f, 1),
-			.OutlineThickness = 0.0f,
-			.Extrusion = 1.0);
-	}
-
-	f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
-	v4f CapsuleColours[2] = { v4f(1.0f, 0.4f, 0.0f, 1), v4f(0.8f, 0.35f, 0.0f, 1) };
-	static b32 Clicked = False;
-	static f32 ExtrusionTarget = 1.0;
-	static f32 Extrusion = 1.0;
-
-	Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
-	D_Str8(&App->Draw, Str8("HELLO, WORLD!"),
-		.Font = App->Font,
-		.Position = v3f(W * 0.10f, H * 0.90f, 0),
-		.HeightInPixels = 64.0f,
-		.Colour = v4f(1, 1, 1, 1));
-
-	UI_Begin(&App->UI);
-	UI_PANEL(&App->UI, v2f(1000, 200), v2f(600, 1000))
-	{
-		UI_ROW(&App->UI, UI_LAYOUT_FIXED)
+		// Squircles with varying exponent. The middle one opts into a soft sheen
+		// that tracks the cursor; the others stay flat for comparison.
+		f32 SquircleStartX = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + ShapeGap;
+		f32 Exponents[3] = { 2.5f, 4.0f, 8.0f };
+		for (int I = 0; I < (int)(sizeof(Exponents)/sizeof(Exponents[0])); I++)
 		{
-			UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
-			UI_Button(&App->UI, Str8("Submit"));
-		}
-		str8 Elements[3] = {
-			Str8("Cat"), 
-			Str8("Dog"),
-			Str8("Meow"),
-		};
-		UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
-
-		UI_FILL(&App->UI)
-		{
-			ui_widget *ViewportWidget = UI_GetWidget(&App->UI, Str8("3D Viewport"));
-			ViewportWidget->Size = v2f(50, 50);
+			f32 X = SquircleStartX + (ShapeSize + ShapeGap) * (f32)I;
+			D_Squircle(&App->Draw, v2f(X, ShapeY),
+				ShapeSize, ShapeSize, Exponents[I],
+				.Colour = v4f(0.55f, 0.65f, 1.0f, 1),
+				.OutlineColour = v4f(0.1f, 0.1f, 0.15f, 1),
+				.OutlineThickness = 0.0f,
+				.Extrusion = 1.0);
 		}
 
-		if(UI_Button(&App->UI, Str8("Some button")))
+		f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
+		v4f CapsuleColours[2] = { v4f(1.0f, 0.4f, 0.0f, 1), v4f(0.8f, 0.35f, 0.0f, 1) };
+		static b32 Clicked = False;
+		static f32 ExtrusionTarget = 1.0;
+		static f32 Extrusion = 1.0;
+
+		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
+		D_Str8(&App->Draw, Str8("HELLO, WORLD!"),
+			.Font = App->Font,
+			.Position = v3f(W * 0.10f, H * 0.90f, 0),
+			.HeightInPixels = 64.0f,
+			.Colour = v4f(1, 1, 1, 1));
+
+		UI_Begin(&App->UI);
+		UI_PANEL(&App->UI, v2f(1000, 200), v2f(600, 1000))
 		{
-			LogInfo("Clicked button");
+			UI_ROW(&App->UI, UI_LAYOUT_FIXED)
+			{
+				UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
+				UI_Button(&App->UI, Str8("Submit"));
+			}
+			str8 Elements[3] = {
+				Str8("Cat"), 
+				Str8("Dog"),
+				Str8("Meow"),
+			};
+			UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
+
+			UI_CENTRE(&App->UI)
+			{
+				UI_Texture(&App->UI, Str8("Cube widget"), TestTexture);
+			}
+
+			if(UI_Button(&App->UI, Str8("Some button")))
+			{
+				LogInfo("Clicked button");
+			}
 		}
+
+		UI_Layout(&App->UI);
+		UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
+
+		for(int I = 0; I < App->UI.FloatCount; I++)
+		{
+			ui_widget *Float = App->UI.FloatRoots[I];
+			UI_LayoutColumn(&App->UI, Float, App->UI.Draw->ViewportSize);
+			UI_LayoutPositions(&App->UI, Float, Float->Position);
+			UI_RenderWidgets(&App->UI, Float);
+		}
+
+		UI_End(&App->UI);
 	}
 
-	UI_Layout(&App->UI);
-	UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
-
-	for(int I = 0; I < App->UI.FloatCount; I++)
-	{
-		ui_widget *Float = App->UI.FloatRoots[I];
-		UI_LayoutColumn(&App->UI, Float, App->UI.Draw->ViewportSize);
-		UI_LayoutPositions(&App->UI, Float, Float->Position);
-		UI_RenderWidgets(&App->UI, Float);
-	}
-
-	UI_End(&App->UI);
-	}
-
-	R_Pass(&App->Render, Str8("Blit"), .Colours[0] = Screen, .ColourOps[0] = LO_LOAD)
-	{
-		R_UniformM44F(&App->Render, Str8("PVMMatrix"), Ortho);
-		R_UniformV2F(&App->Render, Str8("Position"), v2f(100, 100));
-		R_UniformV2F(&App->Render, Str8("Size"), v2f(400, 400));
-		R_BindTexture(&App->Render, TestTexture);
-		R_DrawTriangles(&App->Render, Str8("textured_quad.metal"), 6);
-	}
 	R_Update(&App->Render, OS_NextDrawable(App->Window), Screen);
 }
 

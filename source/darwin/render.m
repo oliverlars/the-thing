@@ -205,7 +205,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 			Entry->Options = Options[0];
 			Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 		}
-		return (r_texture){Entry - Metal->Textures};
+		return (r_texture){Options->Size, Entry - Metal->Textures};
 	}
 	else if(Entry->Texture)
 	{
@@ -219,7 +219,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 					Entry->Options = Options[0];
 					Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 				}
-				return (r_texture){Entry - Metal->Textures};
+				return (r_texture){Options->Size, Entry - Metal->Textures};
 			}
 		}
 	}
@@ -228,7 +228,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 		Entry->Options = Options[0];
 		Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 	}
-	return (r_texture){Entry - Metal->Textures };
+	return (r_texture){Options->Size, Entry - Metal->Textures };
 }
 
 id<MTLBuffer> MakeMetalBuffer(render_context *R, str8 Name, r_buffer_options *Options)
@@ -695,7 +695,7 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 		NSError *Error = nil;
 		NSString *NSSource = [[NSString alloc] initWithBytes:BlitSource.Bytes length:BlitSource.Size encoding:NSUTF8StringEncoding];	
 		MTLCompileOptions *CompileOptions = [MTLCompileOptions new];
-		
+
 		CompileOptions.enableLogging = (getenv("GPU_LOGGING") != NULL);
 		id<MTLLibrary> Library = [M->Device newLibraryWithSource:NSSource options:CompileOptions error:&Error];
 		if (!Library)

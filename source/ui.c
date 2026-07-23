@@ -13,6 +13,8 @@ void UI_Begin(ui_context *UI)
 	UI->HoverNextLayer = 0;
 	UI->FloatCount = 0;
 	UI->NextGap = UI_DEFAULT_GAP;
+	UI->LayoutCount = 0;
+	UI->CurrentLayout = 0;
 	for(int WidgetIndex = 0; WidgetIndex < UI_WIDGET_TABLE_SIZE; WidgetIndex++)
 	{
 		ui_widget *Widget = UI->Widgets + WidgetIndex;
@@ -112,6 +114,29 @@ ui_signal UI_Interact(ui_context *UI, ui_widget *Widget)
 	return Signal;
 }
 
+v2f UI_RenderPos(ui_context *UI, ui_widget *Widget);
+
+void UI_Texture(ui_context *UI, str8 Name, r_texture Texture)
+{
+	ui_widget *Widget = UI_GetWidget(UI, Name);
+	Widget->Kind = UI_WIDGET_BUTTON;
+	Widget->String = Name;
+	Widget->DisplayString = Name;
+
+	ui_widget *Layout = UI->CurrentLayout;
+	UI_AppendAsChild(Layout, Widget);
+
+	v2f RenderPosition = UI_RenderPos(UI, Widget);
+	R_UniformM44F(UI->Draw->Render, Str8("PVMMatrix"), R_CurrentTransform(UI->Draw->Render));
+	R_UniformV2F(UI->Draw->Render, Str8("Position"), RenderPosition);
+	R_UniformV2F(UI->Draw->Render, Str8("Size"), Widget->Size);
+	R_BindTexture(UI->Draw->Render, Texture);
+	R_DrawTriangles(UI->Draw->Render, Str8("textured_quad.metal"), 6);
+
+	Widget->Aspect = (f32)Texture.Size.Y / (f32)Texture.Size.X;
+	Widget->Size   = v2f(Texture.Size.X, Texture.Size.Y);
+}
+
 b32 UI_Button(ui_context *UI, str8 Name)
 {
 	ui_widget *Widget = UI_GetWidget(UI, Name);
@@ -124,7 +149,7 @@ b32 UI_Button(ui_context *UI, str8 Name)
 	Widget->TextColour = v4f(0.9f, 0.87f, 0.83f, 1.0f);
 	Widget->CornerRadius = 15.0f;
 
-	ui_widget *Layout = UI->LayoutStack + UI->LayoutIndex - 1;
+	ui_widget *Layout = UI->CurrentLayout;
 	UI_AppendAsChild(Layout, Widget);
 
 	ui_signal Signal = UI_Interact(UI, Widget);
@@ -208,7 +233,7 @@ int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int
 	Header->Icon = Str8("\uE211");
 	Header->Padding = v2f(10.0f, 12.0f);
 
-	ui_widget *Layout = UI->LayoutStack + UI->LayoutIndex - 1;
+	ui_widget *Layout = UI->CurrentLayout;
 	UI_AppendAsChild(Layout, Header);
 
 	f32 LabelWidth = 0;
@@ -274,23 +299,23 @@ int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int
 
 void UI_LayoutPop(ui_context *UI)
 {
-	assert(UI->LayoutIndex > 0);
-	UI->LayoutIndex--;
+	assert(UI->CurrentLayout);
+	UI->CurrentLayout = UI->CurrentLayout->Parent;
 }
 
 void UI_LayoutPush(ui_context *UI, ui_widget Layout)
 {
-	UI->LayoutStack[UI->LayoutIndex] = Layout;
-	ui_widget *Pushed = UI->LayoutStack + UI->LayoutIndex;
-	if(UI->LayoutIndex > 0)
+	ui_widget *Pushed = UI->LayoutStack + UI->LayoutCount++;
+	*Pushed = Layout;
+	if(UI->CurrentLayout)
 	{
-		UI_AppendAsChild(UI->LayoutStack + UI->LayoutIndex - 1, Pushed);
+		UI_AppendAsChild(UI->CurrentLayout, Pushed);
 	}
 	else
 	{
 		UI->Root = Pushed;
 	}
-	UI->LayoutIndex++;
+	UI->CurrentLayout = Pushed;
 
 	if(Pushed->Flags & UI_DRAW_BACKGROUND)
 	{
@@ -336,7 +361,6 @@ void UI_AppendAsSibling(ui_widget *OlderSibling, ui_widget *YoungerSibling)
 
 void UI_Layout(ui_context *UI)
 {
-	//for(ui_widget *Child = UI->Root->First; Child; Child = Child->Next)
 	v2f ChildSize = UI->Root->Size;
 	ChildSize = SubV2F(ChildSize, UI->Root->Padding);
 	{
@@ -348,7 +372,7 @@ void UI_Layout(ui_context *UI)
 v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 {
 	v2f TotalSize = v2f(0.0, 0.0);
-	// Offset by Padding, decrease MaxSize by Padding * 2
+
 	v2f Paddingx2 = MulV2F(Row->Padding, v2f(2, 2));
 	MaxSize = SubV2F(MaxSize, Paddingx2);
 	int NumberOfChildren = 0;
@@ -362,6 +386,10 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 		else if(Sibling->Flags & UI_LAYOUT_COLUMN)
 		{
 			ChildSize = UI_LayoutColumn(UI, Sibling, MaxSize);
+		}
+		else if(Sibling->Flags & UI_LAYOUT_CENTRE)
+		{
+			ChildSize = UI_LayoutCentre(UI, Sibling, MaxSize);
 		}
 		else
 		{
@@ -400,7 +428,7 @@ v2f UI_LayoutRow(ui_context *UI, ui_widget *Row, v2f MaxSize)
 v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize)
 {
 	v2f TotalSize = v2f(0.0, 0.0);
-	// Offset by Padding, decrease MaxSize by Padding * 2
+
 	v2f Paddingx2 = MulV2F(Column->Padding, v2f(2, 2));
 	MaxSize = SubV2F(MaxSize, Paddingx2);
 	int NumberOfChildren = 0;
@@ -415,6 +443,10 @@ v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize)
 		{
 			ChildSize = UI_LayoutColumn(UI, Sibling, MaxSize);
 		}
+		else if(Sibling->Flags & UI_LAYOUT_CENTRE)
+		{
+			ChildSize = UI_LayoutCentre(UI, Sibling, MaxSize);
+		}
 		else
 		{
 			ChildSize = Sibling->Size;
@@ -424,20 +456,76 @@ v2f UI_LayoutColumn(ui_context *UI, ui_widget *Column, v2f MaxSize)
 		NumberOfChildren++;
 	}
 	if(NumberOfChildren > 1) TotalSize.Y += Column->Gap * (f32)(NumberOfChildren - 1);
+
+	v2f SpaceLeft = SubV2F(MaxSize, TotalSize);
+	Assert(SpaceLeft.Y >= 0.0f);
+	int NumberOfFillChildren = 0;
+	for(ui_widget *Sibling = Column->First; Sibling; Sibling = Sibling->Next)
+	{
+		if(Sibling->Flags & UI_LAYOUT_FILL) NumberOfFillChildren++;
+	}
+	if(NumberOfFillChildren > 0)
+	{
+		f32 ExtraSpacePerFillChild = SpaceLeft.Y / (f32)NumberOfFillChildren;
+		for(ui_widget *Sibling = Column->First; Sibling; Sibling = Sibling->Next)
+		{
+			if(Sibling->Flags & UI_LAYOUT_FILL)
+			{
+				Sibling->Size.Y += ExtraSpacePerFillChild;
+				Sibling->Size.X  = MaxSize.X;
+			}
+		}
+		TotalSize.Y += SpaceLeft.Y;
+		TotalSize.X  = Max(TotalSize.X, MaxSize.X);
+	}
 	Column->Size = AddV2F(TotalSize, Paddingx2);
 	return TotalSize;
+}
+
+v2f UI_LayoutCentre(ui_context *UI, ui_widget *Centre, v2f MaxSize)
+{
+	v2f Content = v2f(0.0, 0.0);
+	for(ui_widget *Child = Centre->First; Child; Child = Child->Next)
+	{
+		v2f ChildSize = v2f(0.0, 0.0);
+		if(Child->Flags & UI_LAYOUT_ROW)         ChildSize = UI_LayoutRow(UI, Child, MaxSize);
+		else if(Child->Flags & UI_LAYOUT_COLUMN) ChildSize = UI_LayoutColumn(UI, Child, MaxSize);
+		else if(Child->Flags & UI_LAYOUT_CENTRE) ChildSize = UI_LayoutCentre(UI, Child, MaxSize);
+		else                                     ChildSize = Child->Size;
+		Content.X = Max(Content.X, ChildSize.X);
+		Content.Y = Max(Content.Y, ChildSize.Y);
+	}
+	Centre->Size = Content;
+	return Content;
 }
 
 void UI_LayoutPositions(ui_context *UI, ui_widget *Widget, v2f Position)
 {
 	if(!Widget) return;
 	Widget->Position = Position;
-	Position = AddV2F(Position, Widget->Padding);
+	v2f Inner    = AddV2F(Position, Widget->Padding);
+	v2f InnerBox = SubV2F(Widget->Size, MulV2F(Widget->Padding, v2f(2, 2)));
 	for(ui_widget *Child = Widget->First; Child; Child = Child->Next)
 	{
-		UI_LayoutPositions(UI, Child, Position);
-		if(Widget->Flags & UI_LAYOUT_ROW)         Position.X += Child->Size.X + Widget->Gap;
-		else if(Widget->Flags & UI_LAYOUT_COLUMN) Position.Y += Child->Size.Y + Widget->Gap;
+		if(Widget->Flags & UI_LAYOUT_CENTRE)
+		{
+			if(Child->Aspect > 0.0f)
+			{
+				f32 H = InnerBox.Y;
+				f32 W = H * Child->Aspect;
+				if(W > InnerBox.X) { W = InnerBox.X; H = W / Child->Aspect; }
+				Child->Size = v2f(W, H);
+			}
+			v2f ChildPos = v2f(Inner.X + (InnerBox.X - Child->Size.X) * 0.5f,
+			                   Inner.Y + (InnerBox.Y - Child->Size.Y) * 0.5f);
+			UI_LayoutPositions(UI, Child, ChildPos);
+		}
+		else
+		{
+			UI_LayoutPositions(UI, Child, Inner);
+			if(Widget->Flags & UI_LAYOUT_ROW)         Inner.X += Child->Size.X + Widget->Gap;
+			else if(Widget->Flags & UI_LAYOUT_COLUMN) Inner.Y += Child->Size.Y + Widget->Gap;
+		}
 	}
 }
 

@@ -52,5 +52,5 @@ fragment float4 FragmentMain(
 {
 	sampler Sampler(mag_filter::linear, min_filter::linear);
 
-	return float4(Texture.sample(Sampler, Input.UV).xyz, 1.0);
+	return Texture.sample(Sampler, Input.UV);
 }

@@ -19,6 +19,7 @@ typedef u64 r_handle;
 // NEW API BEGIN
 
 typedef struct r_texture {
+	v2i Size;
 	u64 Handle;
 } r_texture;
 
