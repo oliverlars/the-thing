@@ -18,9 +18,13 @@ typedef struct d_atlas_glyph
 	u32 CodePoint;
 	f32 AdvanceX;
 
-	v2f *Curves;
-	int CurveStart;
+	v2f *Curves;         // persistent CPU curve geometry
 	int CurveCount;
+
+	// Offset this glyph's curves were packed to in the current frame's curve
+	// buffer, valid only while FramePackStamp == the current frame.
+	int FrameCurveOffset;
+	u64 FramePackStamp;
 
 	struct d_atlas_glyph *NextInHashSlot;
 } d_atlas_glyph;
@@ -36,7 +40,12 @@ typedef struct draw_context
 
 	d_atlas_glyph GlyphTable[D_GLYPH_TABLE_SIZE];
 
-	int CurveCount;
+	// Per-frame packed curve buffer for glyph draws (see D_BaseStr8). Rebuilt
+	// each frame from the glyphs actually drawn, so evicted glyphs cost nothing.
+	r_buffer CurveBuffer;
+	v2f     *CurveData;
+	int      CurveCursor;
+	u64      CurveFrameStamp;
 } draw_context;
 
 d_atlas_glyph *D_GlyphFromCodePoint(draw_context *D_Context,

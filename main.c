@@ -55,8 +55,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 	SetTemporaryArena(Frame);
 
 	App->Draw.ViewportSize = v2f(ViewportSize.X, ViewportSize.Y);
-	App->Render.CommandsFirst = NULL;
-	App->Render.CommandsLast = NULL;
 	App->Render.TransformCount = 0;
 	App->Render.ScissorCount = 0;
 
@@ -153,8 +151,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 		}
 	}
 
-	r_buffer CubeVertexPositionsBuffer = R_Buffer(&App->Render, Str8("Cube Positions"), .SizeInBytes = sizeof(v4f) * 36, .Data = CubeVertexPositions);
-	r_buffer CubeVertexColoursBuffer = R_Buffer(&App->Render, Str8("Cube Colours"), .SizeInBytes = sizeof(v4f) * 36, .Data = CubeVertexColours);
+	r_buffer CubeVertexPositionsBuffer = R_BufferPermanent(&App->Render, Str8("Cube Positions"), .SizeInBytes = sizeof(v4f) * 36, .Data = CubeVertexPositions);
+	r_buffer CubeVertexColoursBuffer = R_BufferPermanent(&App->Render, Str8("Cube Colours"), .SizeInBytes = sizeof(v4f) * 36, .Data = CubeVertexColours);
 
 	m44f Model = MulM44FM44F(M44FromYAngle((f32)App->Render.Frame / 100.0 * 0.9f),
 	                         M44FromXAngle((f32)App->Render.Frame / 100.0 * 0.6f));
@@ -182,6 +180,12 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 	f32 CardX0 = W * 0.10f - 30.0f;
 	f32 CardX1 = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + 30.0f;
+
+	r_texture Screen = R_Texture(&App->Render, Str8("Screen"),
+		.Size = ViewportSize, .Format = TF_BGRA10_SRGB);
+	R_Pass(&App->Render, Str8("Screen"), .Colours[0] = Screen, .ColourOps[0] = LO_CLEAR,
+		.ClearColour[0] = v4f(0.001548f, 0.001548f, 0.002322f, 1.0f))
+	{
 	D_RoundedQuad(&App->Draw, v2f(CardX0, ShapeY - 30.0f),
 		CardX1 - CardX0, ShapeSize + 60.0f, 24.0f,
 		.Colour = v4f(0.85f, 0.85f, 0.88f, 1));
@@ -255,15 +259,6 @@ static void Frame(void *UserData, v2i ViewportSize)
 		{
 			LogInfo("Clicked button");
 		}
-
-		R_Pass(&App->Render, Str8("Blit"), .Colours[0] = R_BackBuffer(), .ColourOps[0] = LO_LOAD)
-		{
-			R_UniformM44F(&App->Render, Str8("PVMMatrix"), Ortho);
-			R_UniformV2F(&App->Render, Str8("Position"), v2f(100, 100));
-			R_UniformV2F(&App->Render, Str8("Size"), v2f(400, 400));
-			R_BindTexture(&App->Render, TestTexture);
-			R_DrawTriangles(&App->Render, Str8("textured_quad.metal"), 6);
-		}
 	}
 
 	UI_Layout(&App->UI);
@@ -278,8 +273,17 @@ static void Frame(void *UserData, v2i ViewportSize)
 	}
 
 	UI_End(&App->UI);
+	}
 
-	R_Update(&App->Render, OS_NextDrawable(App->Window));
+	R_Pass(&App->Render, Str8("Blit"), .Colours[0] = Screen, .ColourOps[0] = LO_LOAD)
+	{
+		R_UniformM44F(&App->Render, Str8("PVMMatrix"), Ortho);
+		R_UniformV2F(&App->Render, Str8("Position"), v2f(100, 100));
+		R_UniformV2F(&App->Render, Str8("Size"), v2f(400, 400));
+		R_BindTexture(&App->Render, TestTexture);
+		R_DrawTriangles(&App->Render, Str8("textured_quad.metal"), 6);
+	}
+	R_Update(&App->Render, OS_NextDrawable(App->Window), Screen);
 }
 
 int main(int ArgCount, char **Args)
@@ -307,7 +311,7 @@ int main(int ArgCount, char **Args)
 		.Layer = Window.Layer,
 		.ShaderDir = Str8("shaders"),
 	};
-	R_Init(&App.Render, Arena, v2i(Window.Width, Window.Height), Opts, OS_NextDrawable(App.Window));
+	R_Init(&App.Render, Arena, v2i(Window.Width, Window.Height), Opts);
 
 	App.Draw.Arena = Arena;
 	App.Draw.Render = &App.Render;

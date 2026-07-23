@@ -22,12 +22,12 @@ float Squircle2D(float2 P, float2 HalfSize, float N)
 }
 
 fragment float4 FragmentMain(vertex_output Input [[stage_in]],
-                             constant uniforms &Uniforms [[buffer(1)]])
+                             constant uniforms &Uniforms [[buffer(0)]])
 {
-	float2 P = Input.LocalPos - Input.Centre;
-	float Dist = Squircle2D(P, Input.HalfSize, Input.Param);
-	if (Input.ShadowBlur > 0.0) return ShadeShadow(Dist, Input.ShadowBlur, Input.Colour);
-	return ShadeSDF(Dist, Input.LocalPos, Input.HalfSize,
-	                Input.Colour, Input.OutlineColour, Input.OutlineThickness,
-	                Input.Extrusion, 8.0, Uniforms);
+	float2 P = Input.LocalPos - Uniforms.Centre;
+	float Dist = Squircle2D(P, Uniforms.HalfSize, Uniforms.Param);
+	if (Uniforms.ShadowBlur > 0.0) return ShadeShadow(Dist, Uniforms.ShadowBlur, Uniforms.Colour);
+	return ShadeSDF(Dist, Input.LocalPos, Uniforms.HalfSize,
+	                Uniforms.Colour, Uniforms.OutlineColour, Uniforms.OutlineThickness,
+	                Uniforms.Extrusion, 8.0, Uniforms);
 }

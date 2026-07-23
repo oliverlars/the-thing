@@ -6,24 +6,6 @@ struct vertex_output
 {
 	float4 Position [[position]];
 	float2 LocalPos;
-	float4 Colour;
-	float2 Start;
-	float2 End;
-	float Thickness;
-};
-
-struct vertex_input
-{
-	float4 Position;
-	float4 Colour;
-	float2 Start;
-	float2 End;
-	float  Thickness;
-};
-
-struct uniforms
-{
-	float4x4 PVMMatrix;
 };
 
 // https://iquilezles.org/articles/distfunctions2d/
@@ -35,25 +17,27 @@ float DistanceToSegment(float2 Position, float2 Start, float2 End)
 	return length(PositionToStart - H*EndToStart);
 }
 
-vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
-								constant uniforms &Uniforms [[buffer(1)]],
-								uint VertexID [[vertex_id]])
+vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
+                                uint VertexID [[vertex_id]])
 {
+	float2 Min = Uniforms.QuadMin;
+	float2 Max = Uniforms.QuadMax;
+	float2 Corners[6] = {
+		float2(Min.x, Min.y), float2(Max.x, Min.y), float2(Max.x, Max.y),
+		float2(Min.x, Min.y), float2(Min.x, Max.y), float2(Max.x, Max.y),
+	};
 	vertex_output Output;
-	Output.Position = Uniforms.PVMMatrix * Vertices[VertexID].Position;
-	Output.LocalPos = Vertices[VertexID].Position.xy;
-	Output.Colour = Vertices[VertexID].Colour;
-	Output.Start = Vertices[VertexID].Start;
-	Output.End = Vertices[VertexID].End;
-	Output.Thickness = Vertices[VertexID].Thickness;
+	Output.Position = Uniforms.PVMMatrix * float4(Corners[VertexID], 0.0, 1.0);
+	Output.LocalPos = Corners[VertexID];
 	return Output;
 }
 
-fragment float4 FragmentMain(vertex_output Input [[stage_in]])
+fragment float4 FragmentMain(vertex_output Input [[stage_in]],
+                             constant uniforms &Uniforms [[buffer(0)]])
 {
-	float HalfThickness = 0.5 * Input.Thickness;
-	float Distance = DistanceToSegment(Input.LocalPos, Input.Start, Input.End) - HalfThickness;
+	float HalfThickness = 0.5 * Uniforms.Thickness;
+	float Distance = DistanceToSegment(Input.LocalPos, Uniforms.Start, Uniforms.End) - HalfThickness;
 	float AA = smoothstep(HalfThickness + HalfThickness, HalfThickness - HalfThickness, Distance);
 
-	return float4(Input.Colour.rgb, float(AA)*Input.Colour.a);
+	return float4(Uniforms.Colour.rgb, float(AA)*Uniforms.Colour.a);
 }

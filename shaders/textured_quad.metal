@@ -36,7 +36,8 @@ vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
 
 
 	vertex_output Output;
-	Output.Position = Uniforms.PVMMatrix * float4(Positions[VertexID], -1.0, 1);
+	Output.Position = Uniforms.PVMMatrix * float4(Positions[VertexID], 1);
+	Output.Position.z = 1.0;
 	Output.UV = UVs[VertexID];
 
 	return Output;

@@ -57,40 +57,35 @@ typedef struct metal_context
 	id<MTLCommandQueue>  CommandQueue;
 	CAMetalLayer        *Layer;
 
-	metal_shader TriangleShader;
-	metal_shader GlyphShader;
-	metal_shader PointShader;
-	metal_shader LineShader;
-	metal_shader BezierShader;
-	metal_shader RoundedBoxShader;
-	metal_shader SquircleShader;
-
-	id<MTLDepthStencilState> DepthOn;   // LessEqual + write
-	id<MTLDepthStencilState> DepthOff;  // Always + no write
-
-	id<MTLBuffer>  VertexBuffers [FRAMES_IN_FLIGHT];
-	id<MTLBuffer>  UniformBuffers[FRAMES_IN_FLIGHT];
-	id<MTLBuffer>  CurveBuffers  [FRAMES_IN_FLIGHT];
-
-	// Backbuffer lives at 4097
-	metal_texture_entry Textures[4098];
+	metal_texture_entry Textures[4096];
 	int                 TextureCount;
 	int                 TextureFreeList[4096];
 	int                 TextureFreeListCount;
 
+	// Copies the caller's final Source texture onto the drawable in R_Update.
+	id<MTLRenderPipelineState> BlitPipeline;
+
 	metal_buffer_entry Buffers[4096];
 
-	id<MTLBuffer>  FrameArenas[FRAMES_IN_FLIGHT];
+	// One transient heap per in-flight frame. R_BufferFrame (and the per-frame
+	// uniform scratch) sub-allocate from FrameHeaps[Frame % FRAMES_IN_FLIGHT];
+	// the semaphore guarantees a slot's previous frame has completed before we
+	// reuse it, so its allocations are safe to release and overwrite.
+	id<MTLHeap>    FrameHeaps[FRAMES_IN_FLIGHT];
+
+	// This frame's uniform scratch buffer (bump-allocated by R_Uniform*),
+	// allocated from the current frame's heap in R_BeginFrame.
+	id<MTLBuffer>  FrameUniforms;
+
+	// Buffers allocated from the current frame's heap via R_BufferFrame. Handle
+	// of a transient r_buffer indexes this; reset each frame.
+	id<MTLBuffer>  FrameBuffers[256];
+	int            FrameBufferCount;
 
 	// Single one for now, these should eventually chain if it runs out
 	id<MTLHeap>    PermanentArena;
 
 	metal_shader Shaders[4096];
-
-	id<MTLTexture> DepthTexture;
-
-	v2f *Curves;
-	int  TotalCurvesSoFar;
 
 	v2i Viewport;
 
@@ -107,25 +102,6 @@ typedef struct metal_context
 }
 metal_context;
 
-typedef struct uniforms
-{
-	m44f PVMMatrix;       // 64 bytes
-	v4f  LightPosition;   // 16 bytes — xyz = position, w = falloff radius (same units)
-	v4f  LightColour;
-	f32  LightIntensity;
-	f32  Pad[3];
-} uniforms;
-
-void R_UpdateCurves(render_context *Render, v2f *CurvePoints, int CurvePointsCount, int CurvePointsSoFar)
-{
-	metal_context *M = Render->Backend;
-	if (!M->Curves)
-	{
-		M->Curves = ArenaPushArray(Render->Arena, v2f, MegaBytes(2));
-	}
-	MemoryCopy(M->Curves + CurvePointsSoFar, CurvePoints, CurvePointsCount * sizeof(v2f));
-	M->TotalCurvesSoFar += CurvePointsCount;
-}
 
 void R_TextureFromBytes(render_context *R, u8 *Bytes, s32 Width, s32 Height)
 {
@@ -194,6 +170,7 @@ id<MTLTexture> MakeMetalTexture(render_context *R, str8 Name, v2i Size, r_textur
 		case TF_RGBA16: MetalFormat = MTLPixelFormatRGBA16Float; break;
 		case TF_RGBA32: MetalFormat = MTLPixelFormatRGBA32Float; break;
 		case TF_DEPTH32: MetalFormat = MTLPixelFormatDepth32Float; break;
+		case TF_BGRA10_SRGB: MetalFormat = MTLPixelFormatBGRA10_XR_sRGB; break;
 	}
 	MTLTextureDescriptor *Desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MetalFormat
 		width:Size.X
@@ -215,19 +192,11 @@ b32 TextureOptionsEqual(r_texture_options *A, r_texture_options *B)
 	return A->Format == B->Format && A->Size.X == B->Size.X && A->Size.Y && B->Size.Y;
 }
 
-r_texture R_BackBuffer()
-{
-	return (r_texture){ 4097 };
-}
-
 r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 {
 	metal_context *Metal = R->Backend;
 	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
-	// Slot 0 is reserved as the nil "no texture" sentinel (an unset .Depth /
-	// .Colours[n] defaults to handle 0), and slot 4097 holds the backbuffer,
-	// so hashed textures live in [1, 4096].
-	metal_texture_entry *Entry = Metal->Textures + 1 + (Hash % 4096);
+	metal_texture_entry *Entry = Metal->Textures + (Hash % 4096);
 	if(Entry->Hash == Hash)
 	{
 		if(!TextureOptionsEqual(&Entry->Options, Options))
@@ -282,7 +251,9 @@ id<MTLBuffer> MakeMetalBuffer(render_context *R, str8 Name, r_buffer_options *Op
 	return Buffer;
 }
 
-r_buffer R_BufferEx(render_context *R, str8 Name, r_buffer_options *Options)
+// Permanent: cached by name, lives across frames, written once (via .Data) or
+// appended to. Safe as a single copy only because you never overwrite live bytes.
+r_buffer R_BufferPermanentEx(render_context *R, str8 Name, r_buffer_options *Options)
 {
 	metal_context *Metal = R->Backend;
 	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
@@ -306,6 +277,34 @@ r_buffer R_BufferEx(render_context *R, str8 Name, r_buffer_options *Options)
 		Entry->Buffer = MakeMetalBuffer(R, Name, Options);
 	}
 	return (r_buffer){Entry - Metal->Buffers};
+}
+
+// Per-frame: a fresh buffer sub-allocated from this frame's heap on every call.
+// Not cached — Name is only a debug label. Contents are not preserved across
+// frames, so the caller must refill it each frame; it's race-free because the
+// bytes come from a heap slot whose previous frame the semaphore proved complete.
+r_buffer R_BufferFrameEx(render_context *R, str8 Name, r_buffer_options *Options)
+{
+	metal_context *Metal = R->Backend;
+	id<MTLHeap> Heap = Metal->FrameHeaps[R->Frame % FRAMES_IN_FLIGHT];
+	id<MTLBuffer> Buffer = [Heap newBufferWithLength:Options->SizeInBytes options:MTLResourceStorageModeShared];
+	Buffer.label = [[NSString alloc] initWithBytes:Name.Bytes length:Name.Size encoding:NSUTF8StringEncoding];
+	if(Options->Data)
+	{
+		MemoryCopy(Buffer.contents, Options->Data, Options->SizeInBytes);
+	}
+	int Index = Metal->FrameBufferCount++;
+	Metal->FrameBuffers[Index] = Buffer;
+	return (r_buffer){ .Handle = Index, .Transient = True };
+}
+
+// CPU-writable pointer to write into now. For a frame buffer this is the copy
+// allocated for the current frame.
+void *R_BufferData(render_context *R, r_buffer Buffer)
+{
+	metal_context *Metal = R->Backend;
+	id<MTLBuffer> B = Buffer.Transient ? Metal->FrameBuffers[Buffer.Handle] : Metal->Buffers[Buffer.Handle].Buffer;
+	return B.contents;
 }
 
 metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStruct)
@@ -375,7 +374,7 @@ void R_UniformF32(render_context *R, str8 Name, f32 Value)
 	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float1));
 	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float1));
 	MemoryCopy(
-		Metal->FrameArenas[R->Frame % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		(u8*)Metal->FrameUniforms.contents + R->UniformBytesCursor,
 		&Value,
 		sizeof(f32)
 	);
@@ -390,7 +389,7 @@ void R_UniformM44F(render_context *R, str8 Name, m44f Value)
 	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float4x4));
 	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float4x4));
 	MemoryCopy(
-		Metal->FrameArenas[R->Frame % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		(u8*)Metal->FrameUniforms.contents + R->UniformBytesCursor,
 		&Value,
 		sizeof(simd_float4x4)
 	);
@@ -405,11 +404,42 @@ void R_UniformV2F(render_context *R, str8 Name, v2f Value)
 	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float2));
 	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float2));
 	MemoryCopy(
-		Metal->FrameArenas[R->Frame % FRAMES_IN_FLIGHT].contents + R->UniformBytesCursor,
+		(u8*)Metal->FrameUniforms.contents + R->UniformBytesCursor,
 		&Value,
 		sizeof(simd_float2)
 	);
 	R->UniformBytesCursor += sizeof(simd_float2);
+}
+
+void R_UniformV4F(render_context *R, str8 Name, v4f Value)
+{
+	Str8ListAppend(TemporaryArena(), &R->UniformDeclarations, Str8PushF(TemporaryArena(), "metal::float4 ?S", Name));
+	metal_context *Metal = R->Backend;
+
+	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(simd_float4));
+	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(simd_float4));
+	simd_float4 Packed = { Value.X, Value.Y, Value.Z, Value.W };
+	MemoryCopy(
+		(u8*)Metal->FrameUniforms.contents + R->UniformBytesCursor,
+		&Packed,
+		sizeof(simd_float4)
+	);
+	R->UniformBytesCursor += sizeof(simd_float4);
+}
+
+void R_UniformU32(render_context *R, str8 Name, u32 Value)
+{
+	Str8ListAppend(TemporaryArena(), &R->UniformDeclarations, Str8PushF(TemporaryArena(), "uint ?S", Name));
+	metal_context *Metal = R->Backend;
+
+	R->LargestUniformAlignment = Max(R->LargestUniformAlignment, alignof(u32));
+	R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, alignof(u32));
+	MemoryCopy(
+		(u8*)Metal->FrameUniforms.contents + R->UniformBytesCursor,
+		&Value,
+		sizeof(u32)
+	);
+	R->UniformBytesCursor += sizeof(u32);
 }
 
 void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
@@ -439,11 +469,17 @@ void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
 		return;
 	}
-	[Metal->ActiveRenderEncoder setVertexBuffer:Metal->FrameArenas[R->Frame% FRAMES_IN_FLIGHT] offset:R->UniformStartOffset atIndex:0];
+	// The generated `uniforms` block lives at buffer(0) on both stages.
+	[Metal->ActiveRenderEncoder setVertexBuffer:Metal->FrameUniforms   offset:R->UniformStartOffset atIndex:0];
+	[Metal->ActiveRenderEncoder setFragmentBuffer:Metal->FrameUniforms offset:R->UniformStartOffset atIndex:0];
 	for(int I = 0; I < Metal->BoundBuffersCount; I++)
 	{
-		id<MTLBuffer> Buffer = Metal->Buffers[Metal->BoundBuffers[I].Handle].Buffer;
-		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer offset:0 atIndex:1 + I];
+		r_buffer BB = Metal->BoundBuffers[I];
+		id<MTLBuffer> Buffer = BB.Transient ? Metal->FrameBuffers[BB.Handle] : Metal->Buffers[BB.Handle].Buffer;
+		// Bound to both stages at buffer(1 + I); a stage that doesn't declare it
+		// simply ignores it (e.g. glyph curves are read by the fragment shader).
+		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer   offset:0 atIndex:1 + I];
+		[Metal->ActiveRenderEncoder setFragmentBuffer:Buffer offset:0 atIndex:1 + I];
 	}
 	for(int I = 0; I < Metal->BoundTexturesCount; I++)
 	{
@@ -503,12 +539,10 @@ MTLClearColor MetalClearColour(v4f Colour)
 void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options)
 {
 	metal_context *Metal = R->Backend;
-	// Draws inside the pass build their pipeline state (attachment pixel
-	// formats) from this.
+
 	R->PassOptions = *Options;
 	MTLRenderPassDescriptor *PassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-	// Default storeAction is DontCare, which lets the GPU discard the pass's
-	// tile memory instead of writing it back to the texture — store explicitly.
+
 	PassDescriptor.colorAttachments[0].texture = Metal->Textures[Options->Colours[0].Handle].Texture;
 	PassDescriptor.colorAttachments[0].loadAction = MetalLoadAction(Options->ColourOps[0]);
 	PassDescriptor.colorAttachments[0].clearColor = MetalClearColour(Options->ClearColour[0]);
@@ -548,15 +582,6 @@ void R_PassEnd(render_context *R, str8 Name)
 	R->PassOptions = (r_pass_options){0};
 }
 
-static int MTLAlignmentFromAttribute(r_vertex_attributes Attribute)
-{
-	int Index = CTZ_U64(Attribute);
-	#define X(T, NAME, CAPS_NAME, INDEX) alignof(MetalSimdType(T)),
-	int LUT[] = { VERTEX_ATTRIBUTE_FIELDS };
-	#undef X
-	return LUT[Index];
-}
-
 void R_ReleaseTexture(render_context *R, r_handle Texture)
 {
 	metal_context *Metal = R->Backend;
@@ -569,68 +594,6 @@ void R_ReleaseTexture(render_context *R, r_handle Texture)
 		}
 	}
 	Metal->TextureFreeList[Metal->TextureFreeListCount++] = Texture;
-}
-
-static int MTLSizeFromAttribute(r_vertex_attributes Attribute)
-{
-	int Index = CTZ_U64(Attribute);
-	#define X(T, NAME, CAPS_NAME, INDEX) sizeof(MetalSimdType(T)),
-	int LUT[] = { VERTEX_ATTRIBUTE_FIELDS };
-	#undef X
-	return LUT[Index];
-}
-
-static MTLVertexFormat MTLFormatFromAttribute(r_vertex_attributes Attribute)
-{
-	int Index = CTZ_U64(Attribute);
-	#define X(T, NAME, CAPS_NAME, INDEX) Concat(MTLVertexFormat, MetalType(T)),
-	MTLVertexFormat LUT[] = { VERTEX_ATTRIBUTE_FIELDS };
-	#undef X
-	return LUT[Index];
-}
-
-static MTLVertexDescriptor *MakeVertexDescriptor(r_command_type CommandType)
-{
-	MTLVertexDescriptor *VD = [[MTLVertexDescriptor alloc] init];
-	r_vertex_attributes Attributes = R_AttributesFromCommandType(CommandType);
-
-	int Index = 0;
-	int Offset = 0;
-	int MaxAlignment = 0;
-	for (int A = 0; A < (int)ArrayCount(G_VertexAttributes); A++)
-	{
-		if (Attributes & G_VertexAttributes[A])
-		{
-			int Alignment = MTLAlignmentFromAttribute(G_VertexAttributes[A]);
-			MaxAlignment = Max(MaxAlignment, Alignment);
-			Offset = Align(Offset, Alignment);
-			VD.attributes[Index].format = MTLFormatFromAttribute(G_VertexAttributes[A]);
-			VD.attributes[Index].offset = Offset;
-			VD.attributes[Index].bufferIndex = 0;
-			Index++;
-			Offset += MTLSizeFromAttribute(G_VertexAttributes[A]);
-		}
-	}
-	VD.layouts[0].stride = Align(Offset, MaxAlignment ? MaxAlignment : 16);
-	return VD;
-}
-
-static int StrideFromAttributes(r_vertex_attributes Attributes)
-{
-	int Offset = 0;
-	int MaxAlignment = 0;
-	for (int A = 0; A < (int)ArrayCount(G_VertexAttributes); A++)
-	{
-		if (Attributes & G_VertexAttributes[A])
-		{
-			int Alignment = MTLAlignmentFromAttribute(G_VertexAttributes[A]);
-			int Size = MTLSizeFromAttribute(G_VertexAttributes[A]);
-			MaxAlignment = Max(MaxAlignment, Alignment);
-			Offset = Align(Offset, Alignment);
-			Offset += Size;
-		}
-	}
-	return Align(Offset, MaxAlignment ? MaxAlignment : 16);
 }
 
 // Metal's newLibraryWithSource has no include search path, so we resolve local
@@ -688,46 +651,7 @@ static str8 LoadShaderSource(m_arena *Arena, str8 ShaderDir, char *Name)
 	return ResolveShaderIncludes(Arena, ShaderDir, Raw);
 }
 
-static metal_shader MakeShader(metal_context *M, str8 Source, r_command_type Type,
-                               MTLPixelFormat ColorFormat, MTLPixelFormat DepthFormat)
-{
-	metal_shader Shader = {0};
-
-	NSError *Error = nil;
-	NSString *NSSource = [[NSString alloc] initWithBytes:Source.Bytes length:Source.Size encoding:NSUTF8StringEncoding];
-	Shader.Library = [M->Device newLibraryWithSource:NSSource options:nil error:&Error];
-	if (!Shader.Library)
-	{
-		LogError("Shader compile failed: ?cstr",
-			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
-		return Shader;
-	}
-
-	id<MTLFunction> Vert = [Shader.Library newFunctionWithName:@"VertexMain"];
-	id<MTLFunction> Frag = [Shader.Library newFunctionWithName:@"FragmentMain"];
-
-	MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
-	PD.vertexFunction = Vert;
-	PD.fragmentFunction = Frag;
-	PD.colorAttachments[0].pixelFormat = ColorFormat;
-	PD.colorAttachments[0].blendingEnabled = YES;
-	PD.colorAttachments[0].sourceRGBBlendFactor      = MTLBlendFactorSourceAlpha;
-	PD.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-	PD.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
-	PD.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-	PD.depthAttachmentPixelFormat = DepthFormat;
-	PD.vertexDescriptor = MakeVertexDescriptor(Type);
-
-	Shader.PipelineState = [M->Device newRenderPipelineStateWithDescriptor:PD error:&Error];
-	if (!Shader.PipelineState)
-	{
-		LogError("Pipeline state failed: ?cstr",
-			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
-	}
-	return Shader;
-}
-
-void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options, void *DrawableHandle)
+void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 {
 	metal_context *M = ArenaPushArrayZero(Arena, metal_context, 1);
 	R->Backend = M;
@@ -738,48 +662,43 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options,
 	M->CommandQueue = [M->Device newCommandQueue];
 	M->Viewport = Size;
 
+	// One transient heap per in-flight frame; R_BufferFrame and the uniform
+	// scratch sub-allocate from the current frame's heap.
 	for (int Index = 0; Index < FRAMES_IN_FLIGHT; Index++)
 	{
-		M->VertexBuffers[Index]  = [M->Device newBufferWithLength:MegaBytes(64) options:MTLResourceStorageModeShared];
-		M->UniformBuffers[Index] = [M->Device newBufferWithLength:MegaBytes(4)  options:MTLResourceStorageModeShared];
-		M->CurveBuffers[Index]   = [M->Device newBufferWithLength:MegaBytes(16) options:MTLResourceStorageModeShared];
-
-		M->FrameArenas[Index]    = [M->Device newBufferWithLength:MegaBytes(32) options:MTLResourceStorageModeShared];
+		MTLHeapDescriptor *HeapDesc = [[MTLHeapDescriptor alloc] init];
+		HeapDesc.size        = MegaBytes(64);
+		HeapDesc.storageMode = MTLStorageModeShared;
+		HeapDesc.type        = MTLHeapTypeAutomatic;
+		M->FrameHeaps[Index] = [M->Device newHeapWithDescriptor:HeapDesc];
 	}
 
-
-	MTLPixelFormat Color = MTLPixelFormatBGRA10_XR_sRGB;
-	MTLPixelFormat Depth = MTLPixelFormatDepth32Float;
-
-	M->TriangleShader   = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "triangle.metal"),    R_COMMAND_TRIANGLE,    Color, Depth);
-	M->GlyphShader      = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "glyph.metal"),       R_COMMAND_GLYPH,       Color, Depth);
-	M->PointShader      = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "point.metal"),       R_COMMAND_POINTS,      Color, Depth);
-	M->LineShader       = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "line.metal"),        R_COMMAND_LINES,       Color, Depth);
-	M->BezierShader     = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "bezier.metal"),      R_COMMAND_BEZIER,      Color, Depth);
-	M->RoundedBoxShader = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "rounded_box.metal"), R_COMMAND_ROUNDED_BOX, Color, Depth);
-	M->SquircleShader   = MakeShader(M, LoadShaderSource(TemporaryArena(), Options.ShaderDir, "squircle.metal"),    R_COMMAND_SQUIRCLE,    Color, Depth);
-
-	// Two depth states — triangles/points test+write depth, the SDF primitives
-	// and glyphs disable depth so transparent edges don't punch holes in things
-	// drawn behind them.
+	// Fullscreen-triangle pipeline that copies the caller's final Source texture
+	// onto the drawable at the end of R_Update.
 	{
-		MTLDepthStencilDescriptor *D = [MTLDepthStencilDescriptor new];
-		D.depthCompareFunction = MTLCompareFunctionLessEqual;
-		D.depthWriteEnabled = YES;
-		M->DepthOn = [M->Device newDepthStencilStateWithDescriptor:D];
-
-		D = [MTLDepthStencilDescriptor new];
-		D.depthCompareFunction = MTLCompareFunctionAlways;
-		D.depthWriteEnabled = NO;
-		M->DepthOff = [M->Device newDepthStencilStateWithDescriptor:D];
+		str8 BlitSource = LoadShaderSource(TemporaryArena(), Options.ShaderDir, "blit.metal");
+		NSError *Error = nil;
+		NSString *NSSource = [[NSString alloc] initWithBytes:BlitSource.Bytes length:BlitSource.Size encoding:NSUTF8StringEncoding];
+		id<MTLLibrary> Library = [M->Device newLibraryWithSource:NSSource options:nil error:&Error];
+		if (!Library)
+		{
+			LogError("Blit shader compile failed: ?cstr",
+				(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
+		}
+		else
+		{
+			MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
+			PD.vertexFunction   = [Library newFunctionWithName:@"VertexMain"];
+			PD.fragmentFunction = [Library newFunctionWithName:@"FragmentMain"];
+			PD.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA10_XR_sRGB;
+			M->BlitPipeline = [M->Device newRenderPipelineStateWithDescriptor:PD error:&Error];
+			if (!M->BlitPipeline)
+			{
+				LogError("Blit pipeline failed: ?cstr",
+					(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
+			}
+		}
 	}
-
-	id<CAMetalDrawable> Drawable = (__bridge id<CAMetalDrawable>)DrawableHandle;
-	
-	r_texture_options DrawableOptions;
-	DrawableOptions.Format = TF_BGRA10_SRGB;
-	DrawableOptions.Size = v2i(Drawable.texture.width, Drawable.texture.height);
-	M->Textures[4097] = (metal_texture_entry){ Drawable.texture, DrawableOptions, 0 };
 
 	M->InFlightSemaphore = dispatch_semaphore_create(FRAMES_IN_FLIGHT);
 }
@@ -794,192 +713,48 @@ void R_BeginFrame(render_context *R, v2i ViewportSize)
 	R->UniformDeclarations = (str8_list){0};
 	R->LargestUniformAlignment = 0;
 
+	// Block until the frame that last used this heap slot (Frame - FRAMES_IN_FLIGHT)
+	// has finished on the GPU, so its heap allocations are safe to release and
+	// overwrite. This must happen before any uniform / R_BufferFrame writes.
+	dispatch_semaphore_wait(M->InFlightSemaphore, DISPATCH_TIME_FOREVER);
+
+	// Drop last cycle's transient buffers (their command buffers still retain
+	// them until the GPU is done) and reclaim this slot's heap.
+	int Slot = R->Frame % FRAMES_IN_FLIGHT;
+	for (int I = 0; I < M->FrameBufferCount; I++) M->FrameBuffers[I] = nil;
+	M->FrameBufferCount = 0;
+	M->FrameUniforms = nil;
+
 	M->CommandBuffer = [M->CommandQueue commandBuffer];
 
-	if (!M->DepthTexture ||
-	    [M->DepthTexture width]  != (NSUInteger)ViewportSize.X ||
-	    [M->DepthTexture height] != (NSUInteger)ViewportSize.Y)
-	{
-		MTLTextureDescriptor *Desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-		                                                                                width:ViewportSize.X
-		                                                                               height:ViewportSize.Y
-		                                                                            mipmapped:NO];
-		Desc.usage = MTLTextureUsageRenderTarget;
-		Desc.storageMode = MTLStorageModePrivate;
-		M->DepthTexture = [M->Device newTextureWithDescriptor:Desc];
-	}
+	// This frame's uniform scratch, sub-allocated from the frame's heap.
+	M->FrameUniforms = [M->FrameHeaps[Slot] newBufferWithLength:MegaBytes(8) options:MTLResourceStorageModeShared];
+	M->FrameUniforms.label = @"Frame Uniforms";
 }
 
-static int CopyCommandVerticesToGPU(r_command *Command, u8 *Destination)
-{
-	r_vertex_attributes Attributes = Command->Attributes;
-	int Stride = StrideFromAttributes(Attributes);
-
-	u8 *Out = Destination;
-	for (int V = 0; V < Command->VerticesCount; V++)
-	{
-		r_vertex *Vx = Command->Vertices + V;
-		int Offset = 0;
-		for (int A = 0; A < (int)ArrayCount(G_VertexAttributes); A++)
-		{
-			if (Attributes & G_VertexAttributes[A])
-			{
-				int Alignment = MTLAlignmentFromAttribute(G_VertexAttributes[A]);
-				int Size = MTLSizeFromAttribute(G_VertexAttributes[A]);
-				Offset = Align(Offset, Alignment);
-				u8 *Src = (u8*)Vx + G_VertexAttributeOffsets[A];
-				MemoryCopy(Out + Offset, Src, Size);
-				Offset += Size;
-			}
-		}
-		Out += Stride;
-	}
-	return Stride * Command->VerticesCount;
-}
-
-static MTLScissorRect ScissorFor(v4i Scissor, v2i Viewport)
-{
-	int X = Scissor.X;
-	int Y = Viewport.Y - (Scissor.Y + Scissor.W);
-	int W = Scissor.Z;
-	int H = Scissor.W;
-	if (X < 0) { W += X; X = 0; }
-	if (Y < 0) { H += Y; Y = 0; }
-	if (X + W > Viewport.X) W = Viewport.X - X;
-	if (Y + H > Viewport.Y) H = Viewport.Y - Y;
-	if (W < 0) W = 0;
-	if (H < 0) H = 0;
-	return (MTLScissorRect){ .x = X, .y = Y, .width = W, .height = H };
-}
-
-void R_Update(render_context *R, void *DrawableHandle)
+void R_Update(render_context *R, void *DrawableHandle, r_texture Source)
 {
 	metal_context *M = R->Backend;
 	id<CAMetalDrawable> Drawable = (__bridge id<CAMetalDrawable>)DrawableHandle;
-	if (!Drawable) return;
-	r_texture_options DrawableOptions;
-	DrawableOptions.Format = TF_BGRA10_SRGB;
-	DrawableOptions.Size = v2i(Drawable.texture.width, Drawable.texture.height);
-	M->Textures[4097] = (metal_texture_entry){ Drawable.texture, DrawableOptions, 0 };
 
-	dispatch_semaphore_wait(M->InFlightSemaphore, DISPATCH_TIME_FOREVER);
-
-	int ResourceIndex = R->Frame % FRAMES_IN_FLIGHT;
-
-	if (M->TotalCurvesSoFar > 0)
+	// (The semaphore wait that gates heap reuse happens in R_BeginFrame.) The
+	// caller's immediate passes already rendered into Source; here we copy it
+	// onto the drawable. If there's no drawable this frame we still commit so the
+	// completion handler balances R_BeginFrame's wait and the heap gets reclaimed.
+	if (Drawable)
 	{
-		MemoryCopy(M->CurveBuffers[ResourceIndex].contents,
-		           M->Curves, M->TotalCurvesSoFar * sizeof(v2f));
+		MTLRenderPassDescriptor *BlitPass = [MTLRenderPassDescriptor renderPassDescriptor];
+		BlitPass.colorAttachments[0].texture     = Drawable.texture;
+		BlitPass.colorAttachments[0].loadAction  = MTLLoadActionDontCare;
+		BlitPass.colorAttachments[0].storeAction = MTLStoreActionStore;
+		id<MTLRenderCommandEncoder> BlitEncoder = [M->CommandBuffer renderCommandEncoderWithDescriptor:BlitPass];
+		[BlitEncoder setRenderPipelineState:M->BlitPipeline];
+		[BlitEncoder setFragmentTexture:M->Textures[Source.Handle].Texture atIndex:0];
+		[BlitEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+		[BlitEncoder endEncoding];
+
+		[M->CommandBuffer presentDrawable:Drawable];
 	}
-
-	// Stage 1: pack every command's vertex data into the frame's vertex
-	// buffer, and stash each batch's (offset, count, uniform index) so the
-	// single render pass below can issue draws back-to-back.
-	typedef struct draw {
-		r_command_type Type;
-		v4i Scissor;
-		int VertexOffset;     // bytes
-		int VertexCount;
-		int UniformIndex;
-	} draw;
-
-	m_scratch_arena Scratch = ScratchBegin(0, 0);
-	int MaxDraws = 4096;
-	draw *Draws = ArenaPushArray(Scratch.Arena, draw, MaxDraws);
-	int DrawCount = 0;
-
-	int VertexOffsetInBytes = 0;
-	int CurrentBatchBytes = 0;
-	int UniformIndex = 0;
-
-	for (r_command *Command = R->CommandsFirst; Command; Command = Command->Next)
-	{
-		u8 *Dest = (u8*)M->VertexBuffers[ResourceIndex].contents + VertexOffsetInBytes + CurrentBatchBytes;
-		CurrentBatchBytes += CopyCommandVerticesToGPU(Command, Dest);
-
-		b32 EndOfBatch = !Command->Next
-		              || Command->Next->Type != Command->Type
-		              || !MemoryEqual(&Command->Transform, &Command->Next->Transform, sizeof(m44f));
-		if (!EndOfBatch) continue;
-
-		uniforms U = {
-			.PVMMatrix     = Command->Transform,
-			.LightPosition = v4f(R->LightPosition.X, R->LightPosition.Y, R->LightPosition.Z, R->LightRadius),
-			.LightColour   = v4f(R->LightColour.X,   R->LightColour.Y,   R->LightColour.Z,   0),
-			.LightIntensity = R->LightIntensity,
-		};
-		MemoryCopy((u8*)M->UniformBuffers[ResourceIndex].contents + UniformIndex * sizeof(uniforms),
-		           &U, sizeof(U));
-
-		int Stride = StrideFromAttributes(Command->Attributes);
-		assert(DrawCount < MaxDraws);
-		Draws[DrawCount++] = (draw){
-			.Type         = Command->Type,
-			.Scissor      = Command->Scissor,
-			.VertexOffset = VertexOffsetInBytes,
-			.VertexCount  = CurrentBatchBytes / Stride,
-			.UniformIndex = UniformIndex,
-		};
-
-		VertexOffsetInBytes += CurrentBatchBytes;
-		CurrentBatchBytes = 0;
-		UniformIndex++;
-	}
-
-	// Stage 2: one render pass per frame. Clear once at the start, run every
-	// draw inside it, present, commit.
-	MTLRenderPassDescriptor *Pass = [MTLRenderPassDescriptor renderPassDescriptor];
-	Pass.colorAttachments[0].texture     = Drawable.texture;
-	Pass.colorAttachments[0].loadAction  = MTLLoadActionClear;
-	Pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-	// sRGB target: the clear colour is treated as linear and encoded on store, so
-	// linearise the sRGB values (0.02, 0.02, 0.03) to keep the same dark backdrop.
-	Pass.colorAttachments[0].clearColor  = MTLClearColorMake(0.001548, 0.001548, 0.002322, 1.0);
-	Pass.depthAttachment.texture     = M->DepthTexture;
-	Pass.depthAttachment.loadAction  = MTLLoadActionClear;
-	Pass.depthAttachment.storeAction = MTLStoreActionDontCare;
-	Pass.depthAttachment.clearDepth  = 1.0;
-
-	id<MTLRenderCommandEncoder> E = [M->CommandBuffer renderCommandEncoderWithDescriptor:Pass];
-	[E setCullMode:MTLCullModeNone];
-
-	for (int I = 0; I < DrawCount; I++)
-	{
-		draw *D = Draws + I;
-
-		metal_shader *Shader = NULL;
-		b32 WriteDepth = NO;
-		b32 NeedsCurves = NO;
-		switch (D->Type)
-		{
-		case R_COMMAND_TRIANGLE:    Shader = &M->TriangleShader;   WriteDepth = YES; break;
-		case R_COMMAND_GLYPH:       Shader = &M->GlyphShader;      NeedsCurves = YES; break;
-		case R_COMMAND_POINTS:      Shader = &M->PointShader;      WriteDepth = YES; break;
-		case R_COMMAND_LINES:       Shader = &M->LineShader;       break;
-		case R_COMMAND_BEZIER:      Shader = &M->BezierShader;     break;
-		case R_COMMAND_ROUNDED_BOX: Shader = &M->RoundedBoxShader; break;
-		case R_COMMAND_SQUIRCLE:    Shader = &M->SquircleShader;   break;
-		}
-
-		[E setRenderPipelineState:Shader->PipelineState];
-		[E setDepthStencilState:(WriteDepth ? M->DepthOn : M->DepthOff)];
-		[E setScissorRect:ScissorFor(D->Scissor, M->Viewport)];
-		[E setVertexBuffer:M->VertexBuffers[ResourceIndex]    offset:D->VertexOffset                    atIndex:0];
-		[E setVertexBuffer:M->UniformBuffers[ResourceIndex]   offset:D->UniformIndex * sizeof(uniforms) atIndex:1];
-		// Fragment shaders for the lit SDF shapes also read uniforms (light
-		// pos/colour). Vertex and fragment stages have independent buffer
-		// tables, so this binding is required on top of the vertex one above.
-		[E setFragmentBuffer:M->UniformBuffers[ResourceIndex] offset:D->UniformIndex * sizeof(uniforms) atIndex:1];
-		if (NeedsCurves)
-		{
-			[E setFragmentBuffer:M->CurveBuffers[ResourceIndex] offset:0 atIndex:0];
-		}
-		[E drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:D->VertexCount];
-	}
-
-	[E endEncoding];
-
-	[M->CommandBuffer presentDrawable:Drawable];
 
 	__block dispatch_semaphore_t BlockSem = M->InFlightSemaphore;
 	[M->CommandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _) {
@@ -987,10 +762,6 @@ void R_Update(render_context *R, void *DrawableHandle)
 	}];
 	[M->CommandBuffer commit];
 
-	ScratchEnd(Scratch);
-
-	R->CommandsFirst = NULL;
-	R->CommandsLast = NULL;
 	R->Frame++;
 	R->TransformCount = 0;
 	R->ScissorCount = 0;

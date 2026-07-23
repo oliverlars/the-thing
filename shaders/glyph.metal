@@ -4,36 +4,25 @@ using namespace metal;
 struct vertex_output
 {
 	float4 Position [[position]];
-	uint CurveStart;
-	uint CurveCount;
-	float4 Colour;
-	float2 LocalPos;
+	float2 LocalPos;   // glyph-space [0,1], used for curve coverage
 };
 
-struct vertex_input
+vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
+                                uint VertexID [[vertex_id]])
 {
-	float4 Position;
-	float4 Colour;
-	float2 LocalPos;
-	uint CurveStart;
-	uint CurveCount;
-};
-
-struct uniforms
-{
-	float4x4 PVMMatrix;
-};
-
-vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
-								constant uniforms &Uniforms [[buffer(1)]],
-								uint VertexID [[vertex_id]])
-{
+	float2 Min = Uniforms.QuadMin;
+	float2 Max = Uniforms.QuadMax;
+	float2 Corners[6] = {
+		float2(Min.x, Min.y), float2(Max.x, Min.y), float2(Max.x, Max.y),
+		float2(Min.x, Min.y), float2(Min.x, Max.y), float2(Max.x, Max.y),
+	};
+	float2 UVs[6] = {
+		float2(0, 1), float2(1, 1), float2(1, 0),
+		float2(0, 1), float2(0, 0), float2(1, 0),
+	};
 	vertex_output Output;
-	Output.Position = Uniforms.PVMMatrix * Vertices[VertexID].Position;
-	Output.Colour = Vertices[VertexID].Colour;
-	Output.LocalPos = Vertices[VertexID].LocalPos;
-	Output.CurveStart = Vertices[VertexID].CurveStart;
-	Output.CurveCount = Vertices[VertexID].CurveCount;
+	Output.Position = Uniforms.PVMMatrix * float4(Corners[VertexID], 0.0, 1.0);
+	Output.LocalPos = UVs[VertexID];
 	return Output;
 }
 
@@ -59,13 +48,15 @@ float2 CalculateQuadraticRoots(float A, float B, float C)
 }
 
 fragment float4 FragmentMain(vertex_output Input [[stage_in]],
-							 texture2d<float> FontAtlas [[texture(0)]],
-							 device const float2 *Curves [[buffer(0)]],
-							 sampler Sampler [[sampler(0)]])
+                             constant uniforms &Uniforms [[buffer(0)]],
+                             device const float2 *Curves [[buffer(1)]])
 {
 	float PixelWidth = fabs(dfdx(Input.LocalPos.x));
 	float PixelHeight = fabs(dfdy(Input.LocalPos.y));
 	float InversePixelWidth = 1.0 / PixelWidth;
+
+	uint CurveStart = Uniforms.CurveStart;
+	uint CurveCount = Uniforms.CurveCount;
 
 	float AlphaSum = 0.0;
 
@@ -76,11 +67,11 @@ fragment float4 FragmentMain(vertex_output Input [[stage_in]],
 			float2 SamplePos = Input.LocalPos + float2(float(OffsetX) * PixelWidth / 3.0, float(OffsetY) * PixelHeight / 3.0);
 			float Coverage = 0.0;
 
-			for (uint I = 0; I < Input.CurveCount; I += 3)
+			for (uint I = 0; I < CurveCount; I += 3)
 			{
-				float2 P0 = Curves[(Input.CurveStart + I) + 0] - SamplePos;
-				float2 P1 = Curves[(Input.CurveStart + I) + 1] - SamplePos;
-				float2 P2 = Curves[(Input.CurveStart + I) + 2] - SamplePos;
+				float2 P0 = Curves[(CurveStart + I) + 0] - SamplePos;
+				float2 P1 = Curves[(CurveStart + I) + 1] - SamplePos;
+				float2 P2 = Curves[(CurveStart + I) + 2] - SamplePos;
 
 				bool IsDownwardCurve = (P0.y > 0.0) || (P2.y < 0.0);
 
@@ -121,12 +112,6 @@ fragment float4 FragmentMain(vertex_output Input [[stage_in]],
 
 	}
 
-	// Clamp Alpha. With float framebuffer, out-of-range Alpha ends up writing
-	// negative or HDR values via SrcAlpha/OneMinusSrcAlpha blend:
-	// dst = rgb*a*Alpha + dst*(1 - a*Alpha). Alpha>1 makes (1-a*Alpha)<0 →
-	// negative dst channels → composite `1 - exp(-negative)` produces large
-	// values → whites/artifacts at winding-rule edges.
 	float Alpha = clamp(fabs(AlphaSum) / 9.0, 0.0, 1.0);
-	return float4(Input.Colour.rgb, Input.Colour.a * Alpha);
-	//return float4(mix(float3(0, 1, 1), float3(1, 1, 1), Alpha), 1.0);
+	return float4(Uniforms.Colour.rgb, Uniforms.Colour.a * Alpha);
 }

@@ -13,6 +13,6 @@ typedef struct r_init_options
 	str8 ShaderDir;
 } r_init_options;
 
-void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options, void *BackBuffer);
+void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options);
 void R_BeginFrame(render_context *R, v2i ViewportSize);
-void R_Update(render_context *R, void *Drawable);
+void R_Update(render_context *R, void *Drawable, r_texture Source);

@@ -2,64 +2,25 @@
 
 using namespace metal;
 
-struct uniforms
-{
-	float4x4 PVMMatrix;
-	float4   LightPosition;   // xyz = world-space position of point light, w = falloff radius (same units)
-	float4   LightColour;
-	float    LightIntensity;
-	float    Pad[3];
-};
-
-// Field order follows enum bit order in r_vertex_attributes (see
-// VERTEX_ATTRIBUTE_FIELDS in render_common.h) so the struct layout matches the
-// CPU-packed vertex buffer. Param is the shape-specific scalar (corner radius
-// for the rounded box, exponent for the squircle).
-struct vertex_input
-{
-	float4 Position;
-	float4 Colour;
-	float  Param;
-	float2 Centre;
-	float2 HalfSize;
-	float4 OutlineColour;
-	float  OutlineThickness;
-	float  Extrusion;
-	float4 CornerRadii;
-	float  ShadowBlur;
-};
-
 struct vertex_output
 {
 	float4 Position [[position]];
 	float2 LocalPos;
-	float4 Colour;
-	float2 Centre;
-	float2 HalfSize;
-	float  Param;
-	float4 OutlineColour;
-	float  OutlineThickness;
-	float  Extrusion;
-	float4 CornerRadii;
-	float  ShadowBlur;
 };
 
-vertex vertex_output VertexMain(constant vertex_input *Vertices [[buffer(0)]],
-                                constant uniforms &Uniforms [[buffer(1)]],
+vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
                                 uint VertexID [[vertex_id]])
 {
+	float2 Min = Uniforms.QuadMin;
+	float2 Max = Uniforms.QuadMax;
+	float2 Corners[6] = {
+		float2(Min.x, Min.y), float2(Max.x, Min.y), float2(Max.x, Max.y),
+		float2(Min.x, Min.y), float2(Min.x, Max.y), float2(Max.x, Max.y),
+	};
+	float2 P = Corners[VertexID];
 	vertex_output Output;
-	Output.Position         = Uniforms.PVMMatrix * Vertices[VertexID].Position;
-	Output.LocalPos         = Vertices[VertexID].Position.xy;
-	Output.Colour           = Vertices[VertexID].Colour;
-	Output.Centre           = Vertices[VertexID].Centre;
-	Output.HalfSize         = Vertices[VertexID].HalfSize;
-	Output.Param            = Vertices[VertexID].Param;
-	Output.OutlineColour    = Vertices[VertexID].OutlineColour;
-	Output.OutlineThickness = Vertices[VertexID].OutlineThickness;
-	Output.Extrusion        = Vertices[VertexID].Extrusion;
-	Output.CornerRadii      = Vertices[VertexID].CornerRadii;
-	Output.ShadowBlur       = Vertices[VertexID].ShadowBlur;
+	Output.Position = Uniforms.PVMMatrix * float4(P, 0.0, 1.0);
+	Output.LocalPos = P;
 	return Output;
 }
 

@@ -20,12 +20,12 @@ float DistanceToRoundedBox(float2 P, float2 HalfSize, float4 Radii)
 }
 
 fragment float4 FragmentMain(vertex_output Input [[stage_in]],
-                             constant uniforms &Uniforms [[buffer(1)]])
+                             constant uniforms &Uniforms [[buffer(0)]])
 {
-	float2 P = Input.LocalPos - Input.Centre;
-	float Dist = DistanceToRoundedBox(P, Input.HalfSize, Input.CornerRadii);
-	if (Input.ShadowBlur > 0.0) return ShadeShadow(Dist, Input.ShadowBlur, Input.Colour);
-	return ShadeSDF(Dist, Input.LocalPos, Input.HalfSize,
-	                Input.Colour, Input.OutlineColour, Input.OutlineThickness,
-	                Input.Extrusion, 10.0, Uniforms);
+	float2 P = Input.LocalPos - Uniforms.Centre;
+	float Dist = DistanceToRoundedBox(P, Uniforms.HalfSize, Uniforms.CornerRadii);
+	if (Uniforms.ShadowBlur > 0.0) return ShadeShadow(Dist, Uniforms.ShadowBlur, Uniforms.Colour);
+	return ShadeSDF(Dist, Input.LocalPos, Uniforms.HalfSize,
+	                Uniforms.Colour, Uniforms.OutlineColour, Uniforms.OutlineThickness,
+	                Uniforms.Extrusion, 10.0, Uniforms);
 }

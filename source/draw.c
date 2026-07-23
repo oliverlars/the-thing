@@ -131,9 +131,7 @@ static void CurvesFromCodePoint(draw_context *Draw, m_arena *Arena,
 	}
 
 	stbtt_FreeShape(&Font.Info, Vertices);
-
-	R_UpdateCurves(Draw->Render, Curves[0], CurveCount[0], Draw->CurveCount);
-	Draw->CurveCount += CurveCount[0];
+	(void)Draw;
 }
 
 d_atlas_glyph *D_GlyphFromCodePoint(draw_context *D, d_font Font, u32 CodePoint)
@@ -164,7 +162,6 @@ d_atlas_glyph *D_GlyphFromCodePoint(draw_context *D, d_font Font, u32 CodePoint)
 		stbtt_GetCodepointBox(&Font.Info, CodePoint, &Glyph->Box.X, &Glyph->Box.Y,
 		                                              &Glyph->Box.Z, &Glyph->Box.W);
 
-		Glyph->CurveStart = D->CurveCount;
 		CurvesFromCodePoint(D, D->Arena, Glyph, CodePoint, Font, &Glyph->CurveCount, &Glyph->Curves);
 	}
 
@@ -173,14 +170,14 @@ d_atlas_glyph *D_GlyphFromCodePoint(draw_context *D, d_font Font, u32 CodePoint)
 
 // Defined further down; Quad/Point route through it so they pick up the same
 // outline + extrusion + lighting as the rounded shapes.
-static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
+static void PushSDFBox(draw_context *D, str8 Shader, v2f Position,
                        f32 Width, f32 Height, f32 Param, d_shape_options Options);
 
 void D_BaseQuad(draw_context *D, v2f Position, f32 Width, f32 Height, d_shape_options Options)
 {
 	// Corner radius 0 → sharp rectangle, but flowing through the SDF path means it
 	// inherits outline + extrusion + lighting like the rounded shapes.
-	PushSDFBox(D, R_COMMAND_ROUNDED_BOX, Position, Width, Height, 0.0f, Options);
+	PushSDFBox(D, Str8("rounded_box.metal"), Position, Width, Height, 0.0f, Options);
 }
 
 f32 D_Str8WidthFromHeight(d_font Font, str8 String, f32 HeightInPixels)
@@ -251,17 +248,37 @@ void D_BaseStr8InBox(draw_context *D, str8 String,
 	D_BaseStr8(D, String, Options);
 }
 
+// Copy a glyph's curves into this frame's curve buffer (allocated lazily on the
+// first glyph of the frame), returning the offset. Deduplicated per frame, so a
+// repeated letter is packed once; glyphs not drawn this frame cost nothing.
+static int D_PackGlyphCurves(draw_context *D, d_atlas_glyph *Glyph)
+{
+	render_context *R = D->Render;
+	u64 Stamp = R->Frame + 1;
+
+	if (D->CurveFrameStamp != Stamp)
+	{
+		D->CurveBuffer = R_BufferFrame(R, Str8("Glyph Curves"), .SizeInBytes = MegaBytes(4));
+		D->CurveData = (v2f*)R_BufferData(R, D->CurveBuffer);
+		D->CurveCursor = 0;
+		D->CurveFrameStamp = Stamp;
+	}
+
+	if (Glyph->FramePackStamp != Stamp)
+	{
+		MemoryCopy(D->CurveData + D->CurveCursor, Glyph->Curves, Glyph->CurveCount * sizeof(v2f));
+		Glyph->FrameCurveOffset = D->CurveCursor;
+		Glyph->FramePackStamp = Stamp;
+		D->CurveCursor += Glyph->CurveCount;
+	}
+	return Glyph->FrameCurveOffset;
+}
+
 void D_BaseStr8(draw_context *D, str8 String, d_str8_options Options)
 {
-	m_arena *Arena = TemporaryArena();
-	int TotalTriangleCount = (int)String.Size * 6;
-	r_command Command = {0};
-	Command.Vertices = (r_vertex*)ArenaPushZero(Arena, TotalTriangleCount * sizeof(r_vertex));
-	Command.VerticesCount = 0;
-
+	render_context *R = D->Render;
 	f32 StartX = Options.Position.X;
-	r_vertex *Out = Command.Vertices;
-	Options.Colour = LinearFromSRGB(Options.Colour);
+	v4f Colour = LinearFromSRGB(Options.Colour);
 
 	assert(Options.HeightInPixels > 0.0f);
 	f32 Scale = stbtt_ScaleForPixelHeight(&Options.Font.Info, Options.HeightInPixels);
@@ -290,129 +307,87 @@ void D_BaseStr8(draw_context *D, str8 String, d_str8_options Options)
 		f32 GlyphWidth  = ((f32)(Glyph->Box.Z - Glyph->Box.X) * Scale);
 		f32 GlyphHeight = ((f32)(Glyph->Box.W - Glyph->Box.Y) * Scale);
 
-		v2f V[6] =
+		if (CodePoint != ' ' && Glyph->CurveCount > 0)
 		{
-			v2f(Options.Position.X,              Options.Position.Y),
-			v2f(Options.Position.X + GlyphWidth, Options.Position.Y),
-			v2f(Options.Position.X + GlyphWidth, Options.Position.Y + GlyphHeight),
-
-			v2f(Options.Position.X,              Options.Position.Y),
-			v2f(Options.Position.X,              Options.Position.Y + GlyphHeight),
-			v2f(Options.Position.X + GlyphWidth, Options.Position.Y + GlyphHeight),
-		};
-		v2f UV[6] =
-		{
-			v2f(0,1), v2f(1,1), v2f(1,0),
-			v2f(0,1), v2f(0,0), v2f(1,0)
-		};
-
-		if (CodePoint != ' ')
-		{
-			for (int J = 0; J < 6; J++)
-			{
-				r_vertex Vx = {
-					.Position   = v4f(V[J].X + Glyph->Box.X * Scale, V[J].Y + Glyph->Box.Y * Scale, Options.Position.Z, 1),
-					.UV         = UV[J],
-					.Colour     = Options.Colour,
-					.CurveStart = Glyph->CurveStart,
-					.CurveCount = Glyph->CurveCount,
-				};
-				*Out++ = Vx;
-				Command.VerticesCount++;
-			}
+			int CurveOffset = D_PackGlyphCurves(D, Glyph);
+			f32 X0 = Options.Position.X + Glyph->Box.X * Scale;
+			f32 Y0 = Options.Position.Y + Glyph->Box.Y * Scale;
+			R_UniformM44F(R, Str8("PVMMatrix"),  R_CurrentTransform(R));
+			R_UniformV2F (R, Str8("QuadMin"),    v2f(X0, Y0));
+			R_UniformV2F (R, Str8("QuadMax"),    v2f(X0 + GlyphWidth, Y0 + GlyphHeight));
+			R_UniformV4F (R, Str8("Colour"),     Colour);
+			R_UniformU32 (R, Str8("CurveStart"), (u32)CurveOffset);
+			R_UniformU32 (R, Str8("CurveCount"), (u32)Glyph->CurveCount);
+			R_BindBuffer (R, D->CurveBuffer);
+			R_DrawTriangles(R, Str8("glyph.metal"), 6);
 		}
 
 		Options.Position.X += AdvanceX;
-	}
-
-	if (Command.VerticesCount > 0)
-	{
-		Command.Type = R_COMMAND_GLYPH;
-		Command.Attributes = R_AttributesFromCommandType(Command.Type);
-		R_PushCommand(D->Render, Command);
-	}
-}
-
-// Helper: write a screen-space quad (6 vertices) where every vertex carries
-// the same per-primitive attributes. SDF shaders (line/bezier/point) sample
-// fragCoord.xy and read flat-interpolated Start/End/Centre/Thickness.
-static void PushQuad6(r_vertex *Out, v2f Min, v2f Max, r_vertex Template)
-{
-	v2f V[6] = {
-		v2f(Min.X, Min.Y), v2f(Max.X, Min.Y), v2f(Max.X, Max.Y),
-		v2f(Min.X, Min.Y), v2f(Min.X, Max.Y), v2f(Max.X, Max.Y),
-	};
-	for (int I = 0; I < 6; I++)
-	{
-		Out[I] = Template;
-		Out[I].Position = v4f(V[I].X, V[I].Y, 0, 1);
 	}
 }
 
 void D_Line(draw_context *D, v2f Start, v2f End, f32 Thickness, v4f Colour)
 {
-	m_arena *Arena = TemporaryArena();
-	r_command Command = {0};
-	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
-	Command.VerticesCount = 6;
-
+	render_context *R = D->Render;
 	f32 Pad = Thickness * 0.5f + 1.0f;
 	v2f Min = v2f(fminf(Start.X, End.X) - Pad, fminf(Start.Y, End.Y) - Pad);
 	v2f Max = v2f(fmaxf(Start.X, End.X) + Pad, fmaxf(Start.Y, End.Y) + Pad);
 
-	r_vertex Tmpl = {
-		.Colour = LinearFromSRGB(Colour),
-		.Start = Start,
-		.End = End,
-		.Thickness = Thickness,
-	};
-	PushQuad6(Command.Vertices, Min, Max, Tmpl);
-
-	Command.Type = R_COMMAND_LINES;
-	Command.Attributes = R_AttributesFromCommandType(Command.Type);
-	R_PushCommand(D->Render, Command);
+	R_UniformM44F(R, Str8("PVMMatrix"), R_CurrentTransform(R));
+	R_UniformV2F (R, Str8("QuadMin"),   Min);
+	R_UniformV2F (R, Str8("QuadMax"),   Max);
+	R_UniformV4F (R, Str8("Colour"),    LinearFromSRGB(Colour));
+	R_UniformV2F (R, Str8("Start"),     Start);
+	R_UniformV2F (R, Str8("End"),       End);
+	R_UniformF32 (R, Str8("Thickness"), Thickness);
+	R_DrawTriangles(R, Str8("line.metal"), 6);
 }
 
 void D_Bezier(draw_context *D, v2f Start, v2f Control, v2f End, f32 Thickness, v4f Colour)
 {
-	m_arena *Arena = TemporaryArena();
-	r_command Command = {0};
-	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
-	Command.VerticesCount = 6;
-
+	render_context *R = D->Render;
 	f32 Pad = Thickness * 0.5f + 1.0f;
 	f32 MinX = fminf(Start.X, fminf(Control.X, End.X)) - Pad;
 	f32 MinY = fminf(Start.Y, fminf(Control.Y, End.Y)) - Pad;
 	f32 MaxX = fmaxf(Start.X, fmaxf(Control.X, End.X)) + Pad;
 	f32 MaxY = fmaxf(Start.Y, fmaxf(Control.Y, End.Y)) + Pad;
 
-	r_vertex Tmpl = {
-		.Colour = LinearFromSRGB(Colour),
-		.Start = Start,
-		.Control = Control,
-		.End = End,
-		.Thickness = Thickness,
-	};
-	PushQuad6(Command.Vertices, v2f(MinX, MinY), v2f(MaxX, MaxY), Tmpl);
-
-	Command.Type = R_COMMAND_BEZIER;
-	Command.Attributes = R_AttributesFromCommandType(Command.Type);
-	R_PushCommand(D->Render, Command);
+	R_UniformM44F(R, Str8("PVMMatrix"), R_CurrentTransform(R));
+	R_UniformV2F (R, Str8("QuadMin"),   v2f(MinX, MinY));
+	R_UniformV2F (R, Str8("QuadMax"),   v2f(MaxX, MaxY));
+	R_UniformV4F (R, Str8("Colour"),    LinearFromSRGB(Colour));
+	R_UniformV2F (R, Str8("Start"),     Start);
+	R_UniformV2F (R, Str8("Control"),   Control);
+	R_UniformV2F (R, Str8("End"),       End);
+	R_UniformF32 (R, Str8("Thickness"), Thickness);
+	R_DrawTriangles(R, Str8("bezier.metal"), 6);
 }
 
-static void EmitSDFQuad(draw_context *D, r_command_type Type, v2f Min, v2f Max, r_vertex Tmpl)
+static void EmitSDFQuad(draw_context *D, str8 Shader, v2f Min, v2f Max,
+                        v4f Colour, v2f Centre, v2f HalfSize, f32 Param,
+                        v4f OutlineColour, f32 OutlineThickness, f32 Extrusion,
+                        v4f CornerRadii, f32 ShadowBlur)
 {
-	m_arena *Arena = TemporaryArena();
-	r_command Command = {0};
-	Command.Vertices = ArenaPushArrayZero(Arena, r_vertex, 6);
-	Command.VerticesCount = 6;
-	PushQuad6(Command.Vertices, Min, Max, Tmpl);
-	Command.Type = Type;
-	Command.Attributes = R_AttributesFromCommandType(Type);
-	R_PushCommand(D->Render, Command);
+	render_context *R = D->Render;
+	R_UniformM44F(R, Str8("PVMMatrix"),        R_CurrentTransform(R));
+	R_UniformV2F (R, Str8("QuadMin"),          Min);
+	R_UniformV2F (R, Str8("QuadMax"),          Max);
+	R_UniformV4F (R, Str8("Colour"),           Colour);
+	R_UniformV2F (R, Str8("Centre"),           Centre);
+	R_UniformV2F (R, Str8("HalfSize"),         HalfSize);
+	R_UniformF32 (R, Str8("Param"),            Param);
+	R_UniformV4F (R, Str8("OutlineColour"),    OutlineColour);
+	R_UniformF32 (R, Str8("OutlineThickness"), OutlineThickness);
+	R_UniformF32 (R, Str8("Extrusion"),        Extrusion);
+	R_UniformV4F (R, Str8("CornerRadii"),      CornerRadii);
+	R_UniformF32 (R, Str8("ShadowBlur"),       ShadowBlur);
+	R_UniformV4F (R, Str8("LightPosition"),    v4f(R->LightPosition.X, R->LightPosition.Y, R->LightPosition.Z, R->LightRadius));
+	R_UniformV4F (R, Str8("LightColour"),      v4f(R->LightColour.X, R->LightColour.Y, R->LightColour.Z, 0));
+	R_UniformF32 (R, Str8("LightIntensity"),   R->LightIntensity);
+	R_DrawTriangles(R, Shader, 6);
 }
 
-static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
+static void PushSDFBox(draw_context *D, str8 Shader, v2f Position,
                        f32 Width, f32 Height, f32 Param, d_shape_options Options)
 {
 	v2f HalfSize = v2f(Width * 0.5f, Height * 0.5f);
@@ -441,15 +416,12 @@ static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
 		v2f SMin = v2f(SPos.X - SPad,         SPos.Y - SPad);
 		v2f SMax = v2f(SPos.X + Width + SPad, SPos.Y + Height + SPad);
 
-		r_vertex ShadowTmpl = {
-			.Colour      = LinearFromSRGB(ShadowColour),
-			.Centre      = v2f(SPos.X + HalfSize.X, SPos.Y + HalfSize.Y),
-			.HalfSize    = HalfSize,
-			.Thickness   = Param,
-			.CornerRadii = CornerRadii,
-			.ShadowBlur  = Options.ShadowBlur,
-		};
-		EmitSDFQuad(D, Type, SMin, SMax, ShadowTmpl);
+		EmitSDFQuad(D, Shader, SMin, SMax,
+			LinearFromSRGB(ShadowColour),
+			v2f(SPos.X + HalfSize.X, SPos.Y + HalfSize.Y),
+			HalfSize, Param,
+			v4f(0, 0, 0, 0), 0.0f, 0.0f,
+			CornerRadii, Options.ShadowBlur);
 	}
 
 	// Pad enough for AA on the edge plus the outline (drawn just inside, but
@@ -458,34 +430,27 @@ static void PushSDFBox(draw_context *D, r_command_type Type, v2f Position,
 	v2f Min = v2f(Position.X - Pad,         Position.Y - Pad);
 	v2f Max = v2f(Position.X + Width + Pad, Position.Y + Height + Pad);
 
-	r_vertex Tmpl = {
-		.Colour           = LinearFromSRGB(Options.Colour),
-		.Centre           = Centre,
-		.HalfSize         = HalfSize,
-		.Thickness        = Param,
-		.OutlineColour    = LinearFromSRGB(Options.OutlineColour),
-		.OutlineThickness = Options.OutlineThickness,
-		.Extrusion        = Options.Extrusion,
-		.CornerRadii      = CornerRadii,
-		.ShadowBlur       = 0.0f,
-	};
-	EmitSDFQuad(D, Type, Min, Max, Tmpl);
+	EmitSDFQuad(D, Shader, Min, Max,
+		LinearFromSRGB(Options.Colour),
+		Centre, HalfSize, Param,
+		LinearFromSRGB(Options.OutlineColour), Options.OutlineThickness, Options.Extrusion,
+		CornerRadii, 0.0f);
 }
 
 void D_BaseRoundedQuad(draw_context *D, v2f Position, f32 Width, f32 Height, f32 CornerRadius, d_shape_options Options)
 {
-	PushSDFBox(D, R_COMMAND_ROUNDED_BOX, Position, Width, Height, CornerRadius, Options);
+	PushSDFBox(D, Str8("rounded_box.metal"), Position, Width, Height, CornerRadius, Options);
 }
 
 void D_BaseCapsule(draw_context *D, v2f Position, f32 Width, f32 Height, d_shape_options Options)
 {
 	f32 Radius = 0.5f * fminf(Width, Height);
-	PushSDFBox(D, R_COMMAND_ROUNDED_BOX, Position, Width, Height, Radius, Options);
+	PushSDFBox(D, Str8("rounded_box.metal"), Position, Width, Height, Radius, Options);
 }
 
 void D_BaseSquircle(draw_context *D, v2f Position, f32 Width, f32 Height, f32 N, d_shape_options Options)
 {
-	PushSDFBox(D, R_COMMAND_SQUIRCLE, Position, Width, Height, N, Options);
+	PushSDFBox(D, Str8("squircle.metal"), Position, Width, Height, N, Options);
 }
 
 void D_BasePoint(draw_context *D, v2f Position, f32 Size, d_shape_options Options)
@@ -494,5 +459,5 @@ void D_BasePoint(draw_context *D, v2f Position, f32 Size, d_shape_options Option
 	// PushSDFBox expects the top-left corner; D_Point's Position is the centre.
 	f32 Half = Size * 0.5f;
 	v2f Corner = v2f(Position.X - Half, Position.Y - Half);
-	PushSDFBox(D, R_COMMAND_ROUNDED_BOX, Corner, Size, Size, Half, Options);
+	PushSDFBox(D, Str8("rounded_box.metal"), Corner, Size, Size, Half, Options);
 }
