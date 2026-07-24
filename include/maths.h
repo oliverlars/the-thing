@@ -54,7 +54,11 @@ v3f NormalizeV3F(v3f V);
 v3f CrossV3F(v3f A, v3f B);
 f32 DotV3F(v3f A, v3f B);
 
+typedef struct v3i { s32 X; s32 Y; s32 Z; } v3i;
+#define v3i(...) (v3i){ __VA_ARGS__ }
+
 v3f V3FromF32(f32 X);
+v3i V3FromS32(s32 X);
 
 /* V4 */
 typedef struct v4f { f32 X; f32 Y; f32 Z; f32 W; } v4f;

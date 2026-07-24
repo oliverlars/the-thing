@@ -73,6 +73,7 @@ v3f CrossV3F(v3f A, v3f B) {
 	return v3f(A.Y*B.Z - A.Z*B.Y, A.Z*B.X - A.X*B.Z, A.X*B.Y - A.Y*B.X);
 }
 v3f V3FromF32(f32 X) { return v3f(X, X, X); }
+v3i V3FromS32(s32 X) { return v3i(X, X, X); }
 
 v4f AddV4F(v4f A, v4f B) { return v4f(A.X+B.X, A.Y+B.Y, A.Z+B.Z, A.W+B.W); }
 v4f SubV4F(v4f A, v4f B) { return v4f(A.X-B.X, A.Y-B.Y, A.Z-B.Z, A.W-B.W); }

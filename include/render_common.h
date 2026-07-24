@@ -55,7 +55,7 @@ typedef struct r_pass_options {
 	r_texture Depth;
 	r_load_operation DepthOp;
 	v4f ClearColour[4];
-	v4f ClearDepth;
+	f32 ClearDepth;
 } r_pass_options;
 
 typedef struct render_context
@@ -120,6 +120,12 @@ void R_UniformV4F(render_context *R, str8 Name, v4f Value);
 void R_UniformU32(render_context *R, str8 Name, u32 Value);
 
 void R_DrawTriangles(render_context *R, str8 Shader, s32 Count);
+
+void R_DrawLines(render_context *R, str8 Shader, s32 Count);
+
+void R_DispatchGroups(render_context *R, str8 Shader, v3i ThreadGroups, v3i ThreadsInThreadGroups);
+
+void R_DispatchGroupsIndirect(render_context *R, str8 Shader, v3i ThreadGroups, v3i ThreadsInThreadGroups);
 
 
 // NEW API END

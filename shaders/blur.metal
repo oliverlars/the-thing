@@ -45,7 +45,7 @@ fragment float4 FragmentMain(
 		Average += Texture.read(Index);
 		Samples += 1;
 	}
-	Average /= (Samples);
+	Average /= float(Samples);
 
 	return Average;
 }

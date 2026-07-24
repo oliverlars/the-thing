@@ -23,9 +23,6 @@
 
 typedef struct metal_shader
 {
-	// LEGACY!!!! REMOVE THIS!!!!
-	id<MTLRenderPipelineState> PipelineState;
-
 	id<MTLLibrary> Library;
 	id<MTLFunction> VertexEntry;
 	id<MTLFunction> FragmentEntry;
@@ -136,6 +133,7 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name, str8 U
 	MTLCompileOptions *CompileOptions = [MTLCompileOptions new];
 	CompileOptions.enableLogging = (getenv("GPU_LOGGING") != NULL);
 	Shader.Library = [Metal->Device newLibraryWithSource:NSSource options:CompileOptions error:&Error];
+	Shader.Hash = M_FNVHashString(M_FNV_HASH_START, Name);
 	if (!Shader.Library)
 	{
 		LogError("Shader compile failed: ?cstr",
@@ -193,10 +191,11 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 			Entry->Texture = nil;
 			Entry->Options = Options[0];
 			Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
+			Entry->Hash = Hash;
 		}
 		return (r_texture){Options->Size, Entry - Metal->Textures};
 	}
-	else if(Entry->Texture)
+	else if(Entry->Hash > 0)
 	{
 		for(int I = 1; I < 4095; I++)
 		{
@@ -207,6 +206,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 					Entry->Texture = nil;
 					Entry->Options = Options[0];
 					Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
+					Entry->Hash = Hash;
 				}
 				return (r_texture){Options->Size, Entry - Metal->Textures};
 			}
@@ -216,6 +216,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 	{
 		Entry->Options = Options[0];
 		Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
+		Entry->Hash = Hash;
 	}
 	return (r_texture){Options->Size, Entry - Metal->Textures };
 }
@@ -292,9 +293,10 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStru
 {
 	metal_context *Metal = R->Backend;
 	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
-	metal_shader *Shader = Metal->Shaders + (Hash % 4096);
+	s32 Index = (Hash % 4096);
+	metal_shader *Shader = Metal->Shaders + Index;
 	u64 TimeStamp = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
-	if(Str8Equal(Shader->Name, Name))
+	if(Shader->Hash == Hash)
 	{
 		if(TimeStamp > Shader->TimeStamp)
 		{
@@ -303,18 +305,18 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStru
 			else Shader->TimeStamp = TimeStamp;
 		}
 	}
-	else if(!Shader->Name.Size)
+	else if(Shader->Hash == 0)
 	{
 		Shader[0] = LoadMetalShader(R, TimeStamp, Name, UniformStruct);
 	}
 	else
 	{
 		b32 Found = False;
-		for(int I = 1; I < 4095; I++)
+		for(int I = 1; I < 4096; I++)
 		{
-			if(Str8Equal(Shader[I].Name, Name))
+			if(Metal->Shaders[(Index + I) % 4096].Hash == Hash)
 			{
-				Shader = Shader + I;
+				Shader = Metal->Shaders + (Index + I) % 4096;
 				if(TimeStamp > Shader->TimeStamp)
 				{
 					metal_shader New = LoadMetalShader(R, TimeStamp, Name, UniformStruct);
@@ -539,6 +541,8 @@ void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options)
 	{
 		PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle].Texture;
 		PassDescriptor.depthAttachment.loadAction = MetalLoadAction(Options->DepthOp);
+		PassDescriptor.depthAttachment.clearDepth = Options->ClearDepth;
+		PassDescriptor.depthAttachment.storeAction = MTLStoreActionStore;
 	}
 
 	Metal->ActiveRenderEncoder = [Metal->CommandBuffer renderCommandEncoderWithDescriptor:PassDescriptor];
