@@ -35,7 +35,6 @@ ui_widget *UI_GetWidget(ui_context *UI, str8 Name)
 	if(Widget->Key == 0)
 	{
 		MemoryZero(Widget, sizeof(ui_widget));
-		Widget->Flags = UI->Flags;
 		Widget->Key = Key;
 	}
 	else if(Widget->Key != Key)
@@ -43,7 +42,6 @@ ui_widget *UI_GetWidget(ui_context *UI, str8 Name)
 		if(Widget->FrameLastTouched < UI->Frame)
 		{
 			MemoryZero(Widget, sizeof(ui_widget));
-			Widget->Flags = UI->Flags;
 			Widget->Key = Key;
 		}
 		else
@@ -55,6 +53,10 @@ ui_widget *UI_GetWidget(ui_context *UI, str8 Name)
 			}
 		}
 	}
+	// Apply the current flag scope (UI_FILL / UI_FLAG) every frame, not just at creation, so scope
+	// flags behave intuitively for widgets that persist across frames. Widget functions OR in their
+	// own flags (e.g. UI_Button's draw flags) after this, so nothing they set is lost.
+	Widget->Flags = UI->Flags;
 	Widget->FrameLastTouched = UI->Frame;
 	Widget->First = 0;
 	Widget->Last = 0;
@@ -167,7 +169,16 @@ void UI_Texture(ui_context *UI, str8 Name, r_texture Texture)
 void UI_CollapsingTexture(ui_context *UI, str8 Name, str8 TextureName, r_texture Texture)
 {
 	ui_widget *Header = UI_GetWidget(UI, Name);
-	if(UI_Button(UI, Name)) Header->Toggled = !Header->Toggled;
+
+	// A row self-expands to full width when it holds a fill child, so a FILL button inside gives a
+	// full-width header at natural height.
+	b32 Clicked = False;
+	UI_ROW(UI, 0)
+	{
+		UI_FILL(UI) Clicked = UI_Button(UI, Name);
+	}
+	if(Clicked) Header->Toggled = !Header->Toggled;
+
 	if(Header->Toggled)
 	{
 		UI_BACKDROP(UI, v4f(0.08f, 0.09f, 0.12f, 1.0f))
