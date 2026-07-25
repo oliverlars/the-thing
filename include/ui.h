@@ -127,6 +127,7 @@ b32 UI_Button(ui_context *UI, str8 Name);
 int UI_ComboBox(ui_context *UI, str8 Name, str8 *Elements, int ElementCount, int ActiveElement);
 
 void UI_Texture(ui_context *UI, str8 Name, r_texture Texture);
+void UI_CollapsingTexture(ui_context *UI, str8 Name, str8 TextureName, r_texture Texture);
 
 void UI_LayoutPop(ui_context *UI);
 void UI_LayoutPush(ui_context *UI, ui_widget Layout, u64 Seed);

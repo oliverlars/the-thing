@@ -250,7 +250,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 			.Colour = v4f(1, 1, 1, 1));
 
 		UI_Begin(&App->UI);
-		UI_PANEL(&App->UI, v2f(1000, 200), v2f(600, 1000))
+		UI_PANEL(&App->UI, v2f(1000, 200), v2f(900, 1300))
 		{
 			UI_ROW(&App->UI, UI_LAYOUT_FIXED)
 			{
@@ -264,10 +264,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 			};
 			UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
 
-			UI_BACKDROP(&App->UI, v4f(0.08f, 0.09f, 0.12f, 1.0f))
-			{
-				UI_Texture(&App->UI, Str8("Cube widget"), TestTexture);
-			}
+			UI_CollapsingTexture(&App->UI, Str8("Cube"), Str8("Cube widget"), TestTexture);
 
 			if(UI_Button(&App->UI, Str8("Some button")))
 			{

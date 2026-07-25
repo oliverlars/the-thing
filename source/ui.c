@@ -164,6 +164,19 @@ void UI_Texture(ui_context *UI, str8 Name, r_texture Texture)
 	Widget->Size   = v2f(Texture.Size.X, Texture.Size.Y);
 }
 
+void UI_CollapsingTexture(ui_context *UI, str8 Name, str8 TextureName, r_texture Texture)
+{
+	ui_widget *Header = UI_GetWidget(UI, Name);
+	if(UI_Button(UI, Name)) Header->Toggled = !Header->Toggled;
+	if(Header->Toggled)
+	{
+		UI_BACKDROP(UI, v4f(0.08f, 0.09f, 0.12f, 1.0f))
+		{
+			UI_Texture(UI, TextureName, Texture);
+		}
+	}
+}
+
 b32 UI_Button(ui_context *UI, str8 Name)
 {
 	ui_widget *Widget = UI_GetWidget(UI, Name);
