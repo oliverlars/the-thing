@@ -423,7 +423,17 @@ void R_UniformU32(render_context *R, str8 Name, u32 Value)
 	R->UniformBytesCursor += sizeof(u32);
 }
 
-void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
+MTLPrimitiveType MetalPrimType(r_primitive_type PrimType)
+{
+	switch(PrimType)
+	{
+		case R_TRIANGLES: return MTLPrimitiveTypeTriangle;
+		case R_LINES: return MTLPrimitiveTypeLine;
+	}
+	return 0;
+}
+
+void R_Draw(render_context *R, str8 ShaderName, s32 Count, r_primitive_type PrimType)
 {
 	metal_context *Metal = R->Backend;
 	r_shader Shader = R_Shader(R, ShaderName);
@@ -467,7 +477,7 @@ void R_DrawTriangles(render_context *R, str8 ShaderName, s32 Count)
 	Metal->BoundBuffersCount = 0;
 	Metal->BoundTexturesCount = 0;
 	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
-	[Metal->ActiveRenderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:Count];
+	[Metal->ActiveRenderEncoder drawPrimitives:MetalPrimType(PrimType) vertexStart:0 vertexCount:Count];
 	R->UniformDeclarations.First = 0;
 	R->UniformDeclarations.Last = 0;
 	if(R->LargestUniformAlignment > 0)

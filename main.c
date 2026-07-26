@@ -176,7 +176,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 		R_BindBuffer(&App->Render, CubeVertexPositionsBuffer);
 		R_BindBuffer(&App->Render, CubeVertexColoursBuffer);
 		R_UniformM44F(&App->Render, Str8("PVMMatrix"), PVM);
-		R_DrawTriangles(&App->Render, Str8("triangle2.metal"), 36);
+		R_Draw(&App->Render, Str8("triangle2.metal"), 36, R_TRIANGLES);
 	}
 
 	r_texture Temp = R_Texture(&App->Render, Str8("Temp Texture"), .Size = v2i(400, 400), .Format = TF_RGBA16);
@@ -185,7 +185,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 		R_UniformV2F(&App->Render, Str8("Direction"), v2f(1, 0));
 		R_UniformF32(&App->Render, Str8("Radius"), 20);
 		R_BindTexture(&App->Render, TestTexture);
-		R_DrawTriangles(&App->Render, Str8("blur.metal"), 6);
+		R_Draw(&App->Render, Str8("blur.metal"), 6, R_TRIANGLES);
 	}
 
 	R_Pass(&App->Render, Str8("Cube Vertical Blur"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour = v4f(0, 0, 0, 0))
@@ -193,7 +193,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 		R_UniformV2F(&App->Render, Str8("Direction"), v2f(0, 1));
 		R_UniformF32(&App->Render, Str8("Radius"), 5);
 		R_BindTexture(&App->Render, Temp);
-		R_DrawTriangles(&App->Render, Str8("blur.metal"), 6);
+		R_Draw(&App->Render, Str8("blur.metal"), 6, R_TRIANGLES);
 	}
 
 	r_texture Screen = R_Texture(&App->Render, Str8("Screen Texture"),

@@ -3,6 +3,7 @@
 #include "misc.h"
 #include "draw.h"
 #include "os.h"
+#include "render_common.h"
 
 #include "ui.h"
 
@@ -62,6 +63,7 @@ ui_widget *UI_GetWidget(ui_context *UI, str8 Name)
 	Widget->Last = 0;
 	Widget->Next = 0;
 	Widget->Parent = 0;
+	UI->CurrentWidget = Widget;
 	return Widget;
 }
 
@@ -160,7 +162,7 @@ void UI_Texture(ui_context *UI, str8 Name, r_texture Texture)
 	R_UniformV2F(UI->Draw->Render, Str8("Position"), RenderPosition);
 	R_UniformV2F(UI->Draw->Render, Str8("Size"), Widget->Size);
 	R_BindTexture(UI->Draw->Render, Texture);
-	R_DrawTriangles(UI->Draw->Render, Str8("textured_quad.metal"), 6);
+	R_Draw(UI->Draw->Render, Str8("textured_quad.metal"), 6, R_TRIANGLES);
 
 	Widget->Aspect = (f32)Texture.Size.Y / (f32)Texture.Size.X;
 	Widget->Size   = v2f(Texture.Size.X, Texture.Size.Y);
@@ -168,22 +170,41 @@ void UI_Texture(ui_context *UI, str8 Name, r_texture Texture)
 
 void UI_CollapsingTexture(ui_context *UI, str8 Name, str8 TextureName, r_texture Texture)
 {
-	ui_widget *Header = UI_GetWidget(UI, Name);
-
-	// A row self-expands to full width when it holds a fill child, so a FILL button inside gives a
-	// full-width header at natural height.
 	b32 Clicked = False;
-	UI_ROW(UI, 0)
+	ui_widget *Header;
+
+	UI_ROW(UI, 0) UI_FILL(UI)
 	{
-		UI_FILL(UI) Clicked = UI_Button(UI, Name);
+		Header = UI_GetWidget(UI, Name);
+
+		Header->Kind = UI_WIDGET_BUTTON;
+		Header->String = Name;
+		Header->DisplayString = Name;
+
+		Header->Flags |= UI_DRAW_BACKGROUND | UI_DRAW_TEXT | UI_DRAW_HOT;
+		Header->Colour = v4f(1.0f, 0.44f, 0.14f, 1.0f);
+		Header->TextColour = v4f(0.9f, 0.87f, 0.83f, 1.0f);
+		Header->CornerRadius = 30.0f;
+
+		ui_widget *Layout = UI->CurrentLayout;
+		UI_AppendAsChild(Layout, Header);
+
+		ui_signal Signal = UI_Interact(UI, Header);
+
+		Header->Size.X = D_Str8WidthFromHeight(UI->Font, Name, 50) + 30;
+		Header->Size.Y = D_Str8HeightFromHeight(UI->Font, 50) + 30;
+		if(Signal.Clicked)
+		{
+			Header->Toggled = !Header->Toggled;
+		}
 	}
-	if(Clicked) Header->Toggled = !Header->Toggled;
 
 	if(Header->Toggled)
 	{
 		UI_BACKDROP(UI, v4f(0.08f, 0.09f, 0.12f, 1.0f))
 		{
 			UI_Texture(UI, TextureName, Texture);
+			Header->Size.Y += UI->CurrentWidget->Size.Y;
 		}
 	}
 }
@@ -198,7 +219,7 @@ b32 UI_Button(ui_context *UI, str8 Name)
 	Widget->Flags |= UI_DRAW_BACKGROUND | UI_DRAW_TEXT | UI_DRAW_HOT;
 	Widget->Colour = v4f(1.0f, 0.44f, 0.14f, 1.0f);
 	Widget->TextColour = v4f(0.9f, 0.87f, 0.83f, 1.0f);
-	Widget->CornerRadius = 15.0f;
+	Widget->CornerRadius = 30.0f;
 
 	ui_widget *Layout = UI->CurrentLayout;
 	UI_AppendAsChild(Layout, Widget);
@@ -609,7 +630,11 @@ void UI_DrawWidget(ui_context *UI, ui_widget *Widget)
 
 	if(Widget->Flags & UI_DRAW_BACKGROUND)
 	{
-		f32 Extrusion = (Widget->Flags & UI_DRAW_HOT) ? (1.0f - Widget->ActiveAnimation.Value) : 0.0f;
+		f32 Extrusion = 0.5;
+		if(Widget->Flags & UI_DRAW_EXTRUDED)
+		{
+			Extrusion =  (Widget->Flags & UI_DRAW_HOT) ? (1.0f - Widget->ActiveAnimation.Value) : 0.0f;
+		}
 		D_RoundedQuad(UI->Draw, DrawPos, DrawSize.X, DrawSize.Y, Widget->CornerRadius,
 			.Colour = Widget->Colour,
 			.OutlineColour = Widget->OutlineColour,

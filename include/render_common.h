@@ -119,9 +119,14 @@ void R_UniformV2F(render_context *R, str8 Name, v2f Value);
 void R_UniformV4F(render_context *R, str8 Name, v4f Value);
 void R_UniformU32(render_context *R, str8 Name, u32 Value);
 
-void R_DrawTriangles(render_context *R, str8 Shader, s32 Count);
+typedef enum r_primitive_type
+{
+	R_TRIANGLES,
+	R_LINES
+}
+r_primitive_type;
 
-void R_DrawLines(render_context *R, str8 Shader, s32 Count);
+void R_Draw(render_context *R, str8 Shader, s32 Count, r_primitive_type PrimType);
 
 void R_DispatchGroups(render_context *R, str8 Shader, v3i ThreadGroups, v3i ThreadsInThreadGroups);
 

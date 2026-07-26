@@ -16,10 +16,11 @@ typedef enum ui_widget_flags
 	UI_LAYOUT_CENTRE = 1 << 9,
 
 	UI_DRAW_BACKGROUND = 1 << 5,
-	UI_DRAW_TEXT       = 1 << 6,
-	UI_DRAW_HOT        = 1 << 7,
+	UI_DRAW_EXTRUDED   = 1 << 6,
+	UI_DRAW_TEXT       = 1 << 7,
+	UI_DRAW_HOT        = 1 << 8,
 
-	UI_LAYOUT_FLOATING = 1 << 8,
+	UI_LAYOUT_FLOATING = 1 << 9,
 }
 ui_widget_flags;
 

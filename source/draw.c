@@ -2,6 +2,7 @@
 #include "maths.h"
 #include "memory.h"
 #include "render.h"
+#include "render_common.h"
 #include "strings.h"
 #include "draw.h"
 
@@ -312,7 +313,7 @@ void D_BaseStr8(draw_context *D, str8 String, d_str8_options Options)
 			R_UniformU32 (R, Str8("CurveStart"), (u32)CurveOffset);
 			R_UniformU32 (R, Str8("CurveCount"), (u32)Glyph->CurveCount);
 			R_BindBuffer (R, D->CurveBuffer);
-			R_DrawTriangles(R, Str8("glyph.metal"), 6);
+			R_Draw(R, Str8("glyph.metal"), 6, R_TRIANGLES);
 		}
 
 		Options.Position.X += AdvanceX;
@@ -333,7 +334,7 @@ void D_Line(draw_context *D, v2f Start, v2f End, f32 Thickness, v4f Colour)
 	R_UniformV2F (R, Str8("Start"),     Start);
 	R_UniformV2F (R, Str8("End"),       End);
 	R_UniformF32 (R, Str8("Thickness"), Thickness);
-	R_DrawTriangles(R, Str8("line.metal"), 6);
+	R_Draw(R, Str8("line.metal"), 6, R_TRIANGLES);
 }
 
 void D_Bezier(draw_context *D, v2f Start, v2f Control, v2f End, f32 Thickness, v4f Colour)
@@ -353,7 +354,7 @@ void D_Bezier(draw_context *D, v2f Start, v2f Control, v2f End, f32 Thickness, v
 	R_UniformV2F (R, Str8("Control"),   Control);
 	R_UniformV2F (R, Str8("End"),       End);
 	R_UniformF32 (R, Str8("Thickness"), Thickness);
-	R_DrawTriangles(R, Str8("bezier.metal"), 6);
+	R_Draw(R, Str8("bezier.metal"), 6, R_TRIANGLES);
 }
 
 static void EmitSDFQuad(draw_context *D, str8 Shader, v2f Min, v2f Max,
@@ -377,7 +378,7 @@ static void EmitSDFQuad(draw_context *D, str8 Shader, v2f Min, v2f Max,
 	R_UniformV4F (R, Str8("LightPosition"),    v4f(R->LightPosition.X, R->LightPosition.Y, R->LightPosition.Z, R->LightRadius));
 	R_UniformV4F (R, Str8("LightColour"),      v4f(R->LightColour.X, R->LightColour.Y, R->LightColour.Z, 0));
 	R_UniformF32 (R, Str8("LightIntensity"),   R->LightIntensity);
-	R_DrawTriangles(R, Shader, 6);
+	R_Draw(R, Shader, 6, R_TRIANGLES);
 }
 
 static void PushSDFBox(draw_context *D, str8 Shader, v2f Position,
