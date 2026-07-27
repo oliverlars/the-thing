@@ -201,6 +201,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	R_Pass(&App->Render, Str8("Screen"), .Colours[0] = Screen, .ColourOps[0] = LO_CLEAR,
 		.ClearColour[0] = v4f(0.001548f, 0.001548f, 0.002322f, 1.0f))
 	{
+
 		D_RoundedQuad(&App->Draw, v2f(CardX0, ShapeY - 30.0f),
 			CardX1 - CardX0, ShapeSize + 60.0f, 24.0f,
 			.Colour = v4f(0.85f, 0.85f, 0.88f, 1));

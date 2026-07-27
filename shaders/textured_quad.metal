@@ -45,12 +45,18 @@ vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
 	return Output;
 }
 
+struct generic_args
+{
+	array<texture2d<float>, 4> Textures [[id(0)]];
+};
+
 fragment float4 FragmentMain(
 	vertex_output Input [[stage_in]],
-	texture2d<float> Texture [[texture(0)]]
+	texture2d<float> Texture [[texture(0)]],
+	constant generic_args &Args [[buffer(1)]]
 )
 {
 	sampler Sampler(mag_filter::linear, min_filter::linear);
 
-	return Texture.sample(Sampler, Input.UV);
+	return Args.Textures[0].sample(Sampler, Input.UV);
 }

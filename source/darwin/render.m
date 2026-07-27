@@ -469,11 +469,16 @@ void R_Draw(render_context *R, str8 ShaderName, s32 Count, r_primitive_type Prim
 		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer   offset:0 atIndex:1 + I];
 		[Metal->ActiveRenderEncoder setFragmentBuffer:Buffer offset:0 atIndex:1 + I];
 	}
+	id<MTLHeap> FrameHeap = Metal->FrameHeaps[R->Frame % FRAMES_IN_FLIGHT];
+	id<MTLBuffer> BindlessTextureBuffer = [FrameHeap newBufferWithLength:Metal->BoundTexturesCount*8 options:MTLResourceStorageModeShared];
 	for(int I = 0; I < Metal->BoundTexturesCount; I++)
 	{
 		id<MTLTexture> Texture = Metal->Textures[Metal->BoundTextures[I].Handle].Texture;
+		MTLResourceID *BTB = BindlessTextureBuffer.contents;
+		BTB[I] = Texture.gpuResourceID;
 		[Metal->ActiveRenderEncoder setFragmentTexture:Texture atIndex:I];
 	}
+	[Metal->ActiveRenderEncoder setFragmentBuffer:BindlessTextureBuffer offset:0 atIndex:1 + Metal->BoundBuffersCount];
 	Metal->BoundBuffersCount = 0;
 	Metal->BoundTexturesCount = 0;
 	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
