@@ -47,14 +47,12 @@ vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
 
 struct generic_args
 {
-	array<texture2d<float>, 4> Textures [[id(0)]];
+	texture2d<float> Textures [[id(0)]][16384];
+	texture2d<float, access::read_write> Images [[id(16384)]][1024];
+	uint64_t Buffers [[id(16384 + 1024)]][4096];
 };
 
-fragment float4 FragmentMain(
-	vertex_output Input [[stage_in]],
-	texture2d<float> Texture [[texture(0)]],
-	constant generic_args &Args [[buffer(1)]]
-)
+FragmentMain2
 {
 	sampler Sampler(mag_filter::linear, min_filter::linear);
 

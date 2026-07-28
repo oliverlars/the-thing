@@ -49,6 +49,7 @@ str8 Str8Copy(m_arena *Arena, str8 String);
 b32 Str8Equal(str8 A, str8 B);
 
 void Str8ListAppend(m_arena *Arena, str8_list *List, str8 String);
+void Str8ListAppendF(m_arena *Arena, str8_list *List, char *Format, ...);
 str8 Str8ListJoin(m_arena *Arena, str8_list *List);
 
 void Print(char *Format, ...);

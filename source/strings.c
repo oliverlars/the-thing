@@ -40,6 +40,15 @@ void Str8ListAppend(m_arena *Arena, str8_list *List, str8 String)
 	else { List->Last->Next = N; N->Previous = List->Last; List->Last = N; }
 }
 
+void Str8ListAppendF(m_arena *Arena, str8_list *List, char *Format, ...)
+{
+	va_list Args;
+	va_start(Args, Format);
+	str8 String = Str8PushFV(TemporaryArena(), Format, Args);
+	va_end(Args);
+	Str8ListAppend(Arena, List, String);
+}
+
 str8 Str8ListJoin(m_arena *Arena, str8_list *List)
 {
 	u64 Total = 0;

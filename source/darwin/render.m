@@ -505,7 +505,22 @@ r_shader R_Shader(render_context *R, str8 Name)
 	u64 LastModified = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
 	metal_context *Metal = R->Backend;
 
-	return (r_shader){ MetalShaderFromName(R, Name, Str8ListJoin(TemporaryArena(), &UniformStruct)) - Metal->Shaders };
+	str8_list Prelude = {0};
+
+	Str8ListAppend(TemporaryArena(), &Prelude, Str8ListJoin(TemporaryArena(), &UniformStruct));
+
+	Str8ListAppend(TemporaryArena(), &Prelude, Str8("\n#define FragmentMain2 "));
+	Str8ListAppend(TemporaryArena(), &Prelude, Str8("fragment float4 FragmentMain(vertex_output Input [[stage_in]],"));
+	for(int I = 0; I < Metal->BoundTexturesCount; I++)
+	{
+		Str8ListAppendF(TemporaryArena(), &Prelude, " texture2d<float> Texture [[texture(?u32)]], ", I);
+	}
+
+	Str8ListAppendF(TemporaryArena(), &Prelude, " constant generic_args &Args [[buffer(1)]]");
+
+	Str8ListAppend(TemporaryArena(), &Prelude, Str8(")"));
+
+	return (r_shader){ MetalShaderFromName(R, Name,  Str8ListJoin(TemporaryArena(), &Prelude)) - Metal->Shaders };
 }
 
 MTLLoadAction MetalLoadAction(r_load_operation Op)
