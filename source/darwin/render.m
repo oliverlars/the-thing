@@ -48,16 +48,15 @@ typedef struct metal_buffer_entry
 }
 metal_buffer_entry;
 
+#define R_TEXTURE_TABLE_SIZE 16384
+
 typedef struct metal_context
 {
 	id<MTLDevice>        Device;
 	id<MTLCommandQueue>  CommandQueue;
 	CAMetalLayer        *Layer;
 
-	metal_texture_entry Textures[4096];
-	int                 TextureCount;
-	int                 TextureFreeList[4096];
-	int                 TextureFreeListCount;
+	metal_texture_entry Textures[R_TEXTURE_TABLE_SIZE];
 
 	id<MTLRenderPipelineState> BlitPipeline;
 
@@ -183,7 +182,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 {
 	metal_context *Metal = R->Backend;
 	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
-	metal_texture_entry *Entry = Metal->Textures + (Hash % 4096);
+	metal_texture_entry *Entry = Metal->Textures + (Hash % R_TEXTURE_TABLE_SIZE);
 	if(Entry->Hash == Hash)
 	{
 		if(!TextureOptionsEqual(&Entry->Options, Options))
@@ -197,9 +196,9 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 	}
 	else if(Entry->Hash > 0)
 	{
-		for(int I = 1; I < 4095; I++)
+		for(int I = 1; I < R_TEXTURE_TABLE_SIZE - 1; I++)
 		{
-			if(Entry[I % 4096].Hash == Hash)
+			if(Entry[I % R_TEXTURE_TABLE_SIZE].Hash == Hash)
 			{
 				if(!TextureOptionsEqual(&Entry->Options, Options))
 				{
@@ -293,6 +292,7 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStru
 {
 	metal_context *Metal = R->Backend;
 	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
+	Hash = M_FNVHashString(Hash, UniformStruct);
 	s32 Index = (Hash % 4096);
 	metal_shader *Shader = Metal->Shaders + Index;
 	u64 TimeStamp = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
@@ -590,20 +590,6 @@ void R_PassEnd(render_context *R, str8 Name)
 	[Metal->ActiveRenderEncoder endEncoding];
 	Metal->ActiveRenderEncoder = nil;
 	R->PassOptions = (r_pass_options){0};
-}
-
-void R_ReleaseTexture(render_context *R, r_handle Texture)
-{
-	metal_context *Metal = R->Backend;
-	for(int I = 0; I < Metal->TextureFreeListCount; I++)
-	{
-		if(Metal->TextureFreeList[I] == Texture) 
-		{
-			LogError("Texture '?s32' already freed", Texture);
-			return;
-		}
-	}
-	Metal->TextureFreeList[Metal->TextureFreeListCount++] = Texture;
 }
 
 static str8 ResolveShaderIncludes(m_arena *Arena, str8 ShaderDir, str8 Source)
