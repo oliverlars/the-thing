@@ -21,6 +21,7 @@ typedef u64 r_handle;
 typedef struct r_texture {
 	v2i Size;
 	u64 Handle;
+	str8 Name;
 } r_texture;
 
 typedef struct r_buffer {

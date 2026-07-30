@@ -70,6 +70,8 @@ typedef struct metal_context
 
 	id<MTLHeap>    PermanentArena;
 
+	id<MTLBuffer>  BindlessTexturesBuffer;
+
 	metal_shader Shaders[4096];
 
 	v2i Viewport;
@@ -192,7 +194,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 			Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 			Entry->Hash = Hash;
 		}
-		return (r_texture){Options->Size, Entry - Metal->Textures};
+		return (r_texture){Options->Size, Entry - Metal->Textures, Name};
 	}
 	else if(Entry->Hash > 0)
 	{
@@ -207,7 +209,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 					Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 					Entry->Hash = Hash;
 				}
-				return (r_texture){Options->Size, Entry - Metal->Textures};
+				return (r_texture){Options->Size, Entry - Metal->Textures, Name};
 			}
 		}
 	}
@@ -217,7 +219,7 @@ r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 		Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 		Entry->Hash = Hash;
 	}
-	return (r_texture){Options->Size, Entry - Metal->Textures };
+	return (r_texture){Options->Size, Entry - Metal->Textures, Name };
 }
 
 id<MTLBuffer> MakeMetalBuffer(render_context *R, str8 Name, r_buffer_options *Options)
@@ -340,6 +342,7 @@ void R_BindTexture(render_context *R, r_texture Texture)
 {
 	metal_context *Metal = R->Backend;
 	Metal->BoundTextures[Metal->BoundTexturesCount++] = Texture;
+	R_UniformU32(R, Str8PushF(TemporaryArena(), "?SIndex", Texture.Name), Texture.Handle);
 }
 
 void R_BindShader(render_context *R, r_shader Shader)
@@ -470,15 +473,13 @@ void R_Draw(render_context *R, str8 ShaderName, s32 Count, r_primitive_type Prim
 		[Metal->ActiveRenderEncoder setFragmentBuffer:Buffer offset:0 atIndex:1 + I];
 	}
 	id<MTLHeap> FrameHeap = Metal->FrameHeaps[R->Frame % FRAMES_IN_FLIGHT];
-	id<MTLBuffer> BindlessTextureBuffer = [FrameHeap newBufferWithLength:Metal->BoundTexturesCount*8 options:MTLResourceStorageModeShared];
 	for(int I = 0; I < Metal->BoundTexturesCount; I++)
 	{
 		id<MTLTexture> Texture = Metal->Textures[Metal->BoundTextures[I].Handle].Texture;
-		MTLResourceID *BTB = BindlessTextureBuffer.contents;
-		BTB[I] = Texture.gpuResourceID;
-		[Metal->ActiveRenderEncoder setFragmentTexture:Texture atIndex:I];
+		MTLResourceID *BTB = Metal->BindlessTexturesBuffer.contents;
+		BTB[Metal->BoundTextures[I].Handle] = Texture.gpuResourceID;
 	}
-	[Metal->ActiveRenderEncoder setFragmentBuffer:BindlessTextureBuffer offset:0 atIndex:1 + Metal->BoundBuffersCount];
+	[Metal->ActiveRenderEncoder setFragmentBuffer:Metal->BindlessTexturesBuffer offset:0 atIndex:1 + Metal->BoundBuffersCount];
 	Metal->BoundBuffersCount = 0;
 	Metal->BoundTexturesCount = 0;
 	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
@@ -509,11 +510,13 @@ r_shader R_Shader(render_context *R, str8 Name)
 
 	Str8ListAppend(TemporaryArena(), &Prelude, Str8ListJoin(TemporaryArena(), &UniformStruct));
 
+	Str8ListAppend(TemporaryArena(), &Prelude, Str8("\n struct generic_args { metal::texture2d<float> Textures[[id(0)]][4096];};\n"));
+
 	Str8ListAppend(TemporaryArena(), &Prelude, Str8("\n#define FragmentMain2 "));
 	Str8ListAppend(TemporaryArena(), &Prelude, Str8("fragment float4 FragmentMain(vertex_output Input [[stage_in]],"));
 	for(int I = 0; I < Metal->BoundTexturesCount; I++)
 	{
-		Str8ListAppendF(TemporaryArena(), &Prelude, " texture2d<float> Texture [[texture(?u32)]], ", I);
+		Str8ListAppendF(TemporaryArena(), &Prelude, "\n#define ?S (Args.Textures[[Uniforms.?SIndex])\n", Metal->BoundTextures[I].Name, Metal->BoundTextures[I].Name);
 	}
 
 	Str8ListAppendF(TemporaryArena(), &Prelude, " constant generic_args &Args [[buffer(1)]]");
@@ -707,6 +710,8 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 			}
 		}
 	}
+
+	M->BindlessTexturesBuffer = [M->PermanentArena newBufferWithLength:4096*8 options:MTLResourceStorageModeShared];
 
 	M->InFlightSemaphore = dispatch_semaphore_create(FRAMES_IN_FLIGHT);
 }

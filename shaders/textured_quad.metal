@@ -45,13 +45,6 @@ vertex vertex_output VertexMain(constant uniforms &Uniforms [[buffer(0)]],
 	return Output;
 }
 
-struct generic_args
-{
-	texture2d<float> Textures [[id(0)]][16384];
-	texture2d<float, access::read_write> Images [[id(16384)]][1024];
-	uint64_t Buffers [[id(16384 + 1024)]][4096];
-};
-
 FragmentMain2
 {
 	sampler Sampler(mag_filter::linear, min_filter::linear);
