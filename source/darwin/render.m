@@ -484,6 +484,7 @@ void R_Draw(render_context *R, str8 ShaderName, s32 Count, r_primitive_type Prim
 		id<MTLTexture> Texture = Metal->Textures[Metal->BoundTextures[I].Handle].Texture;
 		MTLResourceID *BTB = Metal->BindlessTexturesBuffer.contents;
 		BTB[Metal->BoundTextures[I].Handle] = Texture.gpuResourceID;
+		[Metal->ActiveRenderEncoder useResource: Texture usage: MTLResourceUsageRead stages:MTLRenderStageFragment];
 	}
 	[Metal->ActiveRenderEncoder setFragmentBuffer:Metal->BindlessTexturesBuffer offset:0 atIndex:1 + Metal->BoundBuffersCount];
 	Metal->BoundBuffersCount = 0;

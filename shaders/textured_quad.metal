@@ -49,5 +49,5 @@ FragmentMain2
 {
 	sampler Sampler(mag_filter::linear, min_filter::linear);
 
-	return Args.Textures[0].sample(Sampler, Input.UV);
+	return Texture.sample(Sampler, Input.UV);
 }
