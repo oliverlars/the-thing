@@ -170,6 +170,7 @@ id<MTLTexture> MakeMetalTexture(render_context *R, str8 Name, v2i Size, r_textur
 	];
 	Desc.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
 	Desc.storageMode = MTLStorageModeShared;
+	NSError *Error = nil;
 	id<MTLTexture> Texture = [Metal->Device newTextureWithDescriptor:Desc];
 	Texture.label = [
 		[NSString alloc] initWithBytes:Name.Bytes
@@ -339,11 +340,6 @@ void R_BindBuffer(render_context *R, r_buffer Buffer)
 {
 	metal_context *Metal = R->Backend;
 	Metal->BoundBuffers[Metal->BoundBuffersCount++] = Buffer;
-}
-
-str8 NormaliseName(str8 Name)
-{
-
 }
 
 void R_BindTexture(render_context *R, str8 BindName, r_texture Texture)
@@ -520,7 +516,7 @@ r_shader R_Shader(render_context *R, str8 Name)
 
 	Str8ListAppend(TemporaryArena(), &Prelude, Str8ListJoin(TemporaryArena(), &UniformStruct));
 
-	Str8ListAppend(TemporaryArena(), &Prelude, Str8("\n struct generic_args { metal::texture2d<float> Textures[[id(0)]][4096];};\n"));
+	Str8ListAppendF(TemporaryArena(), &Prelude, "\n struct generic_args { metal::texture2d<float> Textures[[id(0)]][?u32];};\n", R_TEXTURE_TABLE_SIZE);
 
 	for(int I = 0; I < Metal->BoundTexturesCount; I++)
 	{
@@ -723,8 +719,14 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 		}
 	}
 
-	M->BindlessTexturesBuffer = [M->PermanentArena newBufferWithLength:4096*8 options:MTLResourceStorageModeShared];
+	MTLHeapDescriptor *HeapDesc = [[MTLHeapDescriptor alloc] init];
+	HeapDesc.size        = MegaBytes(128);
+	HeapDesc.storageMode = MTLStorageModeShared;
+	HeapDesc.type        = MTLHeapTypeAutomatic;
+	M->PermanentArena = [M->Device newHeapWithDescriptor:HeapDesc];
 
+	M->BindlessTexturesBuffer = [M->PermanentArena newBufferWithLength:R_TEXTURE_TABLE_SIZE*8 options:MTLResourceStorageModeShared];
+	assert(M->BindlessTexturesBuffer);
 	M->InFlightSemaphore = dispatch_semaphore_create(FRAMES_IN_FLIGHT);
 }
 
