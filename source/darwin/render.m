@@ -76,7 +76,9 @@ typedef struct metal_context
 
 	v2i Viewport;
 
-	r_texture BoundTextures[16];
+	r_texture BoundTextures[64];
+	// HACK(Oliver): This is kinda weird
+	str8      BoundTextureNames[64];
 	int BoundTexturesCount;
 
 	r_buffer BoundBuffers[16];
@@ -137,7 +139,8 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name, str8 U
 	Shader.Hash = M_FNVHashString(M_FNV_HASH_START, Name);
 	if (!Shader.Library)
 	{
-		LogError("Shader compile failed: ?cstr",
+		LogError("Shader \"?S\" compile failed: ?cstr",
+			Name,
 			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
 		return Shader;
 	}
@@ -338,11 +341,18 @@ void R_BindBuffer(render_context *R, r_buffer Buffer)
 	Metal->BoundBuffers[Metal->BoundBuffersCount++] = Buffer;
 }
 
-void R_BindTexture(render_context *R, r_texture Texture)
+str8 NormaliseName(str8 Name)
+{
+
+}
+
+void R_BindTexture(render_context *R, str8 BindName, r_texture Texture)
 {
 	metal_context *Metal = R->Backend;
-	Metal->BoundTextures[Metal->BoundTexturesCount++] = Texture;
-	R_UniformU32(R, Str8PushF(TemporaryArena(), "?SIndex", Texture.Name), Texture.Handle);
+	Metal->BoundTextures[Metal->BoundTexturesCount] = Texture;
+	Metal->BoundTextureNames[Metal->BoundTexturesCount] = BindName;
+	Metal->BoundTexturesCount++;
+	R_UniformU32(R, Str8PushF(TemporaryArena(), "?SIndex", BindName), Texture.Handle);
 }
 
 void R_BindShader(render_context *R, r_shader Shader)
@@ -512,14 +522,16 @@ r_shader R_Shader(render_context *R, str8 Name)
 
 	Str8ListAppend(TemporaryArena(), &Prelude, Str8("\n struct generic_args { metal::texture2d<float> Textures[[id(0)]][4096];};\n"));
 
-	Str8ListAppend(TemporaryArena(), &Prelude, Str8("\n#define FragmentMain2 "));
-	Str8ListAppend(TemporaryArena(), &Prelude, Str8("fragment float4 FragmentMain(vertex_output Input [[stage_in]],"));
 	for(int I = 0; I < Metal->BoundTexturesCount; I++)
 	{
-		Str8ListAppendF(TemporaryArena(), &Prelude, "\n#define ?S (Args.Textures[[Uniforms.?SIndex])\n", Metal->BoundTextures[I].Name, Metal->BoundTextures[I].Name);
+		Str8ListAppendF(TemporaryArena(), &Prelude, "\n#define ?S (Args.Textures[Uniforms.?SIndex])\n", Metal->BoundTextureNames[I], Metal->BoundTextureNames[I]);
 	}
 
-	Str8ListAppendF(TemporaryArena(), &Prelude, " constant generic_args &Args [[buffer(1)]]");
+	Str8ListAppend(TemporaryArena(), &Prelude, Str8("\n#define FragmentMain2 "));
+	Str8ListAppend(TemporaryArena(), &Prelude, Str8("fragment float4 FragmentMain(vertex_output Input [[stage_in]],"));
+
+	Str8ListAppendF(TemporaryArena(), &Prelude, " device generic_args &Args [[buffer(1)]], ");
+	Str8ListAppendF(TemporaryArena(), &Prelude, " constant uniforms &Uniforms [[buffer(0)]]");
 
 	Str8ListAppend(TemporaryArena(), &Prelude, Str8(")"));
 

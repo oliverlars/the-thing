@@ -165,8 +165,8 @@ static void Frame(void *UserData, v2i ViewportSize)
 	f32 CardX0 = W * 0.10f - 30.0f;
 	f32 CardX1 = W * 0.10f + (ShapeSize + ShapeGap) + ShapeSize * 2.0f + 30.0f;
 
-	r_texture TestTexture = R_Texture(&App->Render, Str8("Test Texture"), .Size = v2i(400, 400), .Format = TF_RGBA16);
-	r_texture TestDepth   = R_Texture(&App->Render, Str8("Test Depth"), .Size = v2i(400, 400), .Format = TF_DEPTH32);
+	r_texture TestTexture = R_Texture(&App->Render, Str8("TestTexture"), .Size = v2i(400, 400), .Format = TF_RGBA16);
+	r_texture TestDepth   = R_Texture(&App->Render, Str8("TestDepth"), .Size = v2i(400, 400), .Format = TF_DEPTH32);
 
 	R_Pass(&App->Render, Str8("Cube Pass"), 
 		.Depth = TestDepth, .DepthOp = LO_CLEAR, .ClearDepth = 1.0,
@@ -179,12 +179,12 @@ static void Frame(void *UserData, v2i ViewportSize)
 		R_Draw(&App->Render, Str8("triangle2.metal"), 36, R_TRIANGLES);
 	}
 
-	r_texture Temp = R_Texture(&App->Render, Str8("Temp Texture"), .Size = v2i(400, 400), .Format = TF_RGBA16);
+	r_texture Temp = R_Texture(&App->Render, Str8("TempTexture"), .Size = v2i(400, 400), .Format = TF_RGBA16);
 	R_Pass(&App->Render, Str8("Cube Horizontal Blur"), .Colours[0] = Temp, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 0))
 	{
 		R_UniformV2F(&App->Render, Str8("Direction"), v2f(1, 0));
 		R_UniformF32(&App->Render, Str8("Radius"), 20);
-		R_BindTexture(&App->Render, TestTexture);
+		R_BindTexture(&App->Render, Str8("Texture"), TestTexture);
 		R_Draw(&App->Render, Str8("blur.metal"), 6, R_TRIANGLES);
 	}
 
@@ -192,7 +192,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 	{
 		R_UniformV2F(&App->Render, Str8("Direction"), v2f(0, 1));
 		R_UniformF32(&App->Render, Str8("Radius"), 5);
-		R_BindTexture(&App->Render, Temp);
+		R_BindTexture(&App->Render, Str8("Texture"), Temp);
 		R_Draw(&App->Render, Str8("blur.metal"), 6, R_TRIANGLES);
 	}
 

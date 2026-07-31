@@ -161,7 +161,7 @@ void UI_Texture(ui_context *UI, str8 Name, r_texture Texture)
 	R_UniformM44F(UI->Draw->Render, Str8("PVMMatrix"), R_CurrentTransform(UI->Draw->Render));
 	R_UniformV2F(UI->Draw->Render, Str8("Position"), RenderPosition);
 	R_UniformV2F(UI->Draw->Render, Str8("Size"), Widget->Size);
-	R_BindTexture(UI->Draw->Render, Texture);
+	R_BindTexture(UI->Draw->Render, Str8("Texture"), Texture);
 	R_Draw(UI->Draw->Render, Str8("textured_quad.metal"), 6, R_TRIANGLES);
 
 	Widget->Aspect = (f32)Texture.Size.Y / (f32)Texture.Size.X;

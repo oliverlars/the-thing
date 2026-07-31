@@ -28,11 +28,7 @@ vertex vertex_output VertexMain(
 	return Output;
 }
 
-fragment float4 FragmentMain(
-	vertex_output Input [[stage_in]],
-	texture2d<float> Texture [[texture(0)]],
-	constant uniforms &Uniforms [[buffer(0)]]
-)
+FragmentMain2
 {
 	float4 Average = float4(0.0);
 	int Radius = Uniforms.Radius;

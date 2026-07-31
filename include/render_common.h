@@ -111,7 +111,7 @@ void    *R_BufferData(render_context *R, r_buffer Buffer);
 r_shader R_Shader(render_context *R, str8 Name);
 
 void R_BindBuffer(render_context *R, r_buffer Buffer);
-void R_BindTexture(render_context *R, r_texture Texture);
+void R_BindTexture(render_context *R, str8 BindName, r_texture Texture);
 void R_BindShader(render_context *R, r_shader Shader);
 
 void R_UniformF32(render_context *R, str8 Name, f32 Value);
