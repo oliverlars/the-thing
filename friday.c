@@ -116,6 +116,12 @@ Entry(InputWaveInfo)
 	if(!PrintHelpMenu)
 	{
 		FailedToBuild = Build(WaveInfo, &Arena, BuildOptions);
+		build_options DynLibBuildOptions = BuildOptions;
+		DynLibBuildOptions.OutputType = OUTPUT_DYNAMIC_LIBRARY;
+		DynLibBuildOptions.OutputName = Str8("dltest.dynlib");
+		DynLibBuildOptions.SourceFiles = (str8_list){0};
+		Str8ListAppend(&Arena, &DynLibBuildOptions.SourceFiles, Str8("dyn.c"));
+		FailedToBuild &= Build(WaveInfo, &Arena, DynLibBuildOptions);
 	}
 
 	if(WaveIsFirstLane(WaveInfo) && ShouldRun && !FailedToBuild)

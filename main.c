@@ -13,6 +13,8 @@
 
 #include <math.h>
 
+#include <dlfcn.h>
+
 typedef struct app_state
 {
 	m_arena *FrameArenas[2];
@@ -337,6 +339,11 @@ int main(int ArgCount, char **Args)
 	App.UI.Font = App.Font;
 	App.UI.IconFont = App.LucideFont;
 	App.UI.Window = App.Window;
+
+
+	void *DLTest = dlopen("build/dltest.dynlib", RTLD_NOW | RTLD_LOCAL);
+	int (*SomeFunc)(void) = (int (*)(void))dlsym(DLTest, "SomeFunc");
+	LogInfo("SomeFunc() = ?s32", SomeFunc());
 
 	OS_Run(&Window, Frame, &App);
 	return 0;

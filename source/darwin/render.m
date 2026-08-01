@@ -314,6 +314,7 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStru
 	else if(Shader->Hash == 0)
 	{
 		Shader[0] = LoadMetalShader(R, TimeStamp, Name, UniformStruct);
+		Shader->Hash = Hash;
 	}
 	else
 	{

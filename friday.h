@@ -114,6 +114,10 @@ typedef enum compiler
 
 	COMPILER_COUNT,
 } compiler;
+
+#define OUTPUT_FLAG_STATIC Str8("-static")
+#define OUTPUT_FLAG_DYNAMIC Str8("-dynamiclib")
+
 #elif defined(_WIN32)
 #include <stdatomic.h>
 
@@ -506,9 +510,17 @@ str8 CompileCommandFromBuildOptions(memory_arena *Arena, build_options *BuildOpt
 
 str8 LinkCommandFromBuildOptions(memory_arena *Arena, build_options *BuildOptions, str8_array ObjectFiles)
 {
+	str8 OutputTypes[OUTPUT_COUNT] =
+	{
+		Str8(""),
+		OUTPUT_FLAG_STATIC,
+		OUTPUT_FLAG_DYNAMIC,
+	};
+
 	str8 LinkCommand = Str8PushF(
 		Arena,
-		"clang %.*s -o %.*s%.*s %.*s",
+		"clang %.*s %.*s -o %.*s%.*s %.*s",
+		Str8ToPrintfArgs(OutputTypes[BuildOptions->OutputType]),
 		Str8ToPrintfArgs(Str8ListJoin(Arena, BuildOptions->ExtraLinkFlags)),
 		Str8ToPrintfArgs(BuildOptions->OutputPath),
 		Str8ToPrintfArgs(BuildOptions->OutputName),
