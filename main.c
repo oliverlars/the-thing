@@ -27,6 +27,8 @@ typedef struct app_state
 	u64 StartTime;
 
 	ui_context UI;
+
+	os_platform OS;
 } app_state;
 
 
@@ -294,6 +296,7 @@ static void Frame(void *UserData, v2i ViewportSize)
 
 int main(int ArgCount, char **Args)
 {
+
 	m_arena *Arena = ArenaInitialise(GigaBytes(4));
 	per_thread_context *Ctx = GetThreadLocalContext();
 	Ctx->ScratchArenas[0] = ArenaInitialise(GigaBytes(1));
@@ -306,6 +309,23 @@ int main(int ArgCount, char **Args)
 	App.FrameArenas[0] = ArenaInitialise(MegaBytes(256));
 	App.FrameArenas[1] = ArenaInitialise(MegaBytes(256));
 	SetTemporaryArena(App.FrameArenas[0]);
+
+
+	App.OS.LoadEntireFileIntoMemory = OS_LoadEntireFileIntoMemory;
+	App.OS.NextDrawable = OS_NextDrawable;
+	App.OS.WindowHeight = OS_WindowHeight;
+	App.OS.WindowWidth = OS_WindowWidth;
+	App.OS.MousePosition = OS_MousePosition;
+	App.OS.NextEvent = OS_NextEvent;
+	App.OS.KeyDown = OS_KeyDown;
+	App.OS.MouseDown = OS_MouseDown;
+	App.OS.KeyPressed = OS_KeyPressed;
+	App.OS.KeyReleased = OS_KeyReleased;
+	App.OS.MousePressed = OS_MousePressed;
+	App.OS.MouseReleased = OS_MouseReleased;
+	App.OS.TimeStampNow = OS_TimeStampNow;
+	App.OS.MilliSecondsFromTimeStamp = OS_MilliSecondsFromTimeStamp;
+	App.OS.LastModified = OS_LastModified;
 
 	os_window Window = OS_MakeWindow(Str8("the-thing"), 1280, 800);
 	App.Window = &Window;
@@ -344,6 +364,7 @@ int main(int ArgCount, char **Args)
 	void *DLTest = dlopen("build/dltest.dynlib", RTLD_NOW | RTLD_LOCAL);
 	int (*SomeFunc)(void) = (int (*)(void))dlsym(DLTest, "SomeFunc");
 	LogInfo("SomeFunc() = ?s32", SomeFunc());
+
 
 	OS_Run(&Window, Frame, &App);
 	return 0;
