@@ -6,7 +6,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-per_thread_local struct per_thread_context __ThreadLocalContext;
+per_thread_local struct per_thread_context *__ThreadLocalContext;
 
 m_arena *ArenaInitialise(s64 NumberOfBytes)
 {
@@ -49,7 +49,12 @@ void ScratchEnd(m_scratch_arena Scratch)
 
 per_thread_context *GetThreadLocalContext(void)
 {
-	return &__ThreadLocalContext;
+	return __ThreadLocalContext;
+}
+
+void SetThreadLocalContextPointer(per_thread_context *Ctx)
+{
+	__ThreadLocalContext = Ctx;
 }
 
 m_arena *TemporaryArena(void)

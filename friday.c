@@ -118,9 +118,13 @@ Entry(InputWaveInfo)
 		FailedToBuild = Build(WaveInfo, &Arena, BuildOptions);
 		build_options DynLibBuildOptions = BuildOptions;
 		DynLibBuildOptions.OutputType = OUTPUT_DYNAMIC_LIBRARY;
-		DynLibBuildOptions.OutputName = Str8("dltest.dynlib");
+		DynLibBuildOptions.OutputName = Str8("app.dynlib");
 		DynLibBuildOptions.SourceFiles = (str8_list){0};
-		Str8ListAppend(&Arena, &DynLibBuildOptions.SourceFiles, Str8("dyn.c"));
+		Str8ListAppend(&Arena, &DynLibBuildOptions.SourceFiles, Str8("app.c"));
+		AppendSourceFilesInFolder(&Arena, &DynLibBuildOptions.SourceFiles, Str8("source/darwin"));
+		AppendSourceFilesInFolder(&Arena, &DynLibBuildOptions.SourceFiles, Str8("source/"));
+		AppendSourceFilesInFolder(&Arena, &DynLibBuildOptions.SourceFiles, Str8("external/"));
+		Str8ListAppend(&Shared->Arena, &DynLibBuildOptions.SourceFiles, Str8("build/embedded_fonts.c"));
 		FailedToBuild &= Build(WaveInfo, &Arena, DynLibBuildOptions);
 	}
 

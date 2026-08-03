@@ -29,6 +29,8 @@ per_thread_context;
 
 per_thread_context *GetThreadLocalContext(void);
 
+void SetThreadLocalContextPointer(per_thread_context *Ctx);
+
 m_scratch_arena ScratchBegin(m_arena **Arenas, int ConflictCount);
 void ScratchEnd(m_scratch_arena Scratch);
 

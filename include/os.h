@@ -164,3 +164,5 @@ typedef struct os_platform
 	u64  (*GetPageSize)(void);
 }
 os_platform;
+
+extern os_platform Platform;

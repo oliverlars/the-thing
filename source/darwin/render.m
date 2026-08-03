@@ -112,7 +112,7 @@ void R_TextureFromBytes(render_context *R, u8 *Bytes, s32 Width, s32 Height)
 static str8 LoadShaderFile(m_arena *Arena, str8 ShaderDir, char *Name)
 {
 	str8 Path = Str8PushF(Arena, "?S/?cstr", ShaderDir, Name);
-	return OS_LoadEntireFileIntoMemory(Arena, Path);
+	return Platform.LoadEntireFileIntoMemory(Arena, Path);
 }
 
 static str8 ResolveShaderIncludes(m_arena *Arena, str8 ShaderDir, str8 Source);
@@ -124,7 +124,7 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name, str8 U
 	Shader.Name = Str8Copy(R->Arena, Name);
 	Shader.TimeStamp = TimeStamp;
 	str8 Path = Str8PushF(TemporaryArena(), "shaders/?S", Name);
-	str8 SourceNoPrelude = OS_LoadEntireFileIntoMemory(TemporaryArena(), Path);
+	str8 SourceNoPrelude = Platform.LoadEntireFileIntoMemory(TemporaryArena(), Path);
 	str8_list SourceAndPrelude = {0};
 	Str8ListAppend(TemporaryArena(), &SourceAndPrelude, UniformStruct);
 	Str8ListAppend(TemporaryArena(), &SourceAndPrelude, Str8("\n"));
@@ -301,7 +301,7 @@ metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStru
 	Hash = M_FNVHashString(Hash, UniformStruct);
 	s32 Index = (Hash % 4096);
 	metal_shader *Shader = Metal->Shaders + Index;
-	u64 TimeStamp = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
+	u64 TimeStamp = Platform.LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
 	if(Shader->Hash == Hash)
 	{
 		if(TimeStamp > Shader->TimeStamp)
@@ -511,7 +511,7 @@ r_shader R_Shader(render_context *R, str8 Name)
 		Str8ListAppend(TemporaryArena(), &UniformStruct, Str8(";"));
 	}
 	Str8ListAppend(TemporaryArena(), &UniformStruct, Str8("};\n"));
-	u64 LastModified = OS_LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
+	u64 LastModified = Platform.LastModified(Str8PushF(TemporaryArena(), "shaders/?S", Name));
 	metal_context *Metal = R->Backend;
 
 	str8_list Prelude = {0};
