@@ -199,7 +199,7 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 	m44f Model = MulM44FM44F(M44FromYAngle((f32)App->Render.Frame / 100.0 * 0.9f),
 	                         M44FromXAngle((f32)App->Render.Frame / 100.0 * 0.6f));
 	m44f View  = M44FLookAt(v3f(0, 0, 3), v3f(0, 0, 0), v3f(0, 1, 0));
-	f32 Aspect = ViewportSize.X / ViewportSize.Y;
+	f32 Aspect = (f32)ViewportSize.Y / (f32)ViewportSize.X;
 	m44f Proj  = PerspectiveMetal(Aspect, 50.0f, 0.1f, 100.0f);
 	m44f PVM   = MulM44FM44F(MulM44FM44F(Model, View), Proj);
 
@@ -243,9 +243,24 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 
 	r_texture Screen = R_Texture(&App->Render, Str8("Screen Texture"),
 		.Size = ViewportSize, .Format = TF_BGRA10_SRGB);
+
+
 	R_Pass(&App->Render, Str8("Screen"), .Colours[0] = Screen, .ColourOps[0] = LO_CLEAR,
 		.ClearColour[0] = v4f(0.001548f, 0.001548f, 0.002322f, 1.0f))
 	{
+
+		D_RoundedQuad(&App->Draw, v2f(200, 600), 400, 400, 15.0, 
+			.OutlineThickness = 2.0f,
+			.Colour = v4f(1.0, 1.0, 1.0, 1.0),
+			.OutlineColour = v4f(1, 1, 1, 1),
+		);
+
+		v2f RenderPosition = v2f(200, 600);
+		R_UniformM44F(&App->Render, Str8("PVMMatrix"), Ortho);
+		R_UniformV2F(&App->Render, Str8("Position"), RenderPosition);
+		R_UniformV2F(&App->Render, Str8("Size"), v2f(400, 400));
+		R_BindTexture(&App->Render, Str8("Texture"), TestTexture);
+		R_Draw(&App->Render, Str8("textured_quad.metal"), 6, R_TRIANGLES);
 
 		D_RoundedQuad(&App->Draw, v2f(CardX0, ShapeY - 30.0f),
 			CardX1 - CardX0, ShapeSize + 60.0f, 24.0f,
@@ -291,45 +306,45 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
 		D_Str8(&App->Draw, Str8("HELLO, WORLD!"),
 			.Font = App->Font,
-			.Position = v3f(W * 0.10f, H * 0.90f, 0),
+			.Position = v3f(W * 0.55f, H * 0.90f, 0),
 			.HeightInPixels = 64.0f,
 			.Colour = v4f(1, 1, 1, 1));
 
-		UI_Begin(&App->UI);
-		UI_PANEL(&App->UI, v2f(1000, 200), v2f(900, 1300))
-		{
-			UI_ROW(&App->UI, UI_LAYOUT_FIXED)
-			{
-				UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
-				UI_Button(&App->UI, Str8("Submit"));
-			}
-			str8 Elements[3] = {
-				Str8("Cat"), 
-				Str8("Dog"),
-				Str8("Meow"),
-			};
-			UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
+		// UI_Begin(&App->UI);
+		// UI_PANEL(&App->UI, v2f(0, 0), v2f(ViewportSize.X/2.0, ViewportSize.Y/1.50))
+		// {
+		// 	UI_ROW(&App->UI, UI_LAYOUT_FIXED)
+		// 	{
+		// 		UI_FILL(&App->UI) UI_Button(&App->UI, Str8("A"));
+		// 		UI_Button(&App->UI, Str8("Submit"));
+		// 	}
+		// 	str8 Elements[3] = {
+		// 		Str8("Cat"), 
+		// 		Str8("Dog"),
+		// 		Str8("Meow"),
+		// 	};
+		// 	UI_ComboBox(&App->UI, Str8("ComboBox"), Elements, 3, 0);
 
-			UI_CollapsingTexture(&App->UI, Str8("Cube"), Str8("Cube widget"), TestTexture);
+		// 	UI_CollapsingTexture(&App->UI, Str8("Cube"), Str8("Cube widget"), TestTexture);
 
-			if(UI_Button(&App->UI, Str8("Some button")))
-			{
-				LogInfo("Clicked button");
-			}
-		}
+		// 	if(UI_Button(&App->UI, Str8("Some button")))
+		// 	{
+		// 		LogInfo("Clicked button");
+		// 	}
+		// }
 
-		UI_Layout(&App->UI);
-		UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
+		// UI_Layout(&App->UI);
+		// UI_LayoutPositions(&App->UI, App->UI.Root, App->UI.Root->Position);
 
-		for(int I = 0; I < App->UI.FloatCount; I++)
-		{
-			ui_widget *Float = App->UI.FloatRoots[I];
-			UI_LayoutColumn(&App->UI, Float, App->UI.Draw->ViewportSize);
-			UI_LayoutPositions(&App->UI, Float, Float->Position);
-			UI_RenderWidgets(&App->UI, Float);
-		}
+		// for(int I = 0; I < App->UI.FloatCount; I++)
+		// {
+		// 	ui_widget *Float = App->UI.FloatRoots[I];
+		// 	UI_LayoutColumn(&App->UI, Float, App->UI.Draw->ViewportSize);
+		// 	UI_LayoutPositions(&App->UI, Float, Float->Position);
+		// 	UI_RenderWidgets(&App->UI, Float);
+		// }
 
-		UI_End(&App->UI);
+		// UI_End(&App->UI);
 	}
 
 	R_Update(&App->Render, Platform.NextDrawable(App->Window), Screen);

@@ -20,7 +20,7 @@ vertex vertex_output VertexMain(
 	return Output;
 }
 
-fragment float4 FragmentMain(vertex_output Input [[stage_in]])
+FragmentMain2
 {
 	float4 Colour = Input.Colour;
 	return Colour;

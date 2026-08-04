@@ -181,49 +181,46 @@ id<MTLTexture> MakeMetalTexture(render_context *R, str8 Name, v2i Size, r_textur
 
 b32 TextureOptionsEqual(r_texture_options *A, r_texture_options *B)
 {
-	return A->Format == B->Format && A->Size.X == B->Size.X && A->Size.Y && B->Size.Y;
+	return A->Format == B->Format && A->Size.X == B->Size.X && A->Size.Y == B->Size.Y;
 }
 
 r_texture R_TextureEx(render_context *R, str8 Name, r_texture_options *Options)
 {
 	metal_context *Metal = R->Backend;
 	u64 Hash = M_FNVHashString(M_FNV_HASH_START, Name);
-	metal_texture_entry *Entry = Metal->Textures + (Hash % R_TEXTURE_TABLE_SIZE);
-	if(Entry->Hash == Hash)
+	u64 Start = Hash % R_TEXTURE_TABLE_SIZE;
+
+	// Linear probe outwards from the hashed slot, wrapping around the table.
+	// A zero hash marks a slot that has never been claimed; nothing is ever
+	// evicted, so the first empty slot is also the end of this name's chain.
+	for(u64 Step = 0; Step < R_TEXTURE_TABLE_SIZE; Step++)
 	{
-		if(!TextureOptionsEqual(&Entry->Options, Options))
+		u64 Index = (Start + Step) % R_TEXTURE_TABLE_SIZE;
+		metal_texture_entry *Entry = Metal->Textures + Index;
+
+		if(Entry->Hash == 0)
 		{
-			Entry->Texture = nil;
+			Entry->Hash    = Hash;
 			Entry->Options = Options[0];
 			Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
-			Entry->Hash = Hash;
+			return (r_texture){Options->Size, Index, Name};
 		}
-		return (r_texture){Options->Size, Entry - Metal->Textures, Name};
-	}
-	else if(Entry->Hash > 0)
-	{
-		for(int I = 1; I < R_TEXTURE_TABLE_SIZE - 1; I++)
+
+		if(Entry->Hash == Hash)
 		{
-			if(Entry[I % R_TEXTURE_TABLE_SIZE].Hash == Hash)
+			// Same name, different shape — the old texture is dropped here but
+			// stays alive as long as in-flight command buffers reference it.
+			if(!TextureOptionsEqual(&Entry->Options, Options))
 			{
-				if(!TextureOptionsEqual(&Entry->Options, Options))
-				{
-					Entry->Texture = nil;
-					Entry->Options = Options[0];
-					Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
-					Entry->Hash = Hash;
-				}
-				return (r_texture){Options->Size, Entry - Metal->Textures, Name};
+				Entry->Options = Options[0];
+				Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
 			}
+			return (r_texture){Options->Size, Index, Name};
 		}
 	}
-	else
-	{
-		Entry->Options = Options[0];
-		Entry->Texture = MakeMetalTexture(R, Name, Options->Size, Options->Format);
-		Entry->Hash = Hash;
-	}
-	return (r_texture){Options->Size, Entry - Metal->Textures, Name };
+
+	LogError("Texture table is full, cannot allocate ?S", Name);
+	return (r_texture){0};
 }
 
 id<MTLBuffer> MakeMetalBuffer(render_context *R, str8 Name, r_buffer_options *Options)
