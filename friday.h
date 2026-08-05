@@ -1,6 +1,5 @@
-#include "memory.h"
+#pragma once
 #include <assert.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -1121,6 +1120,8 @@ int F_MoveFileOnDisk(f_memory_arena *Arena, f_str8 Source, f_str8 Destination)
 
 f_u8* F_ArenaPush(f_memory_arena *Arena, f_s64 Bytes)
 {
+	Arena->At = (Arena->At + 15) & ~(f_s64)15;
+
 	if(Arena->At + Bytes >= Arena->Committed)
 	{
 		f_s64 BytesNeeded = (Arena->At + Bytes - Arena->Committed);

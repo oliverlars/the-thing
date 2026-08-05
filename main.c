@@ -39,7 +39,6 @@ F_Entry(InputWaveInfo)
 	f_memory_arena Arena = {0};
 	Arena.Start = F_MemoryReserve(F_GigaBytes(1));
 
-	b32 ShouldRebuildApp = False;
 	f_str8_array RelativeSourceFilePaths = {0};
 	f_str8_array ObjectFileNames = {0};
 	if(F_WaveIsFirstLane(WaveInfo))
@@ -48,35 +47,38 @@ F_Entry(InputWaveInfo)
 		ObjectFileNames.Count = RelativeSourceFilePaths.Count;
 		ObjectFileNames.Items = (f_str8*)F_ArenaPush(&WaveInfo->Shared->Arena, sizeof(f_str8)*RelativeSourceFilePaths.Count);
 	}
-	
 	F_BroadcastToAllLanes(WaveInfo, RelativeSourceFilePaths);
 
 	f_s64 Count = F_LaneValueFromTotal(WaveInfo, RelativeSourceFilePaths.Count);
 	f_s64 Index = F_ExclusiveWavePrefixSum(WaveInfo, Count);
-
-	f_b32 AnyFilesChanged = F_False;
-	for(int I = Index; I < Index + Count; I++)
+	for(;;)
 	{
-		f_str8 Path = RelativeSourceFilePaths.Items[I];
+		b32 ShouldRebuildApp = False;
 
-		struct stat FileStat = {0};
-		u64 LastModified = 0;
-		if(stat(F_CStrFromStr8(&Arena, Path), &FileStat) == 0)
+		f_b32 AnyFilesChanged = F_False;
+		for(int I = Index; I < Index + Count; I++)
 		{
-			LastModified = (u64)FileStat.st_mtime;
+			f_str8 Path = RelativeSourceFilePaths.Items[I];
+
+			struct stat FileStat = {0};
+			u64 LastModified = 0;
+			if(stat(F_CStrFromStr8(&Arena, Path), &FileStat) == 0)
+			{
+				LastModified = (u64)FileStat.st_mtime;
+			}
+
+			if(LastModified != SourceFileTimeStamps[I])
+			{
+				SourceFileTimeStamps[I] = LastModified;
+				AnyFilesChanged = F_True;
+			}
 		}
 
-		if(LastModified != SourceFileTimeStamps[I])
+		ShouldRebuildApp = F_WaveAnyTrue(WaveInfo, AnyFilesChanged);
+		if(ShouldRebuildApp)
 		{
-			SourceFileTimeStamps[I] = LastModified;
-			AnyFilesChanged = F_True;
+			F_Build(WaveInfo, &Arena, Shared->BuildOptions);
 		}
-	}
-
-	ShouldRebuildApp = F_WaveAnyTrue(WaveInfo, AnyFilesChanged);
-	if(ShouldRebuildApp)
-	{
-		F_Build(WaveInfo, &Arena, Shared->BuildOptions);
 	}
 
 	return 0;
