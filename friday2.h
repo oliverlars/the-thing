@@ -18,7 +18,7 @@ typedef unsigned short int f_b16;
 typedef unsigned int f_b32;
 typedef unsigned long long f_b64;
 
-#define Null ((void*)0)
+#define F_Null ((void*)0)
 
 #define F_KiloBytes(X) (1024ull * X)
 #define F_MegaBytes(X) (1024ull * F_KiloBytes(X))
@@ -102,7 +102,25 @@ typedef struct f_file_info
 }
 f_file_info;
 
-typedef struct f_thread f_thread;
+typedef struct f_thread
+{
+	f_u64 Handle;
+}
+f_thread;
+
+typedef struct f_barrier
+{
+	_Atomic(f_u64) Generation;
+	_Atomic(f_u64) LanesWaiting;
+}
+f_barrier;
+
+typedef struct f_wave
+{
+	f_s64      Lane;
+	f_barrier *Barrier;
+}
+f_wave;
 
 typedef struct f_dir_iter f_dir_iter;
 
@@ -132,13 +150,14 @@ void F_Dispatch(f_wave_context *Ctx, f_s64 LaneCount);
 f_s64           F_WaveLaneIndex   (f_wave *Wave);
 f_s64           F_WaveLaneCount   (f_wave *Wave);
 f_b32           F_WaveIsFirstLane (f_wave *Wave);
-void            F_WaveBarrier     (f_wave *Wave);
 f_b32           F_WaveAnyTrue     (f_wave *Wave, f_b32 Value);
 f_b32           F_WaveAllTrue     (f_wave *Wave, f_b32 Value);
 f_u64           F_WavePrefixSum   (f_wave *Wave, f_u64 Value);
 void            F_WaveBroadcast   (f_wave *Wave, void *Bytes, f_s64 Count);
 f_memory_arena *F_WaveArena       (f_wave *Wave);
 f_memory_arena *F_WaveSharedArena (f_wave *Wave);
+
+void            F_WaveBarrier     (f_wave *Wave);
 
 
 #define F_WaveOnce(W)
@@ -174,8 +193,9 @@ f_b32 F_OS_DirNext       (f_dir_iter *Iter, f_str8 *OutName);
 f_b32 F_OS_ProcessSpawn  (char **Argv, f_process *Out);
 f_b32 F_OS_ProcessState  (f_process *P, f_s32 *ExitCode);
 
-void  F_OS_ThreadStart(f_thread *T, void *(*Fn)(void *), void *Arg);
-void  F_OS_ThreadJoin (f_thread T);
+void  F_OS_ThreadStart(f_thread Thread, void *(*Entry)(void *), void *EntryArgument);
+void  F_OS_WaitForSingleThread(f_thread Thread);
+void  F_OS_WaitForThreads(f_thread *Thread, f_s32 NumberOfThreadsToWaitFor);
 void  F_OS_FutexWait  (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll(void *Address);
 
@@ -190,6 +210,8 @@ f_s64 F_OS_CPUCount(void);
 
 #include <sys/mman.h> // mmap, mprotect
 #include <unistd.h> // getpagesize()
+#include <os/os_sync_wait_on_address.h> // os_sync_wake_on_address(), os_sync_wait_on_address()
+#include <pthread.h> // pthread_create(), pthread_join()
 
 #endif
 
@@ -197,13 +219,15 @@ f_s64 F_OS_CPUCount(void);
 #define FRIDAY_IMPLEMENTATION
 #ifdef FRIDAY_IMPLEMENTATION
 
+#include <stdatomic.h>
+
 f_u8 *F_OS_Reserve(f_s64 NumberOfBytes)
 {
 	f_u8 *Result;
 #if defined(OS_WINDOWS)
 	Result = (f_u8*)VirtualAlloc((void*)0, NumberOfBytes, MEM_RESERVE, PAGE_READWRITE);
 #elif defined(OS_DARWIN)
-	Result = (f_u8 *)mmap(Null, NumberOfBytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	Result = (f_u8 *)mmap(F_Null, NumberOfBytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
 #endif
 	return Result;
 }
@@ -221,16 +245,84 @@ void  F_OS_Commit(void *Address, f_s64 BytesToCommit)
 
 f_s64 F_OS_PageSize(void)
 {
+	f_s64 PageSize;
 #if defined(OS_WINDOWS)
 	SYSTEM_INFO SystemInfo = {0};
 	GetSystemInfo(&SystemInfo);
 
-	return SystemInfo.dwPageSize;
+	PageSize = SystemInfo.dwPageSize;
 #elif defined(OS_DARWIN)
-	return getpagesize();
+	PageSize = getpagesize();
 #else
 #error "Unsupported OS"
 #endif
+	return PageSize;
+}
+
+void F_OS_ThreadStart(f_thread Thread, void *(*Entry)(void *), void *EntryArgument)
+{
+#if defined(OS_WINDOWS)
+	CreateThread(0, 0, Entry, EntryArgument, 0, &Thread.Handle);
+#elif defined(OS_DARWIN)
+	pthread_create((pthread_t*)&Thread.Handle, F_Null, Entry, EntryArgument);
+#else
+#error "Unsupported OS"
+#endif
+}
+
+void  F_OS_WaitForSingleThread(f_thread Thread)
+{
+#if defined(OS_WINDOWS)
+	WaitForSingleObject((HANDLE)Thread.Handle, INFINITE);
+#elif defined(OS_DARWIN)
+	pthread_join((pthread_t)Thread.Handle, F_Null);
+#else
+#error "Unsupported OS"
+#endif
+}
+
+void  F_OS_WaitForThreads(f_thread *Threads, f_s32 NumberOfThreadsToWaitFor)
+{
+#if defined(OS_WINDOWS)
+	WaitForMultipleObjects(NumberOfThreadsToWaitFor, (const HANDLE*)Threads, TRUE, INFINITE);
+#elif defined(OS_DARWIN)
+	for(f_s32 ThreadIndex = 0; ThreadIndex < NumberOfThreadsToWaitFor; ThreadIndex++)
+	{
+		pthread_join((pthread_t)Threads[ThreadIndex].Handle, F_Null);
+	}
+#else
+#error "Unsupported OS"
+#endif
+}
+
+void F_OS_FutexWait(void *Address, f_u64 Expected)
+{
+#if defined(OS_WINDOWS)
+	WaitOnAddress(Address, &Expected, sizeof(Expected), INFINITE);
+#elif defined(OS_DARWIN)
+	os_sync_wait_on_address(Address, Expected, sizeof(Expected), OS_SYNC_WAIT_ON_ADDRESS_NONE);
+#else
+#error "Unsupported OS"
+#endif
+}
+
+void F_OS_FutexWakeAll(void *Address)
+{
+#if defined(OS_WINDOWS)
+	WakeByAddressAll(Address);
+#elif defined(OS_DARWIN)
+	os_sync_wake_by_address_all(Address, sizeof(Address), OS_SYNC_WAKE_BY_ADDRESS_NONE);
+#else
+#error "Unsupported OS"
+#endif
+}
+
+void F_WaveBarrier(f_wave *Wave)
+{
+	f_s64 Generation = atomic_load_explicit(&Wave->Barrier->Generation, memory_order_relaxed);
+	f_s64 LanesWaiting = atomic_fetch_add_explicit(&Wave->Barrier->Generation, 1, memory_order_release);
+
+	// TODO: The rest of this 
 }
 
 #endif
