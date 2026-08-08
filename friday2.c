@@ -5,6 +5,8 @@
 F_LaneEntry(Wave)
 {
 	printf("Lane %llu\n", Wave->Lane);
+
+	F_WaveBarrier(Wave);
 }
 
 

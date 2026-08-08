@@ -239,6 +239,7 @@ F_LaneEntry(EntryArgument);
 #ifdef FRIDAY_IMPLEMENTATION
 
 #include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
+#include <stdio.h> // printf
 
 #if defined(_MSC_VER)
   #include <intrin.h>
@@ -380,8 +381,6 @@ f_memory_arena *F_ArenaReserve(f_s64 NumberOfBytesToReserve)
 	return Arena;
 }
 
-#include <stdio.h>
-
 f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush)
 {
 	if(BytesToPush > Arena->Committed - Arena->At)
@@ -424,11 +423,8 @@ void F_WaveBarrier(f_wave *Wave)
 			}
 			Spins++;
 		}
-
 	}
 }
-
-#include <stdio.h>
 
 void F_Dispatch(f_wave_context *WaveContext, f_s64 LaneCount)
 {
@@ -436,6 +432,7 @@ void F_Dispatch(f_wave_context *WaveContext, f_s64 LaneCount)
 	f_thread *Threads = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_thread);
 	f_wave   *Waves =   F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_wave);
 	f_barrier Barrier = {0};
+	Barrier.LaneCount = LaneCount;
 	for(int I = 0; I < LaneCount; I++)
 	{
 		Waves[I].Lane = I;
