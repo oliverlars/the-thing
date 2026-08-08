@@ -81,7 +81,12 @@ typedef struct f_str8_array
 }
 f_str8_array;
 
-typedef struct f_wave_context f_wave_context;
+typedef struct f_wave_context
+{
+	f_memory_arena *GlobalArena;
+}
+f_wave_context;
+
 typedef struct f_wave f_wave;
 
 typedef struct f_process f_process;
@@ -112,6 +117,7 @@ typedef struct f_barrier
 {
 	_Atomic(f_u64) Generation;
 	_Atomic(f_u64) LanesWaiting;
+	f_s64          LaneCount;
 }
 f_barrier;
 
@@ -128,12 +134,15 @@ typedef struct f_process_state
 {
 	f_b32 Exited;
 	f_s32 ExitCode;
+	f_str8_list StdOutSinceLastPoll;
 }
 f_process_state;
 
-f_memory_arena      F_ArenaReserve    (f_s64 Bytes);
-f_memory_arena      F_ArenaFromMemory (void *Memory, f_s64 Size);
-f_u8               *F_ArenaPush       (f_memory_arena *Arena, f_s64 Bytes);
+f_memory_arena     *F_ArenaReserve   (f_s64 Bytes);
+
+#define F_ArenaPushType(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type))
+#define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)))
+#define F_ArenaPush(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush)
 
 f_str8              F_Str8PushF         (f_memory_arena *A, char *Format, ...);
 void                F_Str8ListAppend    (f_memory_arena *A, f_str8_list *L, f_str8 S);
@@ -143,9 +152,7 @@ f_b32               F_Str8Equal         (f_str8 A, f_str8 B);
 f_b32               F_Str8EndsWith      (f_str8 S, f_str8 Suffix);
 
 
-#define F_Entry(WaveInfo) void F_Entry(f_wave *WaveInfo)
-F_Entry(Data);
-void F_Dispatch(f_wave_context *Ctx, f_s64 LaneCount);
+void F_Dispatch(f_wave_context *WaveContext, f_s64 LaneCount);
 
 f_s64           F_WaveLaneIndex   (f_wave *Wave);
 f_s64           F_WaveLaneCount   (f_wave *Wave);
@@ -193,14 +200,14 @@ f_b32 F_OS_DirNext       (f_dir_iter *Iter, f_str8 *OutName);
 f_b32 F_OS_ProcessSpawn  (char **Argv, f_process *Out);
 f_b32 F_OS_ProcessState  (f_process *P, f_s32 *ExitCode);
 
-void  F_OS_ThreadStart(f_thread Thread, void *(*Entry)(void *), void *EntryArgument);
+void  F_OS_ThreadStart(f_thread *Thread, void *(*Entry)(void *), void *EntryArgument);
 void  F_OS_WaitForSingleThread(f_thread Thread);
 void  F_OS_WaitForThreads(f_thread *Thread, f_s32 NumberOfThreadsToWaitFor);
 void  F_OS_FutexWait  (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll(void *Address);
 
 
-f_s64 F_OS_CPUCount(void);
+f_s64 F_OS_NumberOFHighPerformanceCPUs(void);
 
 #if defined(_WIN32) 
 #define OS_WINDOWS
@@ -208,10 +215,22 @@ f_s64 F_OS_CPUCount(void);
 #if(__APPLE__)
 #define OS_DARWIN
 
+#if defined(OS_WINDOWS)
+#define F_LaneEntry(EntryArgument) DWORD WINAPI F_ThreadEntry(f_wave *EntryArgument)
+typedef DWORD (WINAPI *f_thread_funciton)(void *);
+#elif defined(OS_DARWIN)
+#define F_LaneEntry(EntryArgument) void *F_LaneEntry(f_wave *EntryArgument)
+typedef void *(*f_thread_funciton)(void *);
+#endif
+
+F_LaneEntry(EntryArgument);
+
 #include <sys/mman.h> // mmap, mprotect
 #include <unistd.h> // getpagesize()
 #include <os/os_sync_wait_on_address.h> // os_sync_wake_on_address(), os_sync_wait_on_address()
 #include <pthread.h> // pthread_create(), pthread_join()
+#include <sys/sysctl.h> // sysctlbyname()
+
 
 #endif
 
@@ -219,7 +238,18 @@ f_s64 F_OS_CPUCount(void);
 #define FRIDAY_IMPLEMENTATION
 #ifdef FRIDAY_IMPLEMENTATION
 
-#include <stdatomic.h>
+#include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
+
+#if defined(_MSC_VER)
+  #include <intrin.h>
+#define F_Yield() YieldProcessor()
+#elif defined(__i386__) || defined(__x86_64__)
+#define F_YIELD() __builtin_ia32_pause()
+#elif defined(__aarch64__)
+#define F_Yield() __asm__ __volatile__("isb sy" ::: "memory")
+#else
+#define F_Yield() __asm__ __volatile__("" ::: "memory")
+#endif
 
 f_u8 *F_OS_Reserve(f_s64 NumberOfBytes)
 {
@@ -243,6 +273,29 @@ void  F_OS_Commit(void *Address, f_s64 BytesToCommit)
 #endif
 }
 
+f_s64 F_OS_NumberOFHighPerformanceCPUs(void)
+{
+	f_s64 Result = 0;
+	// Windows assumes only high performance for now
+#if defined(OS_WINDOWS)
+	SYSTEM_INFO SystemInfo = {0};
+	GetSystemInfo(&SystemInfo);
+	Result = SystemInfo.dwNumberOfProcessors;
+#elif defined(OS_DARWIN)
+	f_s32 Count = 0;
+	size_t Size = sizeof Count;
+	if(sysctlbyname("hw.perflevel0.physicalcpu", &Count, &Size, F_Null, 0) != 0)
+	{
+		Size = sizeof Count;
+		if(sysctlbyname("hw.physicalcpu", &Count, &Size, F_Null, 0) != 0) Count = 1;
+	}
+	Result = Count;
+#else
+#error "Unsupported OS"
+#endif
+	return Result;
+}
+
 f_s64 F_OS_PageSize(void)
 {
 	f_s64 PageSize;
@@ -259,12 +312,12 @@ f_s64 F_OS_PageSize(void)
 	return PageSize;
 }
 
-void F_OS_ThreadStart(f_thread Thread, void *(*Entry)(void *), void *EntryArgument)
+void F_OS_ThreadStart(f_thread *Thread, f_thread_funciton Entry, void *EntryArgument)
 {
 #if defined(OS_WINDOWS)
 	CreateThread(0, 0, Entry, EntryArgument, 0, &Thread.Handle);
 #elif defined(OS_DARWIN)
-	pthread_create((pthread_t*)&Thread.Handle, F_Null, Entry, EntryArgument);
+	pthread_create((pthread_t*)&Thread->Handle, F_Null, Entry, EntryArgument);
 #else
 #error "Unsupported OS"
 #endif
@@ -298,9 +351,9 @@ void  F_OS_WaitForThreads(f_thread *Threads, f_s32 NumberOfThreadsToWaitFor)
 void F_OS_FutexWait(void *Address, f_u64 Expected)
 {
 #if defined(OS_WINDOWS)
-	WaitOnAddress(Address, &Expected, sizeof(Expected), INFINITE);
+	WaitOnAddress(Address, &Expected, sizeof Expected, INFINITE);
 #elif defined(OS_DARWIN)
-	os_sync_wait_on_address(Address, Expected, sizeof(Expected), OS_SYNC_WAIT_ON_ADDRESS_NONE);
+	os_sync_wait_on_address(Address, Expected, sizeof Expected, OS_SYNC_WAIT_ON_ADDRESS_NONE);
 #else
 #error "Unsupported OS"
 #endif
@@ -311,18 +364,89 @@ void F_OS_FutexWakeAll(void *Address)
 #if defined(OS_WINDOWS)
 	WakeByAddressAll(Address);
 #elif defined(OS_DARWIN)
-	os_sync_wake_by_address_all(Address, sizeof(Address), OS_SYNC_WAKE_BY_ADDRESS_NONE);
+	os_sync_wake_by_address_all(Address, sizeof Address, OS_SYNC_WAKE_BY_ADDRESS_NONE);
 #else
 #error "Unsupported OS"
 #endif
 }
 
+f_memory_arena *F_ArenaReserve(f_s64 NumberOfBytesToReserve)
+{
+	f_memory_arena *Arena;
+	f_u8 *Start = F_OS_Reserve(NumberOfBytesToReserve + F_OS_PageSize());
+	Arena->Start = Start + F_OS_PageSize();
+	Arena->At = 0;
+	Arena->Committed = 0;
+	return Arena;
+}
+
+#include <stdio.h>
+
+f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush)
+{
+	if(BytesToPush > Arena->Committed - Arena->At)
+	{
+		f_s64 PagesToCommitInBytes = (BytesToPush + F_OS_PageSize() - 1) & ~(F_OS_PageSize() - 1);
+		F_OS_Commit(Arena->Start + Arena->Committed, PagesToCommitInBytes);
+		Arena->Committed += PagesToCommitInBytes;
+	}
+	f_u8 *Result = Arena->Start + Arena->At;
+	Arena->At += (BytesToPush + 15) & ~15;
+	return Result;
+}
+
 void F_WaveBarrier(f_wave *Wave)
 {
 	f_s64 Generation = atomic_load_explicit(&Wave->Barrier->Generation, memory_order_relaxed);
-	f_s64 LanesWaiting = atomic_fetch_add_explicit(&Wave->Barrier->Generation, 1, memory_order_release);
+	f_s64 LanesArrived = atomic_fetch_add_explicit(&Wave->Barrier->LanesWaiting, 1, memory_order_release);
 
-	// TODO: The rest of this 
+	if(LanesArrived == Wave->Barrier->LaneCount - 1)
+	{
+		atomic_thread_fence(memory_order_acquire);
+		atomic_store_explicit(&Wave->Barrier->LanesWaiting, 0, memory_order_relaxed);
+		atomic_store_explicit(&Wave->Barrier->Generation, Generation + 1, memory_order_release);
+		F_OS_FutexWakeAll(&Wave->Barrier->Generation);
+	}
+	else
+	{
+		f_s64 Spins = 0;
+		for(;;)
+		{
+			if(atomic_load_explicit(&Wave->Barrier->Generation, memory_order_acquire) != Generation) break;
+
+			if(Spins < 4096)
+			{
+				F_Yield();
+			}
+			else
+			{
+				F_OS_FutexWait(&Wave->Barrier->Generation, Generation);
+			}
+			Spins++;
+		}
+
+	}
+}
+
+#include <stdio.h>
+
+void F_Dispatch(f_wave_context *WaveContext, f_s64 LaneCount)
+{
+	WaveContext->GlobalArena = F_ArenaReserve(F_GigaBytes(8));
+	f_thread *Threads = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_thread);
+	f_wave   *Waves =   F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_wave);
+	f_barrier Barrier = {0};
+	for(int I = 0; I < LaneCount; I++)
+	{
+		Waves[I].Lane = I;
+		Waves[I].Barrier = &Barrier;
+		F_OS_ThreadStart(Threads + I, (f_thread_funciton)F_LaneEntry, Waves + I);
+	}
+
+	for(int I = 0; I < LaneCount; I++)
+	{
+		F_OS_WaitForThreads(Threads + I, LaneCount);
+	}
 }
 
 #endif
