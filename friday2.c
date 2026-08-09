@@ -2,6 +2,9 @@
 
 #include <stdio.h>
 
+f_str8 BackingFileMemory[32];
+f_str8_array TemporaryGlobalFilePaths = {0};
+
 F_LaneEntry(Wave)
 {
 	f_u64 *SomeArray;
@@ -34,11 +37,21 @@ F_LaneEntry(Wave)
 		}
 	}
 
+	f_watch Watch = F_WatchFilesFromArray(Wave, TemporaryGlobalFilePaths);
+
+
+	while(!F_AnyFilesChangedInWatch(Wave, &Watch));
+
+
 	F_WaveBarrier(Wave);
 }
 
 
 int main(int ArgCount, char **Arguments)
 {
+	TemporaryGlobalFilePaths.Count = 2;
+	TemporaryGlobalFilePaths.Items = BackingFileMemory;
+	TemporaryGlobalFilePaths.Items[0] = F_Str8("friday2.h");
+	TemporaryGlobalFilePaths.Items[1] = F_Str8("friday2.c");
 	F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs());
 }

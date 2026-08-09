@@ -101,12 +101,21 @@ typedef struct f_wave
 
 	// Only defined for the first lane
 	f_memory_arena *GlobalArena;
+	// Each lane has one of these.
+	// Maybe a better idea for this
+	f_memory_arena *Arena;
 }
 f_wave;
 
 typedef struct f_process f_process;
 
-typedef struct f_watch f_watch;
+typedef struct f_watch
+{
+	f_str8 *Files;
+	f_u64  *TimeStamps;
+	f_s32   FileCount;
+}
+f_watch;
 
 typedef struct f_build f_build;
 
@@ -200,8 +209,9 @@ f_b32 F_ProcessSpawn (f_memory_arena *Arena, f_str8_array Argv, f_process *Out);
 f_b32 F_ProcessPoll  (f_process *Process, f_output_sink *Sink, void *User);
 void  F_ProcessWait  (f_process *Process, f_output_sink *Sink, void *User);
 
-f_watch *F_WatchCreate  (f_wave *Wave, f_str8_list Paths);
-f_b32    F_WatchChanged (f_wave *Wave, f_watch *Watch);
+f_watch      F_WatchFilesFromArray (f_wave *Wave, f_str8_array FilePaths);
+f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch);
+f_b32        F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch);
 
 f_build      *F_BuildCreate (f_wave *Wave, f_build_options Options);
 f_b32         F_BuildStart  (f_wave *Wave, f_build *Build);
@@ -214,13 +224,13 @@ f_s64 F_OS_PageSize  (void);
 
 f_u64 F_OS_TimeStamp ();
 
-f_b32 F_OS_FileInfo       (f_str8 Path, f_file_info *Out);
-f_s64 F_OS_FileRead      (f_str8 Path, f_u8 *Dest, f_s64 Max);
-f_b32 F_OS_FileWriteStr8 (f_str8 Path, f_str8 Data);
-f_b32 F_OS_FileDelete    (f_str8 Path);
-f_b32 F_OS_FileRename    (f_str8 From, f_str8 To);
-f_b32 F_OS_DirCreate     (f_str8 Path);
-f_b32 F_OS_DirNext       (f_dir_iter *Iter, f_str8 *OutName);
+f_file_info F_OS_FileInfo(f_memory_arena *Arena, f_str8 Filename);
+f_s64 F_OS_FileRead       (f_str8 Path, f_u8 *Dest, f_s64 Max);
+f_b32 F_OS_FileWriteStr8  (f_str8 Path, f_str8 Data);
+f_b32 F_OS_FileDelete     (f_str8 Path);
+f_b32 F_OS_FileRename     (f_str8 From, f_str8 To);
+f_b32 F_OS_DirCreate      (f_str8 Path);
+f_b32 F_OS_DirNext        (f_dir_iter *Iter, f_str8 *OutName);
 
 f_b32 F_OS_ProcessSpawn  (char **Argv, f_process *Out);
 f_b32 F_OS_ProcessState  (f_process *P, f_s32 *ExitCode);
@@ -258,6 +268,8 @@ F_LaneEntry(Wave);
 #include <pthread.h> // pthread_create(), pthread_join()
 #include <sys/sysctl.h> // sysctlbyname()
 #include <mach/mach_time.h> // mach_absolute_time()
+#include <fcntl.h> // open()
+#include <sys/stat.h> // stat
 
 
 #endif
@@ -284,6 +296,9 @@ F_LaneEntry(Wave);
 
 #define F_Assert(Condition) assert(Condition)
 #define F_MemoryCopy(Destination, Source, BytesToCopy) memcpy(Destination, Source, BytesToCopy)
+
+#define F_True  ((f_b32)1)
+#define F_False ((f_b32)0)
 
 f_u8 *F_OS_Reserve(f_s64 NumberOfBytes)
 {
@@ -562,6 +577,9 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount)
 		Waves[I].BroadcastValues = BroadcastValues;
 		Waves[I].Vote = &Vote;
 		Waves[I].Ballot = &Ballot;
+		// Need a better idea for this
+		Waves[I].Arena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
+		
 		Params[I].WaveArgument = Waves + I;
 		Params[I].LaneEntry = F_LaneEntry;
 		F_OS_ThreadStart(Threads + I, (f_thread_function)F_Internal_ThreadEntry, Params + I);
@@ -569,5 +587,99 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount)
 
 	F_OS_WaitForThreads(Threads, LaneCount);
 }
+
+f_str8_array F_Str8ArrayFromList (f_memory_arena *A, f_str8_list L);
+f_str8 F_Str8Join          (f_memory_arena *A, f_str8_array Array, f_str8 Separator);
+f_b32 F_Str8Equal         (f_str8 A, f_str8 B);
+f_b32 F_Str8EndsWith      (f_str8 String, f_str8 Suffix);
+
+char *F_CStrFromStr8(f_memory_arena *Arena, f_str8 String)
+{
+	char *CString = (char *)F_ArenaPush(Arena, String.Size + 1);
+	F_MemoryCopy(CString, String.Bytes, String.Size);
+	CString[String.Size] = 0;
+	return CString;
+}
+
+f_file_info F_OS_FileInfo(f_memory_arena *Arena, f_str8 Filename)
+{
+	f_file_info FileInfo = {0};
+#if defined(OS_WINDOWS)
+#error "Implement F_OS_FileInfo for OS_WINDOWS"
+#elif defined(OS_DARWIN)
+	f_s32 FileHandle = open(F_CStrFromStr8(Arena, Filename), O_RDONLY);
+	if (FileHandle == -1)
+	{
+		// TODO: Better logging
+		return FileInfo;
+	}
+	struct stat FileStat;
+	fstat(FileHandle, &FileStat);
+	FileInfo.SizeInBytes = FileStat.st_size;
+	FileInfo.Exists = F_True;
+	f_u64 MillisecondsSinceEpoch = 
+		(f_u64)FileStat.st_mtimespec.tv_sec * 1000ull
+		+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
+	FileInfo.LastModified = MillisecondsSinceEpoch;
+#else
+#error "Unsupported OS"
+#endif
+	return FileInfo;
+}
+
+f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
+{
+	f_watch Result = {0};
+	if(F_WaveIsFirstLane(Wave))
+	{
+		Result.Files = F_ArenaPushArrayType(Wave->GlobalArena, FilePaths.Count, f_str8);
+		Result.TimeStamps = F_ArenaPushArrayType(Wave->GlobalArena, FilePaths.Count, f_u64);
+		Result.FileCount = FilePaths.Count;
+	}
+	Result.Files = F_WaveValueAtFirstLane(Wave, Result.Files);
+	Result.TimeStamps = F_WaveValueAtFirstLane(Wave, Result.TimeStamps);
+	Result.FileCount = F_WaveValueAtFirstLane(Wave, Result.FileCount);
+
+	F_WaveBarrier(Wave);
+
+	F_WaveFor(Wave, I, FilePaths.Count)
+	{
+		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, FilePaths.Items[I]);
+		Result.TimeStamps[I] = FileInfo.LastModified;
+		Result.Files[I] = FilePaths.Items[I];
+		Result.FileCount = FilePaths.Count;
+	}
+
+	return Result;
+}
+
+f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch)
+{
+	f_str8_array Result = {0};
+	f_s32 FilesChanged = 0;
+	F_WaveFor(Wave, I, Watch->FileCount)
+	{
+		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
+		if(Watch->TimeStamps[I] != FileInfo.LastModified)
+		{
+			
+		}
+	}
+}
+
+f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)
+{
+	f_b32 AnyChanged = F_False;
+	F_WaveFor(Wave, I, Watch->FileCount)
+	{
+		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
+		if(Watch->TimeStamps[I] != FileInfo.LastModified)
+		{
+			AnyChanged = F_True;
+		}
+	}
+	return F_WaveAnyTrue(Wave, AnyChanged);
+}
+
 
 #endif
