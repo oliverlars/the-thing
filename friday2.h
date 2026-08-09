@@ -98,6 +98,9 @@ typedef struct f_wave
 	_Atomic(f_u64) *Vote;
 	// TODO: Make this work for > 64 lanes
 	_Atomic(f_u64) *Ballot;
+
+	// Only defined for the first lane
+	f_memory_arena *GlobalArena;
 }
 f_wave;
 
@@ -169,20 +172,26 @@ f_b32           F_Internal_WaveAllTrue   (f_wave *Wave, f_b32 Condition);
 #define         F_WaveCountTrue(Wave, Value) F_Internal_WaveCountTrue(Wave, Value != 0)
 f_u64           F_Internal_WaveCountTrue (f_wave *Wave, f_b32 Condition);
 
-#define F_TypeOf(X) __typeof__(X)
+#define __F_TypeOf(X) __typeof__(X)
 
-#define F_WaveBroadcast(Wave, Value) F_Internal_WaveBroadcast(Wave, &Value, sizeof(Value))
-void    F_Internal_WaveBroadcast (f_wave *Wave, void *Bytes, f_s64 Count);
+void    __F_Internal_WaveBroadcast (f_wave *Wave, void *Bytes, f_s64 Count);
+#define __F_WaveBroadcast(Wave, Value) __F_Internal_WaveBroadcast(Wave, &Value, sizeof(Value))
 
-#define F_WaveValueAtLane(Wave, Variable, Lane) (F_WaveBroadcast(Wave, Variable), *(F_TypeOf(Variable)*)(Wave->BroadcastValues + Lane))
-void F_Internal_WaveValueAtLane (f_wave *Wave, void *Bytes, f_s64 Count);
+#define F_WaveValueAtLane(Wave, Variable, Lane) (__F_WaveBroadcast(Wave, Variable), *(__F_TypeOf(Variable)*)(Wave->BroadcastValues + Lane))
+
+#define F_WaveValueAtFirstLane(Wave, Variable) F_WaveValueAtLane(Wave, Variable, 0)
 
 void            F_WaveBarrier (f_wave *Wave);
 
+#define __F_Concat_(A, B) A##B
+#define __F_Concat(A, B) __F_Concat_(A, B)
 
-#define F_WaveOnce(W)
-#define F_WaveFor(W, Index, Count)
-#define F_WaveUniform(W, Var, Expr)
+#define F_WaveFor(Wave, Index, Count) \
+    for(f_s64 Index                          = (Wave)->Lane, \
+              __F_Concat(F_ForEnd__,  __LINE__) = (f_s64)(Count), \
+              __F_Concat(F_ForStep__, __LINE__) = (Wave)->LaneCount; \
+        Index < __F_Concat(F_ForEnd__, __LINE__); \
+        Index += __F_Concat(F_ForStep__, __LINE__))
 
 
 typedef void f_output_sink (void *User, f_str8 Text);
@@ -432,6 +441,7 @@ f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush)
 
 f_b32 F_WaveIsFirstLane(f_wave *Wave)
 {
+	F_WaveBarrier(Wave);
 	return Wave->Lane == 0;
 }
 
@@ -456,16 +466,17 @@ f_b32 F_Internal_WaveAllTrue(f_wave *Wave, f_b32 Condition)
 	return F_Internal_WaveCountTrue(Wave, Condition) == (f_u64)Wave->LaneCount;
 }
 
-void F_Internal_WaveBroadcast(f_wave *Wave, void *Bytes, f_s64 Count)
+void __F_Internal_WaveBroadcast(f_wave *Wave, void *Bytes, f_s64 Count)
 {
 	F_Assert(Count <= 8);
+	F_WaveBarrier(Wave);
 	F_MemoryCopy(Wave->BroadcastValues + Wave->Lane, Bytes, Count);
 	F_WaveBarrier(Wave);
 }
 
 f_u64 F_WaveExclusivePrefixSum (f_wave *Wave, f_u64 Value)
 {
-	F_WaveBroadcast(Wave, Value);
+	__F_WaveBroadcast(Wave, Value);
 	f_u64 ValueForThisLane = 0;
 	for(f_u64 I = 0; I < Wave->Lane; I++)
 	{
@@ -537,6 +548,9 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount)
 	f_thread_entry_params *Params  = F_ArenaPushArrayType(GlobalArena, LaneCount, f_thread_entry_params);
 	f_barrier Barrier = {0};
 	Barrier.LaneCount = LaneCount;
+
+	// Only defined for the first lane
+	Waves[0].GlobalArena = GlobalArena;
 
 	_Atomic(f_u64) Vote = 0;
 	_Atomic(f_u64) Ballot = 0;
