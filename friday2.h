@@ -81,13 +81,25 @@ typedef struct f_str8_array
 }
 f_str8_array;
 
-typedef struct f_wave_context
+typedef struct f_barrier
 {
-	f_memory_arena *GlobalArena;
+	_Atomic(f_u64) Generation;
+	_Atomic(f_u64) LanesWaiting;
+	f_s64          LaneCount;
 }
-f_wave_context;
+f_barrier;
 
-typedef struct f_wave f_wave;
+typedef struct f_wave
+{
+	f_s64      Lane;
+	f_s64      LaneCount;
+	f_barrier *Barrier;
+	f_u64     *BroadcastValues;
+	_Atomic(f_u64) *Vote;
+	// TODO: Make this work for > 64 lanes
+	_Atomic(f_u64) *Ballot;
+}
+f_wave;
 
 typedef struct f_process f_process;
 
@@ -120,21 +132,6 @@ typedef struct f_thread_entry_params
 }
 f_thread_entry_params;
 
-typedef struct f_barrier
-{
-	_Atomic(f_u64) Generation;
-	_Atomic(f_u64) LanesWaiting;
-	f_s64          LaneCount;
-}
-f_barrier;
-
-typedef struct f_wave
-{
-	f_s64      Lane;
-	f_barrier *Barrier;
-}
-f_wave;
-
 typedef struct f_dir_iter f_dir_iter;
 
 typedef struct f_process_state
@@ -159,19 +156,28 @@ f_b32               F_Str8Equal         (f_str8 A, f_str8 B);
 f_b32               F_Str8EndsWith      (f_str8 S, f_str8 Suffix);
 
 
-void F_Dispatch(f_wave_context *WaveContext, f_s64 LaneCount);
+void F_DispatchAcrossNLanes(f_s64 LaneCount);
 
-f_s64           F_WaveLaneIndex   (f_wave *Wave);
-f_s64           F_WaveLaneCount   (f_wave *Wave);
-f_b32           F_WaveIsFirstLane (f_wave *Wave);
-f_b32           F_WaveAnyTrue     (f_wave *Wave, f_b32 Value);
-f_b32           F_WaveAllTrue     (f_wave *Wave, f_b32 Value);
-f_u64           F_WavePrefixSum   (f_wave *Wave, f_u64 Value);
-void            F_WaveBroadcast   (f_wave *Wave, void *Bytes, f_s64 Count);
-f_memory_arena *F_WaveArena       (f_wave *Wave);
-f_memory_arena *F_WaveSharedArena (f_wave *Wave);
+f_b32           F_WaveIsFirstLane        (f_wave *Wave);
+f_u64           F_WaveInclusivePrefixSum (f_wave *Wave, f_u64 Value);
+f_u64           F_WaveExclusivePrefixSum (f_wave *Wave, f_u64 Value);
 
-void            F_WaveBarrier     (f_wave *Wave);
+#define         F_WaveAnyTrue(Wave, Value) F_Internal_WaveAnyTrue(Wave, Value != 0)
+#define         F_WaveAllTrue(Wave, Value) F_Internal_WaveAllTrue(Wave, Value != 0)
+f_b32           F_Internal_WaveAnyTrue   (f_wave *Wave, f_b32 Condition);
+f_b32           F_Internal_WaveAllTrue   (f_wave *Wave, f_b32 Condition);
+#define         F_WaveCountTrue(Wave, Value) F_Internal_WaveCountTrue(Wave, Value != 0)
+f_u64           F_Internal_WaveCountTrue (f_wave *Wave, f_b32 Condition);
+
+#define F_TypeOf(X) __typeof__(X)
+
+#define F_WaveBroadcast(Wave, Value) F_Internal_WaveBroadcast(Wave, &Value, sizeof(Value))
+void    F_Internal_WaveBroadcast (f_wave *Wave, void *Bytes, f_s64 Count);
+
+#define F_WaveValueAtLane(Wave, Variable, Lane) (F_WaveBroadcast(Wave, Variable), *(F_TypeOf(Variable)*)(Wave->BroadcastValues + Lane))
+void F_Internal_WaveValueAtLane (f_wave *Wave, void *Bytes, f_s64 Count);
+
+void            F_WaveBarrier (f_wave *Wave);
 
 
 #define F_WaveOnce(W)
@@ -179,22 +185,25 @@ void            F_WaveBarrier     (f_wave *Wave);
 #define F_WaveUniform(W, Var, Expr)
 
 
-typedef void f_output_sink(void *User, f_str8 Text);
+typedef void f_output_sink (void *User, f_str8 Text);
 
-f_b32 F_ProcessSpawn(f_memory_arena *Arena, f_str8_array Argv, f_process *Out);
-f_b32 F_ProcessPoll (f_process *Process, f_output_sink *Sink, void *User);
-void  F_ProcessWait (f_process *Process, f_output_sink *Sink, void *User);
+f_b32 F_ProcessSpawn (f_memory_arena *Arena, f_str8_array Argv, f_process *Out);
+f_b32 F_ProcessPoll  (f_process *Process, f_output_sink *Sink, void *User);
+void  F_ProcessWait  (f_process *Process, f_output_sink *Sink, void *User);
 
-f_watch *F_WatchCreate (f_wave *Wave, f_str8_list Paths);
-f_b32    F_WatchChanged(f_wave *Wave, f_watch *Watch);
+f_watch *F_WatchCreate  (f_wave *Wave, f_str8_list Paths);
+f_b32    F_WatchChanged (f_wave *Wave, f_watch *Watch);
 
-f_build      *F_BuildCreate(f_wave *Wave, f_build_options Options);
-f_b32         F_BuildStart (f_wave *Wave, f_build *Build);
-f_build_state F_BuildTick  (f_wave *Wave, f_build *Build);
+f_build      *F_BuildCreate (f_wave *Wave, f_build_options Options);
+f_b32         F_BuildStart  (f_wave *Wave, f_build *Build);
+f_build_state F_BuildTick   (f_wave *Wave, f_build *Build);
 
 f_u8 *F_OS_Reserve   (f_s64 NumberOfBytes);
 void  F_OS_Commit    (void *Address, f_s64 BytesToCommit);
 f_s64 F_OS_PageSize  (void);
+
+
+f_u64 F_OS_TimeStamp ();
 
 f_b32 F_OS_FileInfo       (f_str8 Path, f_file_info *Out);
 f_s64 F_OS_FileRead      (f_str8 Path, f_u8 *Dest, f_s64 Max);
@@ -207,16 +216,16 @@ f_b32 F_OS_DirNext       (f_dir_iter *Iter, f_str8 *OutName);
 f_b32 F_OS_ProcessSpawn  (char **Argv, f_process *Out);
 f_b32 F_OS_ProcessState  (f_process *P, f_s32 *ExitCode);
 
-void  F_OS_ThreadStart(f_thread *Thread, void *(*Entry)(void *), void *EntryArgument);
-void  F_OS_WaitForSingleThread(f_thread Thread);
-void  F_OS_WaitForThreads(f_thread *Thread, f_s32 NumberOfThreadsToWaitFor);
-void  F_OS_FutexWait  (void *Address, f_u64 Expected);
-void  F_OS_FutexWakeAll(void *Address);
+void  F_OS_ThreadStart         (f_thread *Thread, void *(*Entry)(void *), void *EntryArgument);
+void  F_OS_WaitForSingleThread (f_thread Thread);
+void  F_OS_WaitForThreads      (f_thread *Thread, f_s32 NumberOfThreadsToWaitFor);
+void  F_OS_FutexWait    (void *Address, f_u64 Expected);
+void  F_OS_FutexWakeAll (void *Address);
 
+f_u64 F_OS_TimeStamp (void);
+f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 
-f_s64 F_OS_NumberOFHighPerformanceCPUs(void);
-
-#if defined(_WIN32) 
+#if defined(_MSC_VER)
 #define OS_WINDOWS
 #endif
 #if(__APPLE__)
@@ -239,6 +248,7 @@ F_LaneEntry(Wave);
 #include <os/os_sync_wait_on_address.h> // os_sync_wake_on_address(), os_sync_wait_on_address()
 #include <pthread.h> // pthread_create(), pthread_join()
 #include <sys/sysctl.h> // sysctlbyname()
+#include <mach/mach_time.h> // mach_absolute_time()
 
 
 #endif
@@ -248,7 +258,9 @@ F_LaneEntry(Wave);
 #ifdef FRIDAY_IMPLEMENTATION
 
 #include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
-#include <stdio.h> // printf
+#include <stdio.h> // printf()
+#include <string.h> // memcpy
+#include <assert.h> // assert()
 
 #if defined(_MSC_VER)
   #include <intrin.h>
@@ -258,8 +270,11 @@ F_LaneEntry(Wave);
 #elif defined(__aarch64__)
 #define F_Yield() __asm__ __volatile__("isb sy" ::: "memory")
 #else
-#define F_Yield() __asm__ __volatile__("" ::: "memory")
+#error "Unsupported OS or CPU architecture"
 #endif
+
+#define F_Assert(Condition) assert(Condition)
+#define F_MemoryCopy(Destination, Source, BytesToCopy) memcpy(Destination, Source, BytesToCopy)
 
 f_u8 *F_OS_Reserve(f_s64 NumberOfBytes)
 {
@@ -281,6 +296,17 @@ void  F_OS_Commit(void *Address, f_s64 BytesToCommit)
 #else
 #error "Unsupported OS"
 #endif
+}
+
+f_u64 F_OS_TimeStamp(void)
+{
+	f_u64 Result;
+#if defined(OS_WINDOWS)
+	Result = 
+#elif defined(OS_DARWIN)
+	Result = mach_absolute_time();
+#endif
+	return Result;
 }
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs(void)
@@ -404,6 +430,56 @@ f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush)
 	return Result;
 }
 
+f_b32 F_WaveIsFirstLane(f_wave *Wave)
+{
+	return Wave->Lane == 0;
+}
+
+f_u64 F_Internal_WaveCountTrue(f_wave *Wave, f_b32 Condition)
+{
+	if(F_WaveIsFirstLane(Wave)) atomic_store_explicit(Wave->Vote, 0, memory_order_relaxed);
+	F_WaveBarrier(Wave);
+	atomic_fetch_add_explicit(Wave->Vote, (Condition != 0), memory_order_relaxed);
+	F_WaveBarrier(Wave);
+	f_u64 Result = atomic_load_explicit(Wave->Vote, memory_order_relaxed);
+	F_WaveBarrier(Wave);
+	return Result;
+}
+
+f_b32 F_Internal_WaveAnyTrue(f_wave *Wave, f_b32 Condition)
+{
+	return F_Internal_WaveCountTrue(Wave, Condition) > 0;
+}
+
+f_b32 F_Internal_WaveAllTrue(f_wave *Wave, f_b32 Condition)
+{
+	return F_Internal_WaveCountTrue(Wave, Condition) == (f_u64)Wave->LaneCount;
+}
+
+void F_Internal_WaveBroadcast(f_wave *Wave, void *Bytes, f_s64 Count)
+{
+	F_Assert(Count <= 8);
+	F_MemoryCopy(Wave->BroadcastValues + Wave->Lane, Bytes, Count);
+	F_WaveBarrier(Wave);
+}
+
+f_u64 F_WaveExclusivePrefixSum (f_wave *Wave, f_u64 Value)
+{
+	F_WaveBroadcast(Wave, Value);
+	f_u64 ValueForThisLane = 0;
+	for(f_u64 I = 0; I < Wave->Lane; I++)
+	{
+		ValueForThisLane += Wave->BroadcastValues[I];
+	}
+	F_WaveBarrier(Wave);
+	return ValueForThisLane;
+}
+
+f_u64 F_WaveInclusivePrefixSum (f_wave *Wave, f_u64 Value)
+{
+	return F_WaveExclusivePrefixSum(Wave, Value) + Value;
+}
+
 void F_WaveBarrier(f_wave *Wave)
 {
 	f_s64 Generation = atomic_load_explicit(&Wave->Barrier->Generation, memory_order_relaxed);
@@ -452,18 +528,26 @@ F_Internal_ThreadEntry(ThreadParams)
 #error "Unsupported OS"
 #endif
 
-void F_Dispatch(f_wave_context *WaveContext, f_s64 LaneCount)
+void F_DispatchAcrossNLanes(f_s64 LaneCount)
 {
-	WaveContext->GlobalArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
-	f_thread              *Threads = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_thread);
-	f_wave                *Waves   = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_wave);
-	f_thread_entry_params *Params  = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_thread_entry_params);
+	f_memory_arena *GlobalArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
+	f_u64 *BroadcastValues   = F_ArenaPushArrayType(GlobalArena, LaneCount, f_u64);
+	f_thread              *Threads = F_ArenaPushArrayType(GlobalArena, LaneCount, f_thread);
+	f_wave                *Waves   = F_ArenaPushArrayType(GlobalArena, LaneCount, f_wave);
+	f_thread_entry_params *Params  = F_ArenaPushArrayType(GlobalArena, LaneCount, f_thread_entry_params);
 	f_barrier Barrier = {0};
 	Barrier.LaneCount = LaneCount;
+
+	_Atomic(f_u64) Vote = 0;
+	_Atomic(f_u64) Ballot = 0;
 	for(int I = 0; I < LaneCount; I++)
 	{
 		Waves[I].Lane = I;
+		Waves[I].LaneCount = LaneCount;
 		Waves[I].Barrier = &Barrier;
+		Waves[I].BroadcastValues = BroadcastValues;
+		Waves[I].Vote = &Vote;
+		Waves[I].Ballot = &Ballot;
 		Params[I].WaveArgument = Waves + I;
 		Params[I].LaneEntry = F_LaneEntry;
 		F_OS_ThreadStart(Threads + I, (f_thread_function)F_Internal_ThreadEntry, Params + I);

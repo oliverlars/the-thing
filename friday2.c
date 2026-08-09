@@ -4,7 +4,9 @@
 
 F_LaneEntry(Wave)
 {
-	printf("Lane %llu\n", Wave->Lane);
+	f_s32 LaneTimesTwo = Wave->Lane * 2;
+
+	printf("Lane 4 has value: %d\n", F_WaveValueAtLane(Wave, LaneTimesTwo, 4));
 
 	F_WaveBarrier(Wave);
 }
@@ -12,6 +14,5 @@ F_LaneEntry(Wave)
 
 int main(int ArgCount, char **Arguments)
 {
-	f_wave_context WaveContext = {0};
-	F_Dispatch(&WaveContext, F_OS_NumberOFHighPerformanceCPUs());
+	F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs());
 }
