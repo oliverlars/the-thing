@@ -94,7 +94,7 @@ typedef struct f_wave
 	f_s64      Lane;
 	f_s64      LaneCount;
 	f_barrier *Barrier;
-	f_u64     *BroadcastValues;
+	void      **BroadcastPointers;
 	_Atomic(f_u64) *Vote;
 	// TODO: Make this work for > 64 lanes
 	_Atomic(f_u64) *Ballot;
@@ -181,14 +181,16 @@ f_b32           F_Internal_WaveAllTrue   (f_wave *Wave, f_b32 Condition);
 #define         F_WaveCountTrue(Wave, Value) F_Internal_WaveCountTrue(Wave, Value != 0)
 f_u64           F_Internal_WaveCountTrue (f_wave *Wave, f_b32 Condition);
 
-#define __F_TypeOf(X) __typeof__(X)
-
-void    __F_Internal_WaveBroadcast (f_wave *Wave, void *Bytes, f_s64 Count);
-#define __F_WaveBroadcast(Wave, Value) __F_Internal_WaveBroadcast(Wave, &Value, sizeof(Value))
-
-#define F_WaveValueAtLane(Wave, Variable, Lane) (__F_WaveBroadcast(Wave, Variable), *(__F_TypeOf(Variable)*)(Wave->BroadcastValues + Lane))
-
-#define F_WaveValueAtFirstLane(Wave, Variable) F_WaveValueAtLane(Wave, Variable, 0)
+#define F_BroadcastLane(Wave, Variable, SourceLane) \
+      do {\
+              f_wave *F_W_ = (Wave);\
+              if(F_W_->Lane == (SourceLane)) F_W_->BroadcastPointers[0] = &(Variable);\
+              F_WaveBarrier(F_W_);\
+              F_MemoryCopy(&(Variable), F_W_->BroadcastPointers[0], sizeof(Variable));\
+              F_WaveBarrier(F_W_);\
+      } while(0)
+ 
+#define F_BroadcastFirstLane(Wave, Variable) F_BroadcastLane(Wave, Variable, 0)
 
 void            F_WaveBarrier (f_wave *Wave);
 
@@ -481,21 +483,15 @@ f_b32 F_Internal_WaveAllTrue(f_wave *Wave, f_b32 Condition)
 	return F_Internal_WaveCountTrue(Wave, Condition) == (f_u64)Wave->LaneCount;
 }
 
-void __F_Internal_WaveBroadcast(f_wave *Wave, void *Bytes, f_s64 Count)
-{
-	F_Assert(Count <= 8);
-	F_WaveBarrier(Wave);
-	F_MemoryCopy(Wave->BroadcastValues + Wave->Lane, Bytes, Count);
-	F_WaveBarrier(Wave);
-}
-
 f_u64 F_WaveExclusivePrefixSum (f_wave *Wave, f_u64 Value)
 {
-	__F_WaveBroadcast(Wave, Value);
+	Wave->BroadcastPointers[Wave->Lane] = &Value;
+	F_WaveBarrier(Wave);
+
 	f_u64 ValueForThisLane = 0;
 	for(f_u64 I = 0; I < Wave->Lane; I++)
 	{
-		ValueForThisLane += Wave->BroadcastValues[I];
+		ValueForThisLane += *(f_u64 *)Wave->BroadcastPointers[I];
 	}
 	F_WaveBarrier(Wave);
 	return ValueForThisLane;
@@ -557,7 +553,7 @@ F_Internal_ThreadEntry(ThreadParams)
 void F_DispatchAcrossNLanes(f_s64 LaneCount)
 {
 	f_memory_arena *GlobalArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
-	f_u64 *BroadcastValues   = F_ArenaPushArrayType(GlobalArena, LaneCount, f_u64);
+	void **BroadcastPointers   = F_ArenaPushArrayType(GlobalArena, LaneCount, void*);
 	f_thread              *Threads = F_ArenaPushArrayType(GlobalArena, LaneCount, f_thread);
 	f_wave                *Waves   = F_ArenaPushArrayType(GlobalArena, LaneCount, f_wave);
 	f_thread_entry_params *Params  = F_ArenaPushArrayType(GlobalArena, LaneCount, f_thread_entry_params);
@@ -574,7 +570,7 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount)
 		Waves[I].Lane = I;
 		Waves[I].LaneCount = LaneCount;
 		Waves[I].Barrier = &Barrier;
-		Waves[I].BroadcastValues = BroadcastValues;
+		Waves[I].BroadcastPointers = BroadcastPointers;
 		Waves[I].Vote = &Vote;
 		Waves[I].Ballot = &Ballot;
 		// Need a better idea for this
@@ -636,11 +632,8 @@ f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
 		Result.TimeStamps = F_ArenaPushArrayType(Wave->GlobalArena, FilePaths.Count, f_u64);
 		Result.FileCount = FilePaths.Count;
 	}
-	Result.Files = F_WaveValueAtFirstLane(Wave, Result.Files);
-	Result.TimeStamps = F_WaveValueAtFirstLane(Wave, Result.TimeStamps);
-	Result.FileCount = F_WaveValueAtFirstLane(Wave, Result.FileCount);
-
-	F_WaveBarrier(Wave);
+	
+	F_BroadcastFirstLane(Wave, Result);
 
 	F_WaveFor(Wave, I, FilePaths.Count)
 	{
@@ -665,6 +658,7 @@ f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch)
 			
 		}
 	}
+	// TODO
 }
 
 f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)

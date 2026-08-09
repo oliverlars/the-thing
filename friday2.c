@@ -17,8 +17,9 @@ F_LaneEntry(Wave)
 
 	F_WaveBarrier(Wave);
 
-	SomeArrayCount = F_WaveValueAtFirstLane(Wave, SomeArrayCount);
-	SomeArray = F_WaveValueAtFirstLane(Wave, SomeArray);
+	F_BroadcastFirstLane(Wave, SomeArrayCount);
+	F_BroadcastFirstLane(Wave, SomeArray);
+
 	printf("Lane %llu has value: %llu\n", Wave->Lane, SomeArrayCount);
 
 	F_WaveBarrier(Wave);
