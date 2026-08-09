@@ -113,6 +113,13 @@ typedef struct f_thread
 }
 f_thread;
 
+typedef struct f_thread_entry_params
+{
+	void (*LaneEntry)(f_wave *WaveArgument);
+	f_wave *WaveArgument;
+}
+f_thread_entry_params;
+
 typedef struct f_barrier
 {
 	_Atomic(f_u64) Generation;
@@ -216,14 +223,16 @@ f_s64 F_OS_NumberOFHighPerformanceCPUs(void);
 #define OS_DARWIN
 
 #if defined(OS_WINDOWS)
-#define F_LaneEntry(EntryArgument) DWORD WINAPI F_ThreadEntry(f_wave *EntryArgument)
-typedef DWORD (WINAPI *f_thread_funciton)(void *);
+typedef DWORD (WINAPI *f_thread_function)(void *);
+#define F_Internal_ThreadEntry(Argument) DWORD WINAPI F_Internal_ThreadEntry(f_thread_entry_params *Argument)
 #elif defined(OS_DARWIN)
-#define F_LaneEntry(EntryArgument) void *F_LaneEntry(f_wave *EntryArgument)
-typedef void *(*f_thread_funciton)(void *);
+typedef void *(*f_thread_function)(void *);
+#define F_Internal_ThreadEntry(Argument) void *F_Internal_ThreadEntry(f_thread_entry_params *Argument)
 #endif
 
-F_LaneEntry(EntryArgument);
+#define F_LaneEntry(Wave) void F_LaneEntry(f_wave *Wave)
+
+F_LaneEntry(Wave);
 
 #include <sys/mman.h> // mmap, mprotect
 #include <unistd.h> // getpagesize()
@@ -313,12 +322,12 @@ f_s64 F_OS_PageSize(void)
 	return PageSize;
 }
 
-void F_OS_ThreadStart(f_thread *Thread, f_thread_funciton Entry, void *EntryArgument)
+void F_OS_ThreadStart(f_thread *Thread, f_thread_function ThreadEntry, void *EntryArgument)
 {
 #if defined(OS_WINDOWS)
 	CreateThread(0, 0, Entry, EntryArgument, 0, &Thread.Handle);
 #elif defined(OS_DARWIN)
-	pthread_create((pthread_t*)&Thread->Handle, F_Null, Entry, EntryArgument);
+	pthread_create((pthread_t*)&Thread->Handle, F_Null, ThreadEntry, EntryArgument);
 #else
 #error "Unsupported OS"
 #endif
@@ -371,10 +380,11 @@ void F_OS_FutexWakeAll(void *Address)
 #endif
 }
 
-f_memory_arena *F_ArenaReserve(f_s64 NumberOfBytesToReserve)
+f_memory_arena *F_ArenaReserveButCommitFirstPage(f_s64 NumberOfBytesToReserve)
 {
-	f_memory_arena *Arena;
 	f_u8 *Start = F_OS_Reserve(NumberOfBytesToReserve + F_OS_PageSize());
+	F_OS_Commit(Start, F_OS_PageSize());
+	f_memory_arena *Arena = (f_memory_arena*)Start;
 	Arena->Start = Start + F_OS_PageSize();
 	Arena->At = 0;
 	Arena->Committed = 0;
@@ -426,24 +436,40 @@ void F_WaveBarrier(f_wave *Wave)
 	}
 }
 
+#if defined(OS_WINDOWS)
+F_Internal_ThreadEntry(ThreadParams)
+{
+	ThreadParams->LaneEntry(ThreadParams->WaveArgument);
+	return 0;
+}
+#elif defined(OS_DARWIN)
+F_Internal_ThreadEntry(ThreadParams)
+{
+	ThreadParams->LaneEntry(ThreadParams->WaveArgument);
+	return F_Null;
+}
+#else
+#error "Unsupported OS"
+#endif
+
 void F_Dispatch(f_wave_context *WaveContext, f_s64 LaneCount)
 {
-	WaveContext->GlobalArena = F_ArenaReserve(F_GigaBytes(8));
-	f_thread *Threads = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_thread);
-	f_wave   *Waves =   F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_wave);
+	WaveContext->GlobalArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
+	f_thread              *Threads = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_thread);
+	f_wave                *Waves   = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_wave);
+	f_thread_entry_params *Params  = F_ArenaPushArrayType(WaveContext->GlobalArena, LaneCount, f_thread_entry_params);
 	f_barrier Barrier = {0};
 	Barrier.LaneCount = LaneCount;
 	for(int I = 0; I < LaneCount; I++)
 	{
 		Waves[I].Lane = I;
 		Waves[I].Barrier = &Barrier;
-		F_OS_ThreadStart(Threads + I, (f_thread_funciton)F_LaneEntry, Waves + I);
+		Params[I].WaveArgument = Waves + I;
+		Params[I].LaneEntry = F_LaneEntry;
+		F_OS_ThreadStart(Threads + I, (f_thread_function)F_Internal_ThreadEntry, Params + I);
 	}
 
-	for(int I = 0; I < LaneCount; I++)
-	{
-		F_OS_WaitForThreads(Threads + I, LaneCount);
-	}
+	F_OS_WaitForThreads(Threads, LaneCount);
 }
 
 #endif
