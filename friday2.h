@@ -160,6 +160,11 @@ f_memory_arena     *F_ArenaReserve   (f_s64 Bytes);
 #define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)))
 #define F_ArenaPush(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush)
 
+f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush);
+void  F_ArenaReset(f_memory_arena *Arena);
+
+void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark);
+
 f_str8              F_Str8PushF         (f_memory_arena *A, char *Format, ...);
 void                F_Str8ListAppend    (f_memory_arena *A, f_str8_list *L, f_str8 S);
 f_str8_array        F_Str8ArrayFromList (f_memory_arena *A, f_str8_list L);
@@ -443,6 +448,16 @@ f_memory_arena *F_ArenaReserveButCommitFirstPage(f_s64 NumberOfBytesToReserve)
 	return Arena;
 }
 
+void  F_ArenaReset(f_memory_arena *Arena)
+{
+	Arena->At = 0;
+}
+
+void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark)
+{
+	Arena->At = Mark;
+}
+
 f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush)
 {
 	if(BytesToPush > Arena->Committed - Arena->At)
@@ -603,14 +618,8 @@ f_file_info F_OS_FileInfo(f_memory_arena *Arena, f_str8 Filename)
 #if defined(OS_WINDOWS)
 #error "Implement F_OS_FileInfo for OS_WINDOWS"
 #elif defined(OS_DARWIN)
-	f_s32 FileHandle = open(F_CStrFromStr8(Arena, Filename), O_RDONLY);
-	if (FileHandle == -1)
-	{
-		// TODO: Better logging
-		return FileInfo;
-	}
 	struct stat FileStat;
-	fstat(FileHandle, &FileStat);
+	stat(F_CStrFromStr8(Arena, Filename), &FileStat);
 	FileInfo.SizeInBytes = FileStat.st_size;
 	FileInfo.Exists = F_True;
 	f_u64 MillisecondsSinceEpoch = 
@@ -664,6 +673,7 @@ f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch)
 f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)
 {
 	f_b32 AnyChanged = F_False;
+	f_s64 Mark = Wave->Arena->At;
 	F_WaveFor(Wave, I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
@@ -672,6 +682,7 @@ f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)
 			AnyChanged = F_True;
 		}
 	}
+	F_ArenaResetTo(Wave->Arena, Mark);
 	return F_WaveAnyTrue(Wave, AnyChanged);
 }
 

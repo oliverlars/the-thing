@@ -41,8 +41,17 @@ F_LaneEntry(Wave)
 	f_watch Watch = F_WatchFilesFromArray(Wave, TemporaryGlobalFilePaths);
 
 
-	while(!F_AnyFilesChangedInWatch(Wave, &Watch));
+	f_u64 NumberOfChecks = 0;
+	while(!F_AnyFilesChangedInWatch(Wave, &Watch))
+	{
+		if(F_WaveIsFirstLane(Wave))
+		{
+			printf("Nothing changed: %llu\n", NumberOfChecks);
+			NumberOfChecks++;
+		}
+	}
 
+	if(F_WaveIsFirstLane(Wave)) printf("Something changed\n");
 
 	F_WaveBarrier(Wave);
 }
