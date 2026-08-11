@@ -2,9 +2,6 @@
 
 #include <stdio.h>
 
-f_str8 BackingFileMemory[32];
-f_str8_array TemporaryGlobalFilePaths = {0};
-
 F_LaneEntry(Wave)
 {
 	f_u64 *SomeArray;
@@ -38,7 +35,18 @@ F_LaneEntry(Wave)
 		}
 	}
 
-	f_watch Watch = F_WatchFilesFromArray(Wave, TemporaryGlobalFilePaths);
+	f_str8_array FilesToWatch;
+	if(F_WaveIsFirstLane(Wave))
+	{
+		f_str8_list FileList;
+		F_Str8ListAppend(Wave->GlobalArena, &FileList, F_Str8("friday2.c"));
+		F_Str8ListAppend(Wave->GlobalArena, &FileList, F_Str8("friday2.h"));
+		FilesToWatch = F_Str8ArrayFromList(Wave->GlobalArena, FileList);
+	}
+
+	F_BroadcastFirstLane(Wave, FilesToWatch);
+
+	f_watch Watch = F_WatchFilesFromArray(Wave, FilesToWatch);
 
 
 	f_u64 NumberOfChecks = 0;
@@ -59,9 +67,5 @@ F_LaneEntry(Wave)
 
 int main(int ArgCount, char **Arguments)
 {
-	TemporaryGlobalFilePaths.Count = 2;
-	TemporaryGlobalFilePaths.Items = BackingFileMemory;
-	TemporaryGlobalFilePaths.Items[0] = F_Str8("friday2.h");
-	TemporaryGlobalFilePaths.Items[1] = F_Str8("friday2.c");
 	F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs());
 }

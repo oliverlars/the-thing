@@ -165,12 +165,13 @@ void  F_ArenaReset(f_memory_arena *Arena);
 
 void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark);
 
-f_str8              F_Str8PushF         (f_memory_arena *A, char *Format, ...);
-void                F_Str8ListAppend    (f_memory_arena *A, f_str8_list *L, f_str8 S);
-f_str8_array        F_Str8ArrayFromList (f_memory_arena *A, f_str8_list L);
-f_str8              F_Str8Join          (f_memory_arena *A, f_str8_array Array, f_str8 Separator);
-f_b32               F_Str8Equal         (f_str8 A, f_str8 B);
-f_b32               F_Str8EndsWith      (f_str8 S, f_str8 Suffix);
+f_str8       F_Str8PushF         (f_memory_arena *A, char *Format, ...);
+void         F_Str8ListAppend    (f_memory_arena *A, f_str8_list *L, f_str8 S);
+f_str8_array F_Str8ArrayFromList (f_memory_arena *A, f_str8_list L);
+f_str8       F_Str8JoinList      (f_memory_arena *Arena, f_str8_list List,   f_str8 Separator);
+f_str8       F_Str8JoinArray     (f_memory_arena *Arena, f_str8_array Array, f_str8 Separator);
+f_b32        F_Str8Equal         (f_str8 A, f_str8 B);
+f_b32        F_Str8EndsWith      (f_str8 S, f_str8 Suffix);
 
 
 void F_DispatchAcrossNLanes(f_s64 LaneCount);
@@ -289,6 +290,7 @@ F_LaneEntry(Wave);
 #include <stdio.h> // printf()
 #include <string.h> // memcpy
 #include <assert.h> // assert()
+#include <stdarg.h> // va_list, va_args etc
 
 #if defined(_MSC_VER)
   #include <intrin.h>
@@ -599,10 +601,136 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount)
 	F_OS_WaitForThreads(Threads, LaneCount);
 }
 
-f_str8_array F_Str8ArrayFromList (f_memory_arena *A, f_str8_list L);
-f_str8 F_Str8Join          (f_memory_arena *A, f_str8_array Array, f_str8 Separator);
-f_b32 F_Str8Equal         (f_str8 A, f_str8 B);
-f_b32 F_Str8EndsWith      (f_str8 String, f_str8 Suffix);
+f_s64 F_Str8ListCount(f_str8_list List)
+{
+	f_s64 Count = 0;
+	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
+	{
+		Count++;
+	}
+	return Count;
+}
+
+f_str8 F_Str8PushFV(f_memory_arena *Arena, char *Format, va_list InputArgs)
+{
+	va_list ArgList;
+	va_copy(ArgList, InputArgs);
+	f_u32 BytesNeeded = vsnprintf(0, 0, Format, InputArgs) + 1;
+	f_str8 Result;
+	Result.Bytes = F_ArenaPushArrayType(Arena, BytesNeeded, f_s8);
+	Result.Size = vsnprintf((char *)Result.Bytes, BytesNeeded, Format, ArgList);
+	Result.Bytes[Result.Size] = 0;
+	va_end(ArgList);
+	return Result;
+}
+
+f_str8 F_Str8PushF(f_memory_arena *Arena, char *Format, ...)
+{
+	va_list args;
+	va_start(args, Format);
+	f_str8 Result = F_Str8PushFV(Arena, Format, args);
+	va_end(args);
+	return Result;
+}
+
+void F_Str8ListAppend(f_memory_arena *Arena, f_str8_list *List, f_str8 StringToAppend)
+{
+	if(List->Last)
+	{
+		f_str8_list_node *Next = F_ArenaPushType(Arena, f_str8_list_node);
+		List->Last->Next = Next;
+		List->Last = Next;
+		Next->String = StringToAppend;
+	}
+	else
+	{
+		f_str8_list_node *Next = F_ArenaPushType(Arena, f_str8_list_node);
+		List->Last = Next;
+		List->First = Next;
+		Next->String = StringToAppend;
+	}
+}
+
+f_str8_array F_Str8ArrayFromList(f_memory_arena *Arena, f_str8_list List)
+{
+	f_s64 Count = F_Str8ListCount(List);
+	f_str8_array Result;
+	Result.Items = F_ArenaPushArrayType(Arena, Count, f_str8);
+	Result.Count = Count;
+	f_s64 Index = 0;
+	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
+	{
+		Result.Items[Index] = Node->String;
+		Index++;
+	}
+	return Result;
+}
+
+f_str8 F_Str8JoinArray(f_memory_arena *Arena, f_str8_array Array, f_str8 Separator)
+{
+	f_s64 TotalStringSize = 0;
+	for(f_s64 I = 0; I < Array.Count; I++)
+	{
+		TotalStringSize += Array.Items[I].Size;
+	}
+	f_str8 Result;
+	Result.Bytes = F_ArenaPushArrayType(Arena, TotalStringSize, f_s8);
+	Result.Size = TotalStringSize;
+
+	f_s64 Start = 0;
+	for(f_s64 I = 0; I < Array.Count; I++)
+	{
+		F_MemoryCopy(Result.Bytes + Start, Array.Items[I].Bytes, Array.Items[I].Size);
+		Start += Array.Items[I].Size;
+	}
+	return Result;
+}
+
+f_str8 F_Str8JoinList(f_memory_arena *Arena, f_str8_list List, f_str8 Separator)
+{
+	f_s64 TotalStringSize = 0;
+	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
+	{
+		TotalStringSize += Node->String.Size;
+	}
+	f_str8 Result;
+	Result.Bytes = F_ArenaPushArrayType(Arena, TotalStringSize, f_s8);
+	Result.Size = TotalStringSize;
+
+	f_s64 Start = 0;
+	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
+	{
+		F_MemoryCopy(Result.Bytes + Start, Node->String.Bytes, Node->String.Size);
+		Start += Node->String.Size;
+	}
+	return Result;
+}
+
+f_b32 F_Str8Equal(f_str8 A, f_str8 B)
+{
+	if(A.Size != B.Size) return F_False;
+	f_b32 Result = F_True;
+	for(f_s64 I = 0; I < A.Size; I++)
+	{
+		if(A.Bytes[I] != B.Bytes[I])
+		{
+			Result = F_False;
+			break;
+		}
+	}
+	return Result;
+}
+
+f_b32 F_Str8EndsWith(f_str8 String, f_str8 Suffix)
+{
+	if(String.Size < Suffix.Size) return F_False;
+	f_str8 StringTail = (f_str8)
+	{
+		Suffix.Size, String.Bytes + (Suffix.Size - String.Size)
+	};
+	f_b32 Result = F_Str8Equal(StringTail, Suffix);
+	return Result;
+}
 
 char *F_CStrFromStr8(f_memory_arena *Arena, f_str8 String)
 {
