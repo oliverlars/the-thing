@@ -107,7 +107,23 @@ typedef struct f_wave
 }
 f_wave;
 
-typedef struct f_process f_process;
+typedef enum f_process_state
+{
+	F_PROCESS_NONE,
+	F_PROCESS_FAILED_TO_LAUNCH,
+	F_PROCESS_RUNNING,
+	F_PROCESS_EXITED,
+}
+f_process_state;
+
+typedef struct f_process
+{
+	f_s32 ID;
+	f_process_state State; 
+	f_u64 ExitCode;
+	f_str8_list StdOutSinceLastPoll;
+}
+f_process;
 
 typedef struct f_watch
 {
@@ -119,7 +135,27 @@ f_watch;
 
 typedef struct f_build f_build;
 
-typedef struct f_build_options f_build_options;
+typedef struct f_toolchain
+{
+	f_str8 CompilerPath;
+
+	f_str8 IncludeFlag;
+	f_str8 ObjectFlag;
+	f_str8 DebugFlag;
+	f_str8 OptimiseFlag;
+	f_str8 SharedFlag;
+}
+f_toolchain;
+
+f_toolchain F_TOOLCHAIN_CLANG;
+f_toolchain F_TOOLCHAIN_MSVC;
+f_toolchain F_TOOLCHAIN_GCC;
+f_toolchain F_TOOLCHAIN_CARNAGE;
+
+typedef struct f_build_options
+{
+}
+f_build_options;
 
 typedef enum f_build_state f_build_state;
 
@@ -146,14 +182,6 @@ f_thread_entry_params;
 
 typedef struct f_dir_iter f_dir_iter;
 
-typedef struct f_process_state
-{
-	f_b32 Exited;
-	f_s32 ExitCode;
-	f_str8_list StdOutSinceLastPoll;
-}
-f_process_state;
-
 f_memory_arena     *F_ArenaReserve   (f_s64 Bytes);
 
 #define F_ArenaPushType(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type))
@@ -172,6 +200,8 @@ f_str8       F_Str8JoinList      (f_memory_arena *Arena, f_str8_list List,   f_s
 f_str8       F_Str8JoinArray     (f_memory_arena *Arena, f_str8_array Array, f_str8 Separator);
 f_b32        F_Str8Equal         (f_str8 A, f_str8 B);
 f_b32        F_Str8EndsWith      (f_str8 S, f_str8 Suffix);
+f_s64        F_Str8ListCount     (f_str8_list List);
+f_s64        F_Str8ListLength    (f_str8_list List);
 
 
 void F_DispatchAcrossNLanes(f_s64 LaneCount);
@@ -210,12 +240,9 @@ void            F_WaveBarrier (f_wave *Wave);
         Index < __F_Concat(F_ForEnd__, __LINE__); \
         Index += __F_Concat(F_ForStep__, __LINE__))
 
-
-typedef void f_output_sink (void *User, f_str8 Text);
-
-f_b32 F_ProcessSpawn (f_memory_arena *Arena, f_str8_array Argv, f_process *Out);
-f_b32 F_ProcessPoll  (f_process *Process, f_output_sink *Sink, void *User);
-void  F_ProcessWait  (f_process *Process, f_output_sink *Sink, void *User);
+void  F_ProcessSpawn (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
+f_b32 F_ProcessPoll  (f_process *Process);
+void  F_ProcessWait  (f_process *Process);
 
 f_watch      F_WatchFilesFromArray (f_wave *Wave, f_str8_array FilePaths);
 f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch);
@@ -278,7 +305,10 @@ F_LaneEntry(Wave);
 #include <mach/mach_time.h> // mach_absolute_time()
 #include <fcntl.h> // open()
 #include <sys/stat.h> // stat
+#include <spawn.h> // posix_spawn()
+#include <util.h> // openpty()
 
+extern char **environ;
 
 #endif
 
@@ -291,6 +321,34 @@ F_LaneEntry(Wave);
 #include <string.h> // memcpy
 #include <assert.h> // assert()
 #include <stdarg.h> // va_list, va_args etc
+
+
+f_toolchain F_TOOLCHAIN_CLANG = 
+{
+	.CompilerPath = F_Str8("clang"),
+	.ObjectFlag = F_Str8("-o"),
+	.DebugFlag = F_Str8("-g"),
+	.OptimiseFlag = F_Str8("-O2"),
+	.IncludeFlag = F_Str8("-I"),
+	.SharedFlag = F_Str8("-dynamiclib"),
+
+};
+
+f_toolchain F_TOOLCHAIN_MSVC =
+{
+	// TODO
+};
+
+f_toolchain F_TOOLCHAIN_GCC = 
+{
+	// TODO
+};
+
+f_toolchain F_TOOLCHAIN_CARNAGE =
+{
+	// TODO
+};
+
 
 #if defined(_MSC_VER)
   #include <intrin.h>
@@ -611,6 +669,16 @@ f_s64 F_Str8ListCount(f_str8_list List)
 	return Count;
 }
 
+f_s64 F_Str8ListLength(f_str8_list List)
+{
+	f_s64 Length = 0;
+	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
+	{
+		Length += Node->String.Size;
+	}
+	return Length;
+}
+
 f_str8 F_Str8PushFV(f_memory_arena *Arena, char *Format, va_list InputArgs)
 {
 	va_list ArgList;
@@ -672,6 +740,7 @@ f_str8 F_Str8JoinArray(f_memory_arena *Arena, f_str8_array Array, f_str8 Separat
 	for(f_s64 I = 0; I < Array.Count; I++)
 	{
 		TotalStringSize += Array.Items[I].Size;
+		if(I < Array.Count - 1) TotalStringSize += Separator.Size;
 	}
 	f_str8 Result;
 	Result.Bytes = F_ArenaPushArrayType(Arena, TotalStringSize, f_s8);
@@ -681,6 +750,8 @@ f_str8 F_Str8JoinArray(f_memory_arena *Arena, f_str8_array Array, f_str8 Separat
 	for(f_s64 I = 0; I < Array.Count; I++)
 	{
 		F_MemoryCopy(Result.Bytes + Start, Array.Items[I].Bytes, Array.Items[I].Size);
+		Start += Separator.Size;
+		F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
 		Start += Array.Items[I].Size;
 	}
 	return Result;
@@ -692,6 +763,7 @@ f_str8 F_Str8JoinList(f_memory_arena *Arena, f_str8_list List, f_str8 Separator)
 	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
 	{
 		TotalStringSize += Node->String.Size;
+		if(Node->Next != List.Last) TotalStringSize += Separator.Size;
 	}
 	f_str8 Result;
 	Result.Bytes = F_ArenaPushArrayType(Arena, TotalStringSize, f_s8);
@@ -701,6 +773,8 @@ f_str8 F_Str8JoinList(f_memory_arena *Arena, f_str8_list List, f_str8 Separator)
 	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
 	{
 		F_MemoryCopy(Result.Bytes + Start, Node->String.Bytes, Node->String.Size);
+		Start += Separator.Size;
+		F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
 		Start += Node->String.Size;
 	}
 	return Result;
@@ -814,5 +888,48 @@ f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)
 	return F_WaveAnyTrue(Wave, AnyChanged);
 }
 
+void  F_ProcessSpawn (f_memory_arena *Arena, f_process *Process, f_str8_list Args)
+{
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	posix_spawn_file_actions_t SpawnActions;
+
+	int MasterFD = -1;
+	int SlaveFD = -1;
+	openpty(&MasterFD, &SlaveFD, F_Null, F_Null, F_Null);
+
+	posix_spawn_file_actions_init(&SpawnActions);
+
+	posix_spawn_file_actions_adddup2(&SpawnActions, SlaveFD, STDOUT_FILENO);
+	posix_spawn_file_actions_adddup2(&SpawnActions, SlaveFD, STDERR_FILENO);
+	posix_spawn_file_actions_addclose(&SpawnActions, MasterFD);
+	posix_spawn_file_actions_addclose(&SpawnActions, SlaveFD);
+
+	f_s32 MaxArguments = 1024;
+	char **CompilerArguments = F_ArenaPushArrayType(Arena, MaxArguments, char*);
+	f_s32 ArgumentCount = 0;
+	for(f_str8_list_node *Node = Args.First; Node; Node = Node->Next)
+	{
+		CompilerArguments[ArgumentCount++] = F_CStrFromStr8(Arena, Node->String);
+	}
+	CompilerArguments[ArgumentCount] = F_Null;
+
+
+	f_s32 ProcessStatus = posix_spawnp(&Process->ID, CompilerArguments[0], &SpawnActions, F_Null, CompilerArguments, environ);
+	posix_spawn_file_actions_destroy(&SpawnActions);
+	
+	if(ProcessStatus == 0)
+	{
+		Process->State = F_PROCESS_RUNNING;
+	}
+	else
+	{
+		Process->State = F_PROCESS_FAILED_TO_LAUNCH;
+	}
+#endif
+}
+
+f_b32 F_ProcessPoll  (f_process *Process);
+void  F_ProcessWait  (f_process *Process);
 
 #endif
