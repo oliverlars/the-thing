@@ -21,7 +21,7 @@ F_LaneEntry(Wave)
 
 	F_WaveBarrier(Wave);
 
-	F_WaveFor(Wave, I, SomeArrayCount)
+	for F_EachWaveSplit(Wave, I, SomeArrayCount)
 	{
 		printf("I: %llu\n", I);
 		SomeArray[I] = Wave->Lane;

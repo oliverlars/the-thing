@@ -184,11 +184,15 @@ typedef struct f_dir_iter f_dir_iter;
 
 f_memory_arena     *F_ArenaReserve   (f_s64 Bytes);
 
-#define F_ArenaPushType(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type))
-#define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)))
-#define F_ArenaPush(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush)
+#define F_ArenaPushType(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type), F_True)
+#define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)), F_True)
+#define F_ArenaPush(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush, F_True)
 
-f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush);
+#define F_ArenaPushTypeNoZero(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type), F_False)
+#define F_ArenaPushArrayTypeNoZero(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)), F_False)
+#define F_ArenaPushNoZero(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush, F_False)
+
+f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush, f_b32 ShouldZero);
 void  F_ArenaReset(f_memory_arena *Arena);
 
 void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark);
@@ -233,12 +237,12 @@ void            F_WaveBarrier (f_wave *Wave);
 #define __F_Concat_(A, B) A##B
 #define __F_Concat(A, B) __F_Concat_(A, B)
 
-#define F_WaveFor(Wave, Index, Count) \
-    for(f_s64 Index                          = (Wave)->Lane, \
-              __F_Concat(F_ForEnd__,  __LINE__) = (f_s64)(Count), \
-              __F_Concat(F_ForStep__, __LINE__) = (Wave)->LaneCount; \
-        Index < __F_Concat(F_ForEnd__, __LINE__); \
-        Index += __F_Concat(F_ForStep__, __LINE__))
+#define F_EachWaveSplit(Wave, Index, Count) \
+    (f_s64 Index                       = (Wave)->Lane, \
+           __F_Concat(F_ForEnd__,  __LINE__) = (f_s64)(Count), \
+           __F_Concat(F_ForStep__, __LINE__) = (Wave)->LaneCount; \
+     Index < __F_Concat(F_ForEnd__, __LINE__); \
+     Index += __F_Concat(F_ForStep__, __LINE__))
 
 void  F_ProcessSpawn (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
 f_b32 F_ProcessPoll  (f_process *Process);
@@ -363,6 +367,7 @@ f_toolchain F_TOOLCHAIN_CARNAGE =
 
 #define F_Assert(Condition) assert(Condition)
 #define F_MemoryCopy(Destination, Source, BytesToCopy) memcpy(Destination, Source, BytesToCopy)
+#define F_MemoryZero(Destination, BytesToZero) memset(Destination, 0, BytesToZero)
 
 #define F_True  ((f_b32)1)
 #define F_False ((f_b32)0)
@@ -518,7 +523,7 @@ void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark)
 	Arena->At = Mark;
 }
 
-f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush)
+f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush, f_b32 ShouldZero)
 {
 	if(BytesToPush > Arena->Committed - Arena->At)
 	{
@@ -528,6 +533,10 @@ f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush)
 	}
 	f_u8 *Result = Arena->Start + Arena->At;
 	Arena->At += (BytesToPush + 15) & ~15;
+	if(ShouldZero)
+	{
+		F_MemoryZero(Result, BytesToPush);
+	}
 	return Result;
 }
 
@@ -703,20 +712,18 @@ f_str8 F_Str8PushF(f_memory_arena *Arena, char *Format, ...)
 
 void F_Str8ListAppend(f_memory_arena *Arena, f_str8_list *List, f_str8 StringToAppend)
 {
+	f_str8_list_node *Next = F_ArenaPushType(Arena, f_str8_list_node);
 	if(List->Last)
 	{
-		f_str8_list_node *Next = F_ArenaPushType(Arena, f_str8_list_node);
 		List->Last->Next = Next;
 		List->Last = Next;
-		Next->String = StringToAppend;
 	}
 	else
 	{
-		f_str8_list_node *Next = F_ArenaPushType(Arena, f_str8_list_node);
 		List->Last = Next;
 		List->First = Next;
-		Next->String = StringToAppend;
 	}
+	Next->String = StringToAppend;
 }
 
 f_str8_array F_Str8ArrayFromList(f_memory_arena *Arena, f_str8_list List)
@@ -846,7 +853,7 @@ f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
 	
 	F_BroadcastFirstLane(Wave, Result);
 
-	F_WaveFor(Wave, I, FilePaths.Count)
+	for F_EachWaveSplit(Wave, I, FilePaths.Count)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, FilePaths.Items[I]);
 		Result.TimeStamps[I] = FileInfo.LastModified;
@@ -861,7 +868,7 @@ f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch)
 {
 	f_str8_array Result = {0};
 	f_s32 FilesChanged = 0;
-	F_WaveFor(Wave, I, Watch->FileCount)
+	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
 		if(Watch->TimeStamps[I] != FileInfo.LastModified)
@@ -876,7 +883,7 @@ f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)
 {
 	f_b32 AnyChanged = F_False;
 	f_s64 Mark = Wave->Arena->At;
-	F_WaveFor(Wave, I, Watch->FileCount)
+	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
 		if(Watch->TimeStamps[I] != FileInfo.LastModified)
@@ -888,7 +895,7 @@ f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)
 	return F_WaveAnyTrue(Wave, AnyChanged);
 }
 
-void  F_ProcessSpawn (f_memory_arena *Arena, f_process *Process, f_str8_list Args)
+void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 {
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
@@ -917,10 +924,12 @@ void  F_ProcessSpawn (f_memory_arena *Arena, f_process *Process, f_str8_list Arg
 
 	f_s32 ProcessStatus = posix_spawnp(&Process->ID, CompilerArguments[0], &SpawnActions, F_Null, CompilerArguments, environ);
 	posix_spawn_file_actions_destroy(&SpawnActions);
-	
+
 	if(ProcessStatus == 0)
 	{
 		Process->State = F_PROCESS_RUNNING;
+
+		close(SlaveFD);
 	}
 	else
 	{
