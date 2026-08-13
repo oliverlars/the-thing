@@ -107,6 +107,9 @@ typedef struct f_wave
 }
 f_wave;
 
+
+#define F_PROCESS_STDOUT_CAPACITY (F_KiloBytes(64))
+
 typedef enum f_process_state
 {
 	F_PROCESS_NONE,
@@ -121,7 +124,8 @@ typedef struct f_process
 	f_s32 ID;
 	f_process_state State; 
 	f_u64 ExitCode;
-	f_str8_list StdOutSinceLastPoll;
+	void *StdOut;
+	f_str8 StdOutSinceLastPoll;
 }
 f_process;
 
@@ -310,7 +314,7 @@ F_LaneEntry(Wave);
 #include <fcntl.h> // open()
 #include <sys/stat.h> // stat
 #include <spawn.h> // posix_spawn()
-#include <util.h> // openpty()
+#include <sys/wait.h> // waitpid()
 
 extern char **environ;
 
@@ -899,18 +903,8 @@ void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args
 {
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
-	posix_spawn_file_actions_t SpawnActions;
 
-	int MasterFD = -1;
-	int SlaveFD = -1;
-	openpty(&MasterFD, &SlaveFD, F_Null, F_Null, F_Null);
-
-	posix_spawn_file_actions_init(&SpawnActions);
-
-	posix_spawn_file_actions_adddup2(&SpawnActions, SlaveFD, STDOUT_FILENO);
-	posix_spawn_file_actions_adddup2(&SpawnActions, SlaveFD, STDERR_FILENO);
-	posix_spawn_file_actions_addclose(&SpawnActions, MasterFD);
-	posix_spawn_file_actions_addclose(&SpawnActions, SlaveFD);
+	Process->StdOutSinceLastPoll.Bytes = F_ArenaPushArrayType(Arena, F_PROCESS_STDOUT_CAPACITY, f_s8);
 
 	f_s32 MaxArguments = 1024;
 	char **CompilerArguments = F_ArenaPushArrayType(Arena, MaxArguments, char*);
@@ -921,24 +915,60 @@ void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args
 	}
 	CompilerArguments[ArgumentCount] = F_Null;
 
+	f_s32 FileDescriptors[2];
+	if(pipe(FileDescriptors) == -1)
+	{
+		Process->State = F_PROCESS_FAILED_TO_LAUNCH;
+		return;
+	}
+
+	posix_spawn_file_actions_t SpawnActions;
+	posix_spawn_file_actions_init(&SpawnActions);
+	posix_spawn_file_actions_adddup2(&SpawnActions, FileDescriptors[0], STDOUT_FILENO);
+	posix_spawn_file_actions_addclose(&SpawnActions, FileDescriptors[0]);
+	posix_spawn_file_actions_addclose(&SpawnActions, FileDescriptors[1]);
 
 	f_s32 ProcessStatus = posix_spawnp(&Process->ID, CompilerArguments[0], &SpawnActions, F_Null, CompilerArguments, environ);
 	posix_spawn_file_actions_destroy(&SpawnActions);
+	close(FileDescriptors[1]);
 
 	if(ProcessStatus == 0)
 	{
+		fcntl(FileDescriptors[0], F_SETFL, O_NONBLOCK);
+		Process->StdOut = (void*)((f_u64)FileDescriptors[0]);
 		Process->State = F_PROCESS_RUNNING;
-
-		close(SlaveFD);
 	}
 	else
 	{
+		close(FileDescriptors[0]);
 		Process->State = F_PROCESS_FAILED_TO_LAUNCH;
+		Process->ExitCode = ProcessStatus;
 	}
 #endif
+
 }
 
-f_b32 F_ProcessPoll  (f_process *Process);
+f_b32 F_ProcessPoll(f_process *Process)
+{
+    Process->StdOutSinceLastPoll.Size = 0;
+
+    ssize_t ReadCount = read((f_s32)((f_u64)Process->StdOut), Process->StdOutSinceLastPoll.Bytes, F_PROCESS_STDOUT_CAPACITY);
+    if (ReadCount > 0)
+    {
+        Process->StdOutSinceLastPoll.Size = (f_u64)ReadCount;
+    }
+
+    int Status = 0;
+    if (waitpid(Process->ID, &Status, WNOHANG) == Process->ID)
+    {
+        Process->ExitCode = WIFEXITED(Status) ? WEXITSTATUS(Status) : -WTERMSIG(Status);
+        close((f_s32)((f_u64)Process->StdOut));
+        return 0;
+    }
+
+    return 1;
+}
+
 void  F_ProcessWait  (f_process *Process);
 
 #endif

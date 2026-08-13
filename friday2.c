@@ -49,13 +49,25 @@ F_LaneEntry(Wave)
 	f_watch Watch = F_WatchFilesFromArray(Wave, FilesToWatch);
 
 
-	f_u64 NumberOfChecks = 0;
-	while(!F_AnyFilesChangedInWatch(Wave, &Watch))
+	// f_u64 NumberOfChecks = 0;
+	// while(!F_AnyFilesChangedInWatch(Wave, &Watch))
+	// {
+	// 	if(F_WaveIsFirstLane(Wave))
+	// 	{
+	// 		printf("Nothing changed: %llu\n", NumberOfChecks);
+	// 		NumberOfChecks++;
+	// 	}
+	// }
+
+	if(F_WaveIsFirstLane(Wave))
 	{
-		if(F_WaveIsFirstLane(Wave))
+		f_process Process = {0};
+		f_str8_list Args = {0};
+		F_Str8ListAppend(Wave->GlobalArena, &Args, F_Str8("clang"));
+		F_ProcessSpawn(Wave->GlobalArena, &Process, Args);
+		while(F_ProcessPoll(&Process))
 		{
-			printf("Nothing changed: %llu\n", NumberOfChecks);
-			NumberOfChecks++;
+			printf("%.*s", F_Expand(Process.StdOutSinceLastPoll));
 		}
 	}
 
