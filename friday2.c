@@ -69,6 +69,11 @@ F_LaneEntry(Wave)
 		{
 			printf("%.*s", F_Expand(Process.StdOutSinceLastPoll));
 		}
+
+		if(!F_ProcessExitedCleanly(&Process))
+		{
+			printf("Clang exited with errors\n");
+		}
 	}
 
 	if(F_WaveIsFirstLane(Wave)) printf("Something changed\n");

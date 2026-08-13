@@ -36,13 +36,13 @@ typedef unsigned long long f_b64;
 #define F_WHITE   "\x1B[37m"
 #define F_RESET   "\x1B[0m"
 
-typedef enum f_operating_system
-{
-	F_OS_WINDOWS,
-	F_OS_DARWIN,
-	F_OS_LINUX,
-}
-f_operating_system;
+#if defined(_MSC_VER)
+#define OS_WINDOWS
+#endif
+#if(__APPLE__)
+#define OS_DARWIN
+#endif
+
 
 typedef struct f_memory_arena
 {
@@ -119,11 +119,17 @@ typedef enum f_process_state
 }
 f_process_state;
 
+typedef struct f_exit_code
+{
+	f_u64 Values[2];
+}
+f_exit_code;
+
 typedef struct f_process
 {
 	f_s32 ID;
 	f_process_state State; 
-	f_u64 ExitCode;
+	f_exit_code ExitCode;
 	void *StdOut;
 	f_str8 StdOutSinceLastPoll;
 }
@@ -248,9 +254,10 @@ void            F_WaveBarrier (f_wave *Wave);
      Index < __F_Concat(F_ForEnd__, __LINE__); \
      Index += __F_Concat(F_ForStep__, __LINE__))
 
-void  F_ProcessSpawn (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
-f_b32 F_ProcessPoll  (f_process *Process);
-void  F_ProcessWait  (f_process *Process);
+void  F_ProcessSpawn         (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
+f_b32 F_ProcessPoll          (f_process *Process);
+void  F_ProcessWait          (f_process *Process);
+f_b32 F_ProcessExitedCleanly (f_process *Process);
 
 f_watch      F_WatchFilesFromArray (f_wave *Wave, f_str8_array FilePaths);
 f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch);
@@ -276,7 +283,6 @@ f_b32 F_OS_DirCreate      (f_str8 Path);
 f_b32 F_OS_DirNext        (f_dir_iter *Iter, f_str8 *OutName);
 
 f_b32 F_OS_ProcessSpawn  (char **Argv, f_process *Out);
-f_b32 F_OS_ProcessState  (f_process *P, f_s32 *ExitCode);
 
 void  F_OS_ThreadStart         (f_thread *Thread, void *(*Entry)(void *), void *EntryArgument);
 void  F_OS_WaitForSingleThread (f_thread Thread);
@@ -288,10 +294,8 @@ f_u64 F_OS_TimeStamp (void);
 f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 
 #if defined(_MSC_VER)
-#define OS_WINDOWS
 #endif
 #if(__APPLE__)
-#define OS_DARWIN
 
 #if defined(OS_WINDOWS)
 typedef DWORD (WINAPI *f_thread_function)(void *);
@@ -942,7 +946,7 @@ void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args
 	{
 		close(FileDescriptors[0]);
 		Process->State = F_PROCESS_FAILED_TO_LAUNCH;
-		Process->ExitCode = ProcessStatus;
+		Process->ExitCode = (f_exit_code){ProcessStatus, 0};
 	}
 #endif
 
@@ -950,23 +954,64 @@ void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args
 
 f_b32 F_ProcessPoll(f_process *Process)
 {
-    Process->StdOutSinceLastPoll.Size = 0;
+	Process->StdOutSinceLastPoll.Size = 0;
 
-    ssize_t ReadCount = read((f_s32)((f_u64)Process->StdOut), Process->StdOutSinceLastPoll.Bytes, F_PROCESS_STDOUT_CAPACITY);
-    if (ReadCount > 0)
-    {
-        Process->StdOutSinceLastPoll.Size = (f_u64)ReadCount;
-    }
 
-    int Status = 0;
-    if (waitpid(Process->ID, &Status, WNOHANG) == Process->ID)
-    {
-        Process->ExitCode = WIFEXITED(Status) ? WEXITSTATUS(Status) : -WTERMSIG(Status);
-        close((f_s32)((f_u64)Process->StdOut));
-        return 0;
-    }
+	if(Process->State != F_PROCESS_RUNNING) return F_False;
 
-    return 1;
+	f_u64 BytesRead = read((f_s32)((f_u64)Process->StdOut), Process->StdOutSinceLastPoll.Bytes, F_PROCESS_STDOUT_CAPACITY);
+	if(BytesRead > 0)
+	{
+		Process->StdOutSinceLastPoll.Size = (f_u64)BytesRead;
+	}
+
+	int Status = 0;
+	if (waitpid(Process->ID, &Status, WNOHANG) != Process->ID)
+	{
+		return F_True;
+	}
+
+	for(;Process->StdOutSinceLastPoll.Size < F_PROCESS_STDOUT_CAPACITY;)
+	{
+		f_s8 *BytesTail = Process->StdOutSinceLastPoll.Bytes + Process->StdOutSinceLastPoll.Size;
+		f_u64 BytesLeft = F_PROCESS_STDOUT_CAPACITY - Process->StdOutSinceLastPoll.Size;
+		f_s64 Tail = read((f_u32)((f_u64)Process->StdOut), BytesTail, BytesLeft);
+
+		if(Tail <= 0) break;
+		else
+		{
+			Process->StdOutSinceLastPoll.Size += (f_u64)Tail;
+		}
+	}
+	if (WIFEXITED(Status))
+	{
+		Process->ExitCode = (f_exit_code){WEXITSTATUS(Status), 0};
+	}
+	else if (WIFSIGNALED(Status))
+	{
+		Process->ExitCode = (f_exit_code){0, WTERMSIG(Status)};
+	}
+	else
+	{
+		return F_True;
+	}
+	Process->State = F_PROCESS_EXITED;
+	close((f_s32)((f_u64)Process->StdOut));
+	Process->StdOut = (void*)(-1);
+	return F_False;
+}
+
+f_b32 F_ProcessExitedCleanly(f_process *Process)
+{
+	f_b32 Result = F_True;
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	if(Process->ExitCode.Values[0] || Process->ExitCode.Values[1])
+	{
+		Result = F_False;
+	}
+#endif
+	return Result;
 }
 
 void  F_ProcessWait  (f_process *Process);
