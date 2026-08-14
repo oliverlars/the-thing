@@ -59,24 +59,21 @@ F_LaneEntry(Wave)
 	// 	}
 	// }
 
-	if(F_WaveIsFirstLane(Wave))
+	f_process Process = {0};
+	f_str8_list Args = {0};
+	F_Str8ListAppend(Wave->Arena, &Args, F_Str8("clang"));
+	F_ProcessSpawn(Wave->Arena, &Process, Args);
+	while(F_ProcessPoll(&Process))
 	{
-		f_process Process = {0};
-		f_str8_list Args = {0};
-		F_Str8ListAppend(Wave->GlobalArena, &Args, F_Str8("clang"));
-		F_ProcessSpawn(Wave->GlobalArena, &Process, Args);
-		while(F_ProcessPoll(&Process))
-		{
-			printf("%.*s", F_Expand(Process.StdOutSinceLastPoll));
-		}
-
-		if(!F_ProcessExitedCleanly(&Process))
-		{
-			printf("Clang exited with errors\n");
-		}
+		printf("%.*s", F_Expand(Process.StdOutSinceLastPoll));
 	}
 
-	if(F_WaveIsFirstLane(Wave)) printf("Something changed\n");
+
+	F_WaveBarrier(Wave);
+	if(!F_ProcessExitedCleanly(&Process))
+	{
+		printf("Clang exited with errors\n");
+	}
 
 	F_WaveBarrier(Wave);
 }

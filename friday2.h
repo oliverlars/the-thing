@@ -231,6 +231,11 @@ f_b32           F_Internal_WaveAllTrue   (f_wave *Wave, f_b32 Condition);
 #define         F_WaveCountTrue(Wave, Value) F_Internal_WaveCountTrue(Wave, Value != 0)
 f_u64           F_Internal_WaveCountTrue (f_wave *Wave, f_b32 Condition);
 
+// One bit per lane, set if that lane's Value was true. TODO: > 64 lanes
+#define         F_WaveBallot(Wave, Value) F_Internal_WaveBallot(Wave, Value != 0)
+f_u64           F_Internal_WaveBallot    (f_wave *Wave, f_b32 Condition);
+f_u64           F_CountBits              (f_u64 Bits);
+
 #define F_BroadcastLane(Wave, Variable, SourceLane) \
       do {\
               f_wave *F_W_ = (Wave);\
@@ -343,7 +348,6 @@ f_toolchain F_TOOLCHAIN_CLANG =
 	.OptimiseFlag = F_Str8("-O2"),
 	.IncludeFlag = F_Str8("-I"),
 	.SharedFlag = F_Str8("-dynamiclib"),
-
 };
 
 f_toolchain F_TOOLCHAIN_MSVC =
@@ -573,6 +577,25 @@ f_b32 F_Internal_WaveAnyTrue(f_wave *Wave, f_b32 Condition)
 f_b32 F_Internal_WaveAllTrue(f_wave *Wave, f_b32 Condition)
 {
 	return F_Internal_WaveCountTrue(Wave, Condition) == (f_u64)Wave->LaneCount;
+}
+
+f_u64 F_Internal_WaveBallot(f_wave *Wave, f_b32 Condition)
+{
+	F_Assert(Wave->LaneCount <= 64);
+	if(F_WaveIsFirstLane(Wave)) atomic_store_explicit(Wave->Ballot, 0, memory_order_relaxed);
+	F_WaveBarrier(Wave);
+	if(Condition) atomic_fetch_or_explicit(Wave->Ballot, 1ull << Wave->Lane, memory_order_relaxed);
+	F_WaveBarrier(Wave);
+	f_u64 Result = atomic_load_explicit(Wave->Ballot, memory_order_relaxed);
+	F_WaveBarrier(Wave);
+	return Result;
+}
+
+f_u64 F_CountBits(f_u64 Bits)
+{
+	f_u64 Result = 0;
+	for(; Bits; Bits &= Bits - 1) Result++;
+	return Result;
 }
 
 f_u64 F_WaveExclusivePrefixSum (f_wave *Wave, f_u64 Value)
@@ -876,14 +899,17 @@ f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch)
 {
 	f_str8_array Result = {0};
 	f_s32 FilesChanged = 0;
+	F_BroadcastFirstLane(Wave, Result);
+
 	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
 		if(Watch->TimeStamps[I] != FileInfo.LastModified)
 		{
-			
+			Watch->TimeStamps[I] = FileInfo.LastModified;
 		}
 	}
+
 	// TODO
 }
 
@@ -954,6 +980,8 @@ void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args
 
 f_b32 F_ProcessPoll(f_process *Process)
 {
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
 	Process->StdOutSinceLastPoll.Size = 0;
 
 
@@ -999,6 +1027,9 @@ f_b32 F_ProcessPoll(f_process *Process)
 	close((f_s32)((f_u64)Process->StdOut));
 	Process->StdOut = (void*)(-1);
 	return F_False;
+#else
+#error "Unsupported OS"
+#endif
 }
 
 f_b32 F_ProcessExitedCleanly(f_process *Process)
@@ -1010,6 +1041,8 @@ f_b32 F_ProcessExitedCleanly(f_process *Process)
 	{
 		Result = F_False;
 	}
+#else
+#error "Unsupported OS"
 #endif
 	return Result;
 }
