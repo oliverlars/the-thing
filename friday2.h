@@ -265,7 +265,7 @@ void  F_ProcessWait          (f_process *Process);
 f_b32 F_ProcessExitedCleanly (f_process *Process);
 
 f_watch      F_WatchFilesFromArray (f_wave *Wave, f_str8_array FilePaths);
-f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch);
+f_str8_array F_FilesChangedInWatch (f_memory_arena *Arena, f_wave *Wave, f_watch *Watch);
 f_b32        F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch);
 
 f_build      *F_BuildCreate (f_wave *Wave, f_build_options Options);
@@ -895,22 +895,49 @@ f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
 	return Result;
 }
 
-f_str8_array F_FilesChangedInWatch (f_wave *Wave, f_watch *Watch)
+f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch *Watch)
 {
+	// Sized for the worst case, that every file in the watch changed.
+	// Pushed before the scratch below so this survives if Arena is the lane's arena.
 	f_str8_array Result = {0};
-	f_s32 FilesChanged = 0;
+	if(F_WaveIsFirstLane(Wave))
+	{
+		Result.Items = F_ArenaPushArrayType(Arena, Watch->FileCount, f_str8);
+	}
 	F_BroadcastFirstLane(Wave, Result);
 
+	f_s64 Mark = Wave->Arena->At;
+	f_b32 *FileChanged = F_ArenaPushArrayType(Wave->Arena, Watch->FileCount, f_b32);
+
+	f_u64 FilesChangedThisLane = 0;
 	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
 		if(Watch->TimeStamps[I] != FileInfo.LastModified)
 		{
 			Watch->TimeStamps[I] = FileInfo.LastModified;
+			FileChanged[I] = F_True;
+			FilesChangedThisLane++;
 		}
 	}
 
-	// TODO
+	// Each lane writes its files after every file found by the lanes below it
+	f_u64 WriteIndex = F_WaveExclusivePrefixSum(Wave, FilesChangedThisLane);
+	for F_EachWaveSplit(Wave, I, Watch->FileCount)
+	{
+		if(FileChanged[I])
+		{
+			Result.Items[WriteIndex++] = Watch->Files[I];
+		}
+	}
+
+	// After its own writes the last lane has walked the whole array, so it has the total
+	f_u64 TotalFilesChanged = WriteIndex;
+	F_BroadcastLane(Wave, TotalFilesChanged, Wave->LaneCount - 1);
+	Result.Count = (f_s64)TotalFilesChanged;
+
+	F_ArenaResetTo(Wave->Arena, Mark);
+	return Result;
 }
 
 f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)

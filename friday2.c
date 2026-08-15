@@ -41,6 +41,10 @@ F_LaneEntry(Wave)
 		f_str8_list FileList;
 		F_Str8ListAppend(Wave->GlobalArena, &FileList, F_Str8("friday2.c"));
 		F_Str8ListAppend(Wave->GlobalArena, &FileList, F_Str8("friday2.h"));
+		F_Str8ListAppend(Wave->GlobalArena, &FileList, F_Str8("app.c"));
+		F_Str8ListAppend(Wave->GlobalArena, &FileList, F_Str8("friday.h"));
+		F_Str8ListAppend(Wave->GlobalArena, &FileList, F_Str8("friday.c"));
+		F_Str8ListAppend(Wave->GlobalArena, &FileList, F_Str8("app.h"));
 		FilesToWatch = F_Str8ArrayFromList(Wave->GlobalArena, FileList);
 	}
 
@@ -49,15 +53,26 @@ F_LaneEntry(Wave)
 	f_watch Watch = F_WatchFilesFromArray(Wave, FilesToWatch);
 
 
-	// f_u64 NumberOfChecks = 0;
-	// while(!F_AnyFilesChangedInWatch(Wave, &Watch))
-	// {
-	// 	if(F_WaveIsFirstLane(Wave))
-	// 	{
-	// 		printf("Nothing changed: %llu\n", NumberOfChecks);
-	// 		NumberOfChecks++;
-	// 	}
-	// }
+	f_u64 NumberOfChecks = 0;
+	while(!F_AnyFilesChangedInWatch(Wave, &Watch))
+	{
+
+		f_str8_array FilesChanged = F_FilesChangedInWatch(Wave->Arena, Wave, &Watch);
+
+		if(FilesChanged.Count > 0)
+		{
+			if(F_WaveIsFirstLane(Wave))
+			{
+				for(int I = 0; I < FilesChanged.Count; I++)
+				{
+					printf("File that changed: %.*s\n", F_Expand(FilesChanged.Items[I]));
+				}
+			}
+			break;
+		}
+	}
+
+	F_WaveBarrier(Wave);
 
 	f_process Process = {0};
 	f_str8_list Args = {0};
