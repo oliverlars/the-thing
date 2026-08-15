@@ -143,17 +143,19 @@ typedef struct f_watch
 }
 f_watch;
 
-typedef struct f_build f_build;
 
 typedef struct f_toolchain
 {
 	f_str8 CompilerPath;
+	f_str8 LinkerPath;
 
 	f_str8 IncludeFlag;
-	f_str8 ObjectFlag;
+	f_str8 OutputFlag;
 	f_str8 DebugFlag;
 	f_str8 OptimiseFlag;
 	f_str8 SharedFlag;
+	f_str8 CompileOnlyFlag;
+	f_str8 LinkOnlyFlag;
 }
 f_toolchain;
 
@@ -162,17 +164,46 @@ f_toolchain F_TOOLCHAIN_MSVC;
 f_toolchain F_TOOLCHAIN_GCC;
 f_toolchain F_TOOLCHAIN_CARNAGE;
 
-typedef struct f_build_options
+typedef struct f_compile_options
 {
+	f_str8_list IncludePaths;
+	f_str8 OutputPath;
+	f_str8 OutputName;
+	f_str8 ExtraFlags;
+	f_b32 Optimise;
+	f_b32 Debug;
 }
-f_build_options;
+f_compile_options;
 
-typedef enum f_build_state f_build_state;
+typedef struct f_link_options
+{
+	f_str8 OutputPath;
+	f_str8 OutputName;
+	f_str8 ExtraFlags;
+}
+f_link_options;
+
+typedef struct f_compilation
+{
+	f_process Process;
+
+	f_str8 SourcePath;
+	f_str8 ObjectPath;
+	f_u64 Hash;
+}
+f_compilation;
+
+typedef struct f_link
+{
+	f_process Process;
+	f_str8 OutputPath;
+}
+f_link;
 
 typedef struct f_file_info
 {
 	f_b32 Exists;
-	f_u64 LastModified;
+	f_u64 LastModifiedInMillisecondsSinceEpoch;
 	f_u64 SizeInBytes;
 }
 f_file_info;
@@ -189,10 +220,6 @@ typedef struct f_thread_entry_params
 	f_wave *WaveArgument;
 }
 f_thread_entry_params;
-
-typedef struct f_dir_iter f_dir_iter;
-
-f_memory_arena     *F_ArenaReserve   (f_s64 Bytes);
 
 #define F_ArenaPushType(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type), F_True)
 #define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)), F_True)
@@ -223,6 +250,8 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount);
 f_b32           F_WaveIsFirstLane        (f_wave *Wave);
 f_u64           F_WaveInclusivePrefixSum (f_wave *Wave, f_u64 Value);
 f_u64           F_WaveExclusivePrefixSum (f_wave *Wave, f_u64 Value);
+
+f_u64           F_WaveSum (f_wave *Wave, f_u64 Value);
 
 #define         F_WaveAnyTrue(Wave, Value) F_Internal_WaveAnyTrue(Wave, Value != 0)
 #define         F_WaveAllTrue(Wave, Value) F_Internal_WaveAllTrue(Wave, Value != 0)
@@ -259,18 +288,35 @@ void            F_WaveBarrier (f_wave *Wave);
      Index < __F_Concat(F_ForEnd__, __LINE__); \
      Index += __F_Concat(F_ForStep__, __LINE__))
 
-void  F_ProcessSpawn         (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
-f_b32 F_ProcessPoll          (f_process *Process);
-void  F_ProcessWait          (f_process *Process);
-f_b32 F_ProcessExitedCleanly (f_process *Process);
+void  F_StartProcess   (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
+f_b32 F_PollProcess    (f_process *Process);
+void  F_WaitForProcess (f_process *Process);
 
-f_watch      F_WatchFilesFromArray (f_wave *Wave, f_str8_array FilePaths);
-f_str8_array F_FilesChangedInWatch (f_memory_arena *Arena, f_wave *Wave, f_watch *Watch);
-f_b32        F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch);
+#define F_WaitForMultipleProcesses(...)\
+do\
+{\
+	f_process *__F_Processes[] = { __VA_ARGS__ };\
+	F_Internal_ProcessWaitMany( __F_Processes, F_ArrayCount(__F_Processes));\
+}\
+while(0)
 
-f_build      *F_BuildCreate (f_wave *Wave, f_build_options Options);
-f_b32         F_BuildStart  (f_wave *Wave, f_build *Build);
-f_build_state F_BuildTick   (f_wave *Wave, f_build *Build);
+void F_Internal_WaitForMultipleProcesses (f_process **Processes, f_u64 ProcessCount);
+
+
+#define F_DEFAULT_TIMEOUT_MS (16)
+
+f_watch      F_WatchFilesFromArray    (f_wave *Wave, f_str8_array FilePaths);
+
+f_str8_array F_FilesChangedInWatch    (f_memory_arena *Arena, f_wave *Wave, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
+f_b32        F_AnyFilesChangedInWatch (f_wave *Wave, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
+
+// f_build      *F_BuildCreate (f_wave *Wave, f_build_options Options);
+// f_b32         F_BuildStart  (f_wave *Wave, f_build *Build);
+// f_build_state F_BuildTick   (f_wave *Wave, f_build *Build);
+
+f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain);
+
+f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain);
 
 f_u8 *F_OS_Reserve   (f_s64 NumberOfBytes);
 void  F_OS_Commit    (void *Address, f_s64 BytesToCommit);
@@ -279,13 +325,24 @@ f_s64 F_OS_PageSize  (void);
 
 f_u64 F_OS_TimeStamp ();
 
-f_file_info F_OS_FileInfo(f_memory_arena *Arena, f_str8 Filename);
-f_s64 F_OS_FileRead       (f_str8 Path, f_u8 *Dest, f_s64 Max);
-f_b32 F_OS_FileWriteStr8  (f_str8 Path, f_str8 Data);
-f_b32 F_OS_FileDelete     (f_str8 Path);
-f_b32 F_OS_FileRename     (f_str8 From, f_str8 To);
-f_b32 F_OS_DirCreate      (f_str8 Path);
-f_b32 F_OS_DirNext        (f_dir_iter *Iter, f_str8 *OutName);
+f_file_info F_OS_FileInfo                (f_memory_arena *Arena, f_str8 Filename);
+f_s64 F_OS_ReadFile                      (f_str8 Path, f_u8 *Dest, f_s64 Max);
+f_b32 F_OS_WriteStr8ToFile                 (f_str8 Path, f_str8 Data);
+f_b32 F_OS_DeleteFile                    (f_str8 Path);
+f_b32 F_OS_RenameFile                    (f_str8 From, f_str8 To);
+f_b32 F_OS_MakeDirecotryIfNotAlreadyMade (f_str8 Path);
+
+typedef struct f_internal_directory_options
+{
+	f_b32 ExcludeDirectories;
+	f_b32 PrependPath;
+}
+f_internal_directory_options;
+
+#define F_OS_ListOfEntriesInDirectory(Arena, DirectoryPath, ...) \
+F_OS_Internal_ListOfEntriesInDirectory(Arena, DirectoryPath, (f_internal_directory_options){ __VA_ARGS__ })
+
+f_str8_list F_OS_Internal_ListOfEntriesInDirectory (f_memory_arena *Arena, f_str8 Directory, f_internal_directory_options Options);
 
 f_b32 F_OS_ProcessSpawn  (char **Argv, f_process *Out);
 
@@ -314,19 +371,6 @@ typedef void *(*f_thread_function)(void *);
 
 F_LaneEntry(Wave);
 
-#include <sys/mman.h> // mmap, mprotect
-#include <unistd.h> // getpagesize()
-#include <os/os_sync_wait_on_address.h> // os_sync_wake_on_address(), os_sync_wait_on_address()
-#include <pthread.h> // pthread_create(), pthread_join()
-#include <sys/sysctl.h> // sysctlbyname()
-#include <mach/mach_time.h> // mach_absolute_time()
-#include <fcntl.h> // open()
-#include <sys/stat.h> // stat
-#include <spawn.h> // posix_spawn()
-#include <sys/wait.h> // waitpid()
-
-extern char **environ;
-
 #endif
 
 #endif
@@ -338,16 +382,30 @@ extern char **environ;
 #include <string.h> // memcpy
 #include <assert.h> // assert()
 #include <stdarg.h> // va_list, va_args etc
+#include <sys/mman.h> // mmap, mprotect
+#include <unistd.h> // getpagesize()
+#include <os/os_sync_wait_on_address.h> // os_sync_wake_on_address(), os_sync_wait_on_address()
+#include <pthread.h> // pthread_create(), pthread_join()
+#include <sys/sysctl.h> // sysctlbyname()
+#include <mach/mach_time.h> // mach_absolute_time()
+#include <fcntl.h> // open()
+#include <sys/stat.h> // stat
+#include <spawn.h> // posix_spawn()
+#include <sys/wait.h> // waitpid()
+#include <dirent.h>
+
+extern char **environ;
 
 
 f_toolchain F_TOOLCHAIN_CLANG = 
 {
 	.CompilerPath = F_Str8("clang"),
-	.ObjectFlag = F_Str8("-o"),
+	.OutputFlag = F_Str8("-o"),
 	.DebugFlag = F_Str8("-g"),
 	.OptimiseFlag = F_Str8("-O2"),
 	.IncludeFlag = F_Str8("-I"),
 	.SharedFlag = F_Str8("-dynamiclib"),
+	.CompileOnlyFlag = F_Str8("-c")
 };
 
 f_toolchain F_TOOLCHAIN_MSVC =
@@ -617,6 +675,19 @@ f_u64 F_WaveInclusivePrefixSum (f_wave *Wave, f_u64 Value)
 	return F_WaveExclusivePrefixSum(Wave, Value) + Value;
 }
 
+f_u64 F_WaveSum(f_wave *Wave, f_u64 Value)
+{
+	Wave->BroadcastPointers[Wave->Lane] = &Value;
+	F_WaveBarrier(Wave);
+	f_u64 Sum = 0;
+	for(f_u64 I = 0; I < Wave->LaneCount; I++)
+	{
+		Sum += *(f_u64 *)Wave->BroadcastPointers[I];
+	}
+	F_WaveBarrier(Wave);
+	return Sum;
+}
+
 void F_WaveBarrier(f_wave *Wave)
 {
 	f_s64 Generation = atomic_load_explicit(&Wave->Barrier->Generation, memory_order_relaxed);
@@ -760,6 +831,7 @@ void F_Str8ListAppend(f_memory_arena *Arena, f_str8_list *List, f_str8 StringToA
 f_str8_array F_Str8ArrayFromList(f_memory_arena *Arena, f_str8_list List)
 {
 	f_s64 Count = F_Str8ListCount(List);
+	printf("Count: %lld\n", Count);
 	f_str8_array Result;
 	Result.Items = F_ArenaPushArrayType(Arena, Count, f_str8);
 	Result.Count = Count;
@@ -811,9 +883,9 @@ f_str8 F_Str8JoinList(f_memory_arena *Arena, f_str8_list List, f_str8 Separator)
 	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
 	{
 		F_MemoryCopy(Result.Bytes + Start, Node->String.Bytes, Node->String.Size);
-		Start += Separator.Size;
-		F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
 		Start += Node->String.Size;
+		F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
+		Start += Separator.Size;
 	}
 	return Result;
 }
@@ -858,14 +930,14 @@ f_file_info F_OS_FileInfo(f_memory_arena *Arena, f_str8 Filename)
 #if defined(OS_WINDOWS)
 #error "Implement F_OS_FileInfo for OS_WINDOWS"
 #elif defined(OS_DARWIN)
-	struct stat FileStat;
-	stat(F_CStrFromStr8(Arena, Filename), &FileStat);
+	struct stat FileStat = {0};
+	assert(stat(F_CStrFromStr8(Arena, Filename), &FileStat) == 0);
 	FileInfo.SizeInBytes = FileStat.st_size;
 	FileInfo.Exists = F_True;
 	f_u64 MillisecondsSinceEpoch = 
 		(f_u64)FileStat.st_mtimespec.tv_sec * 1000ull
 		+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
-	FileInfo.LastModified = MillisecondsSinceEpoch;
+	FileInfo.LastModifiedInMillisecondsSinceEpoch = MillisecondsSinceEpoch;
 #else
 #error "Unsupported OS"
 #endif
@@ -887,7 +959,7 @@ f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
 	for F_EachWaveSplit(Wave, I, FilePaths.Count)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, FilePaths.Items[I]);
-		Result.TimeStamps[I] = FileInfo.LastModified;
+		Result.TimeStamps[I] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
 		Result.Files[I] = FilePaths.Items[I];
 		Result.FileCount = FilePaths.Count;
 	}
@@ -895,10 +967,8 @@ f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
 	return Result;
 }
 
-f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch *Watch)
+f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
 {
-	// Sized for the worst case, that every file in the watch changed.
-	// Pushed before the scratch below so this survives if Arena is the lane's arena.
 	f_str8_array Result = {0};
 	if(F_WaveIsFirstLane(Wave))
 	{
@@ -913,15 +983,15 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch 
 	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
-		if(Watch->TimeStamps[I] != FileInfo.LastModified)
+		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > 0) printf("Change time in ms: %llu\n", FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I]);
+		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
-			Watch->TimeStamps[I] = FileInfo.LastModified;
+			Watch->TimeStamps[I] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
 			FileChanged[I] = F_True;
 			FilesChangedThisLane++;
 		}
 	}
 
-	// Each lane writes its files after every file found by the lanes below it
 	f_u64 WriteIndex = F_WaveExclusivePrefixSum(Wave, FilesChangedThisLane);
 	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
@@ -932,22 +1002,21 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch 
 	}
 
 	// After its own writes the last lane has walked the whole array, so it has the total
-	f_u64 TotalFilesChanged = WriteIndex;
-	F_BroadcastLane(Wave, TotalFilesChanged, Wave->LaneCount - 1);
+	f_u64  TotalFilesChanged = F_WaveSum(Wave, WriteIndex);
 	Result.Count = (f_s64)TotalFilesChanged;
 
 	F_ArenaResetTo(Wave->Arena, Mark);
 	return Result;
 }
 
-f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)
+f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_b32 AnyChanged = F_False;
 	f_s64 Mark = Wave->Arena->At;
 	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
-		if(Watch->TimeStamps[I] != FileInfo.LastModified)
+		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
 			AnyChanged = F_True;
 		}
@@ -956,7 +1025,36 @@ f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch)
 	return F_WaveAnyTrue(Wave, AnyChanged);
 }
 
-void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
+f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8 DirectoryPath, f_internal_directory_options Options)
+{
+	f_str8_list Entries = { 0 };
+#if defined(OS_WINDOWS)
+#error "TODO"
+#elif defined(OS_DARWIN)
+	DIR *Directory = opendir(F_CStrFromStr8(Arena, DirectoryPath));
+	struct dirent *Entry;
+	while((Entry = readdir(Directory)))
+	{
+		f_b32 IsActualEntry = Entry->d_name[0] != '.';
+		f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && Entry->d_type == DT_DIR);
+		if(!IsActualEntry) continue;
+		if(ShouldExcludeDirectories) continue;
+		if(Options.PrependPath)
+		{
+			F_Str8ListAppend(Arena, &Entries, F_Str8PushF(Arena, "%.*s/%s", F_Expand(DirectoryPath), Entry->d_name));
+		}
+		else
+		{
+			F_Str8ListAppend(Arena, &Entries, F_Str8PushF(Arena, "%s", Entry->d_name));
+		}
+	}
+#else
+#error "Unsupported OS"
+#endif
+	return Entries;
+}
+
+void  F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 {
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
@@ -981,7 +1079,7 @@ void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args
 
 	posix_spawn_file_actions_t SpawnActions;
 	posix_spawn_file_actions_init(&SpawnActions);
-	posix_spawn_file_actions_adddup2(&SpawnActions, FileDescriptors[0], STDOUT_FILENO);
+	posix_spawn_file_actions_adddup2(&SpawnActions, FileDescriptors[1], STDOUT_FILENO);
 	posix_spawn_file_actions_addclose(&SpawnActions, FileDescriptors[0]);
 	posix_spawn_file_actions_addclose(&SpawnActions, FileDescriptors[1]);
 
@@ -1005,7 +1103,7 @@ void  F_ProcessSpawn(f_memory_arena *Arena, f_process *Process, f_str8_list Args
 
 }
 
-f_b32 F_ProcessPoll(f_process *Process)
+f_b32 F_PollProcess(f_process *Process)
 {
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
@@ -1074,6 +1172,77 @@ f_b32 F_ProcessExitedCleanly(f_process *Process)
 	return Result;
 }
 
-void  F_ProcessWait  (f_process *Process);
+void F_WaitForProcess(f_process *Process)
+{
+	while(F_PollProcess(Process));
+}
+
+void F_Internal_WaitForMultipleProcesses(f_process **Processes, f_u64 ProcessCount)
+{
+	for(int I = 0; I < ProcessCount; I++)
+	{
+		F_WaitForProcess(Processes[I]);
+	}
+}
+
+f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain)
+{
+	f_compilation Compilation = {0};
+	if(CompileOptions.OutputPath.Size > 0)
+	{
+		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s/%.*s.o", F_Expand(CompileOptions.OutputPath), F_Expand(CompileOptions.OutputName));	}
+	else
+	{
+		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s.o", F_Expand(CompileOptions.OutputName));
+	}
+	Compilation.SourcePath = SourceFile;
+	Compilation.Hash = 0;
+
+	f_str8_list Args = {0};
+	F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
+	F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
+	F_Str8ListAppend(Arena, &Args, SourceFile);
+
+	F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPath)));
+
+	for(f_str8_list_node *Node = CompileOptions.IncludePaths.First; Node; Node = Node->Next)
+	{
+		F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(Node->String)));
+		F_Str8ListAppend(Arena, &Args, Node->String);
+	}
+	printf("%.*s\n", F_Expand(F_Str8JoinList(Arena, Args, F_Str8(" "))));
+	F_StartProcess(Arena, &Compilation.Process, Args);
+
+	return Compilation;
+}
+
+f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain)
+{
+	f_link Link = {0};
+	if(LinkOptions.OutputPath.Size > 0)
+	{
+		Link.OutputPath = F_Str8PushF(Arena, "%.*s%.*s/%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(LinkOptions.OutputPath), F_Expand(LinkOptions.OutputName));
+	}
+	else
+	{
+		Link.OutputPath = F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(LinkOptions.OutputName));
+	}
+
+	f_str8_list Args = {0};
+
+	F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
+	
+	for(int I = 0; I < ObjectFiles.Count; I++)
+	{
+		F_Str8ListAppend(Arena, &Args, ObjectFiles.Items[I]);
+	}
+
+	F_Str8ListAppend(Arena, &Args, Link.OutputPath);
+
+	printf("%.*s\n", F_Expand(F_Str8JoinList(Arena, Args, F_Str8(" "))));
+	F_StartProcess(Arena, &Link.Process, Args);
+
+	return Link;
+}
 
 #endif
