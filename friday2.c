@@ -72,9 +72,9 @@ F_LaneEntry(Wave)
 
 	F_WaveBarrier(Wave);
 
-
 	if(F_WaveIsFirstLane(Wave))
 	{
+		f_u64 TimeStart = F_OS_TimeStamp();
 		f_compile_options CompileOptions = {0};
 		CompileOptions.OutputName = F_Str8("friday2isawesome");
 		f_compilation Compilation = F_CompileTU(Wave->GlobalArena, F_Str8("friday2.c"), CompileOptions, F_TOOLCHAIN_CLANG);
@@ -86,8 +86,28 @@ F_LaneEntry(Wave)
 		ObjectFiles.Count = 1;
 		f_link_options LinkOptions = {0};
 		LinkOptions.OutputName = F_Str8("friday2isawesomeexe");
-		f_link Link = F_LinkTUs(Wave->GlobalArena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
+		f_link Link = {0};
+		
+		if(F_ProcessExitedCleanly(&Compilation.Process))
+		{
+			Link = F_LinkTUs(Wave->GlobalArena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
+		}
 
+
+		f_u64 TotalTime = F_OS_TimeStamp() - TimeStart;
+		f_str8_list Stats = {0};
+		F_Str8ListAppend(Wave->GlobalArena, &Stats, F_Str8PushF(Wave->GlobalArena, F_DIM "project:  " F_RESET "friday2"));
+		F_Str8ListAppend(Wave->GlobalArena, &Stats, F_Str8PushF(Wave->GlobalArena, F_DIM "elapsed:  " F_RESET "%.0fms", F_MilliSecondsFromTimeStamp(TotalTime)));
+		F_Str8ListAppend(Wave->GlobalArena, &Stats, F_Str8PushF(Wave->GlobalArena, F_DIM "compiled: " F_RESET "%d TUs", 5));
+
+		if(F_ProcessExitedCleanly(&Link.Process) && F_ProcessExitedCleanly(&Compilation.Process))
+		{
+			F_PassedBanner(Stats);
+		}
+		else
+		{
+			F_FailedBanner(Stats);
+		}
 	}
 	F_WaveBarrier(Wave);
 }
