@@ -1,7 +1,7 @@
 #ifndef FRIDAY_H
 #define FRIDAY_H
 
-#define FRIDAY_VERSION "V"
+#define FRIDAY_VERSION "2"
 
 typedef signed char f_s8;
 typedef signed short int f_s16;
@@ -335,17 +335,38 @@ f_u64 F_OS_TimeStamp (void);
 f_f32 F_MilliSecondsFromTimeStamp (f_u64 TimeStamp);
 f_f32 F_SecondsFromTimeStamp (f_u64 TimeStamp);
 
-typedef struct f_os_error
+typedef enum f_os_error_kind
 {
-	
+	F_OS_ERROR_NONE,
+	F_OS_ERROR_FAILED_TO_OPEN_FILE,
+	F_OS_ERROR_FAILED_TO_WRITE_TO_FILE,
 }
-f_os_error;
+f_os_error_kind;
 
-f_file_info F_OS_FileInfo                      (f_memory_arena *Arena, f_str8 Filename);
-f_str8      F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, f_str8 Path);
-f_b32       F_OS_WriteStr8ToFile               (f_str8 Path, f_str8 StringToWrite);
-f_b32       F_OS_DeleteFile                    (f_str8 Path);
-f_b32       F_OS_RenameFile                    (f_str8 From, f_str8 To);
+typedef struct f_error
+{
+	f_str8_list Messages;
+	f_memory_arena *Arena;
+}
+f_error;
+
+typedef struct f_file
+{
+	f_str8_list Errors;
+	f_u64 Handle;
+}
+f_file;
+
+void F_PushErrorF(f_error *Error, char *Fmt, ...);
+
+f_file F_OS_FileFromFilename (f_memory_arena *Arena, f_str8 Filename);
+
+f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, f_str8 Filename);
+f_file_info F_OS_FileInfoFromFile              (f_file *File);
+f_str8      F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
+f_b32       F_OS_WriteStr8ToFile               (f_file *File, f_str8 StringToWrite);
+f_b32       F_OS_DeleteFile                    (f_file *File);
+f_b32       F_OS_RenameFileTo                  (f_file *From, f_str8 To);
 f_b32       F_OS_MakeDirectoryIfNotAlreadyMade (f_str8 Path);
 
 typedef struct f_internal_directory_options
@@ -978,7 +999,27 @@ f_file_info F_OS_FileInfo(f_memory_arena *Arena, f_str8 Filename)
 	return FileInfo;
 }
 
-f_str8 F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, f_str8 Path)
+f_file_info F_OS_FileInfoFromFile(f_file *File)
+{
+	f_file_info FileInfo = {0};
+#if defined(OS_WINDOWS)
+#error "Implement F_OS_FileInfo for OS_WINDOWS"
+#elif defined(OS_DARWIN)
+	struct stat FileStat = {0};
+	assert(fstat(File->Handle, &FileStat) == 0);
+	FileInfo.SizeInBytes = FileStat.st_size;
+	FileInfo.Exists = F_True;
+	f_u64 MillisecondsSinceEpoch = 
+		(f_u64)FileStat.st_mtimespec.tv_sec * 1000ull
+		+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
+	FileInfo.LastModifiedInMillisecondsSinceEpoch = MillisecondsSinceEpoch;
+#else
+#error "Unsupported OS"
+#endif
+	return FileInfo;
+}
+
+f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 {
 
 }
@@ -992,8 +1033,25 @@ f_b32 F_OS_MakeDirectoryIfNotAlreadyMade(f_str8 Path)
 #endif
 }
 
-
-f_b32 F_OS_WriteStr8ToFile(f_str8 Path, f_str8 StringToWrite);
+f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
+{
+#if defined(OS_WINDOWS)
+#error "TODO"
+#elif defined(OS_DARWIN)
+	f_file File = {0};
+	f_u64 Handle = open(F_CStrFromStr8(Arena, Filename), O_RDWR);
+	if(Handle != 0)
+	{
+	}
+	else
+	{
+		File.Handle = Handle;
+	}
+#else
+#error "Unsupported OS"
+#endif
+	return File;
+}
 
 f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
 {
