@@ -360,8 +360,8 @@ f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, f_str8 Fi
 f_file_info F_OS_FileInfoFromFile              (f_file *File);
 f_str8      F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
 void        F_OS_WriteStr8ToFile               (f_file *File, f_str8 StringToWrite);
-void        F_OS_DeleteFile                    (f_file *File);
-void        F_OS_RenameFileTo                  (f_file *From, f_str8 To);
+f_b32       F_OS_DeleteFile                    (f_memory_arena *Arena, f_str8 PathToFile);
+void        F_OS_RenameFileTo                  (f_memory_arena *Arena, f_str8 From, f_str8 To);
 void        F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, f_str8 Path);
 
 typedef struct f_internal_directory_options
@@ -1009,6 +1009,30 @@ void F_OS_WriteStr8ToFile(f_file *File, f_str8 FileToWrite)
 #else
 #error "Unsupported OS"
 #endif
+}
+
+f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
+{
+	f_b32 Result = F_True;
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	Result = remove(F_CStrFromStr8(Arena, PathToFile)) == 0;
+#else
+#error "Unsupported OS"
+#endif
+	return Result;
+}
+
+f_b32 F_OS_RenameFile(f_memory_arena *Arena, f_str8 From, f_str8 To)
+{
+	f_b32 Result = F_True;
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	Result = rename(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To)) == 0;
+#else
+#error "Unsupported OS"
+#endif
+	return Result;
 }
 
 f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
