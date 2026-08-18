@@ -48,6 +48,9 @@ typedef unsigned long long f_b64;
 #endif
 
 
+#define F_Temporary(Arena) for(f_s64 __Mark__, _I_ = 0; _I_ != 0; (_I_++, F_ArenaResetTo((Arena), __Mark__)))
+
+
 typedef struct f_memory_arena
 {
 	f_u8 *Start;
@@ -343,31 +346,23 @@ typedef enum f_os_error_kind
 }
 f_os_error_kind;
 
-typedef struct f_error
-{
-	f_str8_list Messages;
-	f_memory_arena *Arena;
-}
-f_error;
-
 typedef struct f_file
 {
-	f_str8_list Errors;
+	// In the future this can set more granular error bits
+	f_u64 Errors;
 	f_u64 Handle;
 }
 f_file;
-
-void F_PushErrorF(f_error *Error, char *Fmt, ...);
 
 f_file F_OS_FileFromFilename (f_memory_arena *Arena, f_str8 Filename);
 
 f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, f_str8 Filename);
 f_file_info F_OS_FileInfoFromFile              (f_file *File);
 f_str8      F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
-f_b32       F_OS_WriteStr8ToFile               (f_file *File, f_str8 StringToWrite);
-f_b32       F_OS_DeleteFile                    (f_file *File);
-f_b32       F_OS_RenameFileTo                  (f_file *From, f_str8 To);
-f_b32       F_OS_MakeDirectoryIfNotAlreadyMade (f_str8 Path);
+void        F_OS_WriteStr8ToFile               (f_file *File, f_str8 StringToWrite);
+void        F_OS_DeleteFile                    (f_file *File);
+void        F_OS_RenameFileTo                  (f_file *From, f_str8 To);
+void        F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, f_str8 Path);
 
 typedef struct f_internal_directory_options
 {
@@ -979,7 +974,73 @@ char *F_CStrFromStr8(f_memory_arena *Arena, f_str8 String)
 	return CString;
 }
 
-f_file_info F_OS_FileInfo(f_memory_arena *Arena, f_str8 Filename)
+f_file_info F_OS_FileInfoFromFile(f_file *File)
+{
+	f_file_info FileInfo = {0};
+#if defined(OS_WINDOWS)
+#error "Implement F_OS_FileInfo for OS_WINDOWS"
+#elif defined(OS_DARWIN)
+	struct stat FileStat = {0};
+	f_s32 Status = fstat(File->Handle, &FileStat);
+	if(Status) 
+	{
+		File->Errors = F_True;
+		return (f_file_info){0};
+	}
+	FileInfo.SizeInBytes = FileStat.st_size;
+	FileInfo.Exists = F_True;
+	f_u64 MillisecondsSinceEpoch = 
+		(f_u64)FileStat.st_mtimespec.tv_sec * 1000ull
+		+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
+	FileInfo.LastModifiedInMillisecondsSinceEpoch = MillisecondsSinceEpoch;
+#else
+#error "Unsupported OS"
+#endif
+	return FileInfo;
+}
+
+void F_OS_WriteStr8ToFile(f_file *File, f_str8 FileToWrite)
+{
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	if(File->Errors) return;
+	f_s32 Status = write(File->Handle, FileToWrite.Bytes, FileToWrite.Size);
+	File->Errors = Status != 0;
+#else
+#error "Unsupported OS"
+#endif
+}
+
+f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
+{
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	if(File->Errors) return F_Str8("");
+	f_file_info Info = F_OS_FileInfoFromFile(File);
+	f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
+	f_s32 Status = read(File->Handle, Backing, Info.SizeInBytes);
+	File->Errors = Status != 0;
+	return (f_str8) { Info.SizeInBytes, Backing };
+#else
+#error "Unsupported OS"
+#endif
+}
+
+void F_OS_MakeDirectoryIfNotAlreadyMade(f_memory_arena *Arena, f_str8 Path)
+{
+#if defined(OS_WINDOWS)
+#error "TODO"
+#elif defined(OS_DARWIN)
+	F_Temporary(Arena)
+	{
+		mkdir(F_CStrFromStr8(Arena, Path), 0777);
+	}
+#else
+#error "Unsupported OS"
+#endif
+}
+
+f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 {
 	f_file_info FileInfo = {0};
 #if defined(OS_WINDOWS)
@@ -999,40 +1060,6 @@ f_file_info F_OS_FileInfo(f_memory_arena *Arena, f_str8 Filename)
 	return FileInfo;
 }
 
-f_file_info F_OS_FileInfoFromFile(f_file *File)
-{
-	f_file_info FileInfo = {0};
-#if defined(OS_WINDOWS)
-#error "Implement F_OS_FileInfo for OS_WINDOWS"
-#elif defined(OS_DARWIN)
-	struct stat FileStat = {0};
-	assert(fstat(File->Handle, &FileStat) == 0);
-	FileInfo.SizeInBytes = FileStat.st_size;
-	FileInfo.Exists = F_True;
-	f_u64 MillisecondsSinceEpoch = 
-		(f_u64)FileStat.st_mtimespec.tv_sec * 1000ull
-		+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
-	FileInfo.LastModifiedInMillisecondsSinceEpoch = MillisecondsSinceEpoch;
-#else
-#error "Unsupported OS"
-#endif
-	return FileInfo;
-}
-
-f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
-{
-
-}
-
-f_b32 F_OS_MakeDirectoryIfNotAlreadyMade(f_str8 Path)
-{
-#if defined(OS_WINDOWS)
-#elif defined(OS_DARWIN)
-#else
-#error "Unsupported OS"
-#endif
-}
-
 f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
 {
 #if defined(OS_WINDOWS)
@@ -1042,6 +1069,7 @@ f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
 	f_u64 Handle = open(F_CStrFromStr8(Arena, Filename), O_RDWR);
 	if(Handle != 0)
 	{
+		File.Errors = F_True;
 	}
 	else
 	{
@@ -1067,7 +1095,7 @@ f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
 
 	for F_EachWaveSplit(Wave, I, FilePaths.Count)
 	{
-		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, FilePaths.Items[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave->Arena, FilePaths.Items[I]);
 		Result.TimeStamps[I] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
 		Result.Files[I] = FilePaths.Items[I];
 		Result.FileCount = FilePaths.Count;
@@ -1091,7 +1119,7 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch 
 	f_u64 FilesChangedThisLane = 0;
 	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
-		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave->Arena, Watch->Files[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > 0) printf("Change time in ms: %llu\n", FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
@@ -1141,7 +1169,7 @@ f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch, f_u64 ChangeGranula
 	f_s64 Mark = Wave->Arena->At;
 	for F_EachWaveSplit(Wave, I, Watch->FileCount)
 	{
-		f_file_info FileInfo = F_OS_FileInfo(Wave->Arena, Watch->Files[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave->Arena, Watch->Files[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
 			AnyChanged = F_True;
