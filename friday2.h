@@ -355,6 +355,7 @@ typedef struct f_file
 f_file;
 
 f_file F_OS_FileFromFilename (f_memory_arena *Arena, f_str8 Filename);
+void   F_OS_ReleaseFile      (f_file *File);
 
 f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, f_str8 Filename);
 f_file_info F_OS_FileInfoFromFile              (f_file *File);
@@ -1001,9 +1002,9 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 
 void F_OS_WriteStr8ToFile(f_file *File, f_str8 FileToWrite)
 {
+	if(File->Errors) return;
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
-	if(File->Errors) return;
 	f_s32 Status = write(File->Handle, FileToWrite.Bytes, FileToWrite.Size);
 	File->Errors = Status != 0;
 #else
@@ -1016,7 +1017,7 @@ f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
 	f_b32 Result = F_True;
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
-	Result = remove(F_CStrFromStr8(Arena, PathToFile)) == 0;
+	F_Temporary(Arena) Result = remove(F_CStrFromStr8(Arena, PathToFile)) == 0;
 #else
 #error "Unsupported OS"
 #endif
@@ -1028,7 +1029,7 @@ f_b32 F_OS_RenameFile(f_memory_arena *Arena, f_str8 From, f_str8 To)
 	f_b32 Result = F_True;
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
-	Result = rename(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To)) == 0;
+	F_Temporary(Arena) Result = rename(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To)) == 0;
 #else
 #error "Unsupported OS"
 #endif
@@ -1037,9 +1038,9 @@ f_b32 F_OS_RenameFile(f_memory_arena *Arena, f_str8 From, f_str8 To)
 
 f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 {
+		if(File->Errors) return F_Str8("");
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
-	if(File->Errors) return F_Str8("");
 	f_file_info Info = F_OS_FileInfoFromFile(File);
 	f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
 	f_s32 Status = read(File->Handle, Backing, Info.SizeInBytes);
@@ -1093,16 +1094,26 @@ f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
 	f_u64 Handle = open(F_CStrFromStr8(Arena, Filename), O_RDWR);
 	if(Handle != 0)
 	{
-		File.Errors = F_True;
+		File.Handle = Handle;
 	}
 	else
 	{
-		File.Handle = Handle;
+		File.Errors = F_True;
 	}
 #else
 #error "Unsupported OS"
 #endif
 	return File;
+}
+
+void F_OS_ReleaseFile(f_file *File)
+{
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	close(File->Handle);
+#else
+#error "Unsupported OS"
+#endif
 }
 
 f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
@@ -1363,7 +1374,12 @@ void F_Internal_WaitForMultipleProcesses(f_process **Processes, f_u64 ProcessCou
 	}
 }
 
-f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain)
+f_b32 F_SourceContentsAndIncludesChanged(f_str8 Source, f_u64 Hash)
+{
+	return F_False;
+}
+
+f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_compile_options CompileOptions, f_toolchain Toolchain)
 {
 	f_compilation Compilation = {0};
 	if(CompileOptions.OutputPath.Size > 0)
@@ -1373,13 +1389,19 @@ f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 SourceFile, f_compile_op
 	{
 		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s.o", F_Expand(CompileOptions.OutputName));
 	}
-	Compilation.SourcePath = SourceFile;
-	Compilation.Hash = 0;
+
+	f_file SourceFile = F_OS_FileFromFilename(Arena, PathToSourceFile);
+	f_str8 Source = F_OS_ReadEntireFile(Arena, &SourceFile);
+	F_OS_ReleaseFile(&SourceFile);
+
+
+	Compilation.SourcePath = PathToSourceFile;
+	Compilation.Hash = F_HashStr8(Source);
 
 	f_str8_list Args = {0};
 	F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
 	F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
-	F_Str8ListAppend(Arena, &Args, SourceFile);
+	F_Str8ListAppend(Arena, &Args, PathToSourceFile);
 
 	F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPath)));
 

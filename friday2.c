@@ -49,6 +49,15 @@ F_LaneEntry(Wave)
 
 	f_watch Watch = F_WatchFilesFromArray(Wave, FilesToWatch);
 
+	if(F_WaveIsFirstLane(Wave))
+	{
+		f_file File = F_OS_FileFromFilename(Wave->GlobalArena, Watch.Files[0]);
+		f_str8 F = F_OS_ReadEntireFile(Wave->GlobalArena, &File);
+		f_u64 Hash = F_HashStr8(F);
+		printf("%.*s", F_Expand(F));
+		printf("\n\nHash = %llu\n", Hash);
+	}
+
 
 	// f_u64 NumberOfChecks = 0;
 	// int FilesChangedCount = 0;
