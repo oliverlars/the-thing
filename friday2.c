@@ -119,6 +119,13 @@ F_LaneEntry(Wave)
 		}
 	}
 	F_WaveBarrier(Wave);
+
+	if(F_WaveIsFirstLane(Wave))
+	{
+		f_file File =F_OS_FileFromFilename(Wave->GlobalArena, F_Str8("friday2.c"));
+		f_str8 Source = F_OS_ReadEntireFileWithPadding(Wave->Arena, &File, 5);
+		F_SourceContentsAndIncludesChanged(Wave->GlobalArena, Source, (f_str8_array){0}, 0);
+	}
 }
 
 int main(int ArgCount, char **Arguments)
