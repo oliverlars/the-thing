@@ -51,7 +51,7 @@ typedef unsigned long long f_b64;
 #endif
 
 
-#define F_Temporary(Arena) for(f_s64 __Mark__, _I_ = 0; _I_ != 0; (_I_++, F_ArenaResetTo((Arena), __Mark__)))
+#define F_Temporary(Arena) for(f_s64 __Mark__ = Arena->At, _I_ = 0; !_I_; (_I_++, F_ArenaResetTo((Arena), __Mark__)))
 
 
 typedef struct f_memory_arena
@@ -68,7 +68,7 @@ typedef struct f_str8
 	f_s8 *Bytes;
 }
 f_str8;
-
+ 
 typedef struct f_str8_list_node
 {
 	struct f_str8_list_node *Next;
@@ -330,7 +330,7 @@ f_u64 F_HashBytes(f_u64 HashStart, void *Data, f_u64 NumberOfBytesToHash);
 f_u64 F_HashStr8(f_str8 String);
 
 
-f_b32 F_SourceContentsAndIncludesChanged(f_memory_arena *Arena, f_str8 Source, f_str8_array IncludePaths, f_u64 Hash);
+f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_str8_array IncludePaths);
 f_compilation F_CompileTU (f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain);
 
 f_link F_LinkTUs (f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain);
@@ -365,7 +365,6 @@ void   F_OS_ReleaseFile      (f_file *File);
 f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, f_str8 Filename);
 f_file_info F_OS_FileInfoFromFile              (f_file *File);
 f_str8      F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
-f_str8      F_OS_ReadEntireFileWithPadding     (f_memory_arena *Arena, f_file *File, f_s64 Padding);
 void        F_OS_WriteStr8ToFile               (f_file *File, f_str8 StringToWrite);
 f_b32       F_OS_DeleteFile                    (f_memory_arena *Arena, f_str8 PathToFile);
 void        F_OS_RenameFileTo                  (f_memory_arena *Arena, f_str8 From, f_str8 To);
@@ -1043,7 +1042,7 @@ f_b32 F_OS_RenameFile(f_memory_arena *Arena, f_str8 From, f_str8 To)
 }
 
 
-f_str8 F_OS_ReadEntireFileWithPadding(f_memory_arena *Arena, f_file *File, f_s64 Padding)
+f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 {
 		if(File->Errors) return F_Str8("");
 #if defined(OS_WINDOWS)
@@ -1056,11 +1055,6 @@ f_str8 F_OS_ReadEntireFileWithPadding(f_memory_arena *Arena, f_file *File, f_s64
 #else
 #error "Unsupported OS"
 #endif
-}
-
-f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
-{
-	return F_OS_ReadEntireFileWithPadding(Arena, File, 0);
 }
 
 void F_OS_MakeDirectoryIfNotAlreadyMade(f_memory_arena *Arena, f_str8 Path)
@@ -1084,13 +1078,15 @@ f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 #error "Implement F_OS_FileInfo for OS_WINDOWS"
 #elif defined(OS_DARWIN)
 	struct stat FileStat = {0};
-	assert(stat(F_CStrFromStr8(Arena, Filename), &FileStat) == 0);
-	FileInfo.SizeInBytes = FileStat.st_size;
-	FileInfo.Exists = F_True;
-	f_u64 MillisecondsSinceEpoch = 
-		(f_u64)FileStat.st_mtimespec.tv_sec * 1000ull
-		+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
-	FileInfo.LastModifiedInMillisecondsSinceEpoch = MillisecondsSinceEpoch;
+	if(stat(F_CStrFromStr8(Arena, Filename), &FileStat) == 0)
+	{
+		FileInfo.SizeInBytes = FileStat.st_size;
+		FileInfo.Exists = F_True;
+		f_u64 MillisecondsSinceEpoch = 
+			(f_u64)FileStat.st_mtimespec.tv_sec * 1000ull
+			+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
+		FileInfo.LastModifiedInMillisecondsSinceEpoch = MillisecondsSinceEpoch;
+	}
 #else
 #error "Unsupported OS"
 #endif
@@ -1386,16 +1382,18 @@ void F_Internal_WaitForMultipleProcesses(f_process **Processes, f_u64 ProcessCou
 	}
 }
 
-f_b32 F_SourceContentsAndIncludesChanged(f_memory_arena *Arena, f_str8 Source, f_str8_array IncludePaths, f_u64 Hash)
+f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_str8_array IncludePaths)
 {
 #define CharAt(Index) ((Index) < Source.Size ? Source.Bytes[Index] : 0)
-#define Advance(Index) ((Index += 1), Index < Source.Size)
 #define AdvanceBy(Index, Amount) ((Index += Amount), Index < Source.Size)
+#define Advance(Index) (AdvanceBy(Index, 1))
 #define MatchAt(String, Index) F_Str8Equal((f_str8){ F_Min(String.Size, (Source.Size - (Index))), Source.Bytes + (Index) }, String)
 #define SkipWhiteSpace(Index) for(;CharAt(Index) == ' ' || CharAt(Index) == '\t';Advance(Index))
 #define SkipUntilMatch(Index, Char) for(;CharAt(Index) != 0 && CharAt(Index) != Char; Advance(Index))
 #define SkipUntilMatch2(Index, CharA, CharB) for(;CharAt(Index) != 0 && CharAt(Index) != CharA && CharAt(Index + 1) != CharB; Advance(Index))
 
+	// Hash whilst advancing?
+	f_u64 SourceAndIncludesHash = F_HashStr8(Source);
 	for(f_s64 I = 0; I < Source.Size; I++)
 	{
 		switch(Source.Bytes[I])
@@ -1403,7 +1401,7 @@ f_b32 F_SourceContentsAndIncludesChanged(f_memory_arena *Arena, f_str8 Source, f
 			case '#': {
 				Advance(I);
 				f_str8 Include = F_Str8("include");
-				f_str8 PathName = {0};
+				f_str8 PathToInclude = {0};
 				if(MatchAt(Include, I))
 				{
 					AdvanceBy(I, Include.Size);
@@ -1413,16 +1411,37 @@ f_b32 F_SourceContentsAndIncludesChanged(f_memory_arena *Arena, f_str8 Source, f
 						Advance(I);
 						f_u64 Start = I;
 						SkipUntilMatch(I, '>');
-						PathName = (f_str8){I - Start, Source.Bytes + Start};
+						PathToInclude = (f_str8){I - Start, Source.Bytes + Start};
 					}
 					else if(CharAt(I) == '\"')
 					{
 						Advance(I);
 						f_u64 Start = I;
 						SkipUntilMatch(I, '\"');
-						PathName = (f_str8){I - Start, Source.Bytes + Start};
+						PathToInclude = (f_str8){I - Start, Source.Bytes + Start};
 					}
-					printf("PathName: %.*s\n", F_Expand(PathName));
+				}
+				if(PathToInclude.Size > 0)
+				{
+					f_file_info Info = {0};
+					f_str8 PathToFile = PathToInclude;
+					F_Temporary(Arena)
+					{
+						Info = F_OS_FileInfoFromFilename(Arena, PathToInclude);
+						for(f_s32 IncludePathIndex = 0; !Info.Exists && IncludePathIndex < IncludePaths.Count; IncludePathIndex++)
+						{
+							PathToFile = F_Str8PushF(Arena, "%.*s/%.*s", F_Expand(IncludePaths.Items[I]), F_Expand(PathToInclude));
+							Info = F_OS_FileInfoFromFilename(Arena, PathToInclude);
+						}
+						if(Info.Exists)
+						{
+							f_file File = F_OS_FileFromFilename(Arena, PathToFile);
+							f_str8 IncludeSource = F_OS_ReadEntireFile(Arena, &File);
+							SourceAndIncludesHash = F_HashBytes(SourceAndIncludesHash, IncludeSource.Bytes, IncludeSource.Size);
+							F_HashSourceContentsAndIncludes(Arena, IncludeSource, IncludePaths);
+							F_OS_ReleaseFile(&File);
+						}
+					}
 				}
 			} break;
 			case '/':
@@ -1437,21 +1456,19 @@ f_b32 F_SourceContentsAndIncludesChanged(f_memory_arena *Arena, f_str8 Source, f
 				else if(CharAt(I) == '*')
 				{
 					Advance(I);
-					CommentStack += 1;
-					for(;CommentStack > 0;)
-					{
-						SkipUntilMatch2(I, '*', '/');
-					}
+					SkipUntilMatch2(I, '*', '/');
+					AdvanceBy(I, 2);
 				}
 			} break;
 		}
 	}
-	return F_False;
+	return SourceAndIncludesHash;
 #undef CharAt
 #undef Advance
 #undef AdvanceBy
 #undef SkipWhiteSpace
 #undef SkipUntilMatch
+#undef SkipUntilMatch2
 }
 
 f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_compile_options CompileOptions, f_toolchain Toolchain)
@@ -1466,7 +1483,7 @@ f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_comp
 	}
 
 	f_file SourceFile = F_OS_FileFromFilename(Arena, PathToSourceFile);
-	f_str8 Source = F_OS_ReadEntireFileWithPadding(Arena, &SourceFile, __F_INTERNAL_LOOKAHEAD);
+	f_str8 Source = F_OS_ReadEntireFile(Arena, &SourceFile);
 	F_OS_ReleaseFile(&SourceFile);
 
 

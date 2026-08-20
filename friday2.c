@@ -123,8 +123,10 @@ F_LaneEntry(Wave)
 	if(F_WaveIsFirstLane(Wave))
 	{
 		f_file File =F_OS_FileFromFilename(Wave->GlobalArena, F_Str8("friday2.c"));
-		f_str8 Source = F_OS_ReadEntireFileWithPadding(Wave->Arena, &File, 5);
-		F_SourceContentsAndIncludesChanged(Wave->GlobalArena, Source, (f_str8_array){0}, 0);
+		f_str8 Source = F_OS_ReadEntireFile(Wave->Arena, &File);
+		f_u64 Hash = F_HashSourceContentsAndIncludes(Wave->GlobalArena, Source, (f_str8_array){0});
+		printf("Hash for friday2.c is: %llu", Hash);
+		//8309539540133370345
 	}
 }
 
