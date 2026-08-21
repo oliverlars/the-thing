@@ -3,6 +3,13 @@
 
 #define FRIDAY_VERSION "2"
 
+#if defined(_MSC_VER)
+#define OS_WINDOWS
+#endif
+#if(__APPLE__)
+#define OS_DARWIN
+#endif
+
 typedef signed char f_s8;
 typedef signed short int f_s16;
 typedef signed int f_s32;
@@ -25,10 +32,32 @@ typedef unsigned long long f_b64;
 #define F_GigaBytes(X) (1024ull * F_MegaBytes(X))
 
 #define F_Expand(String) (int)String.Size, (char*)String.Bytes
-#define F_Str8(String) (f_str8) { strlen(String), (f_s8*)String }
+#define F_Str8(String) (f_str8) { sizeof(String"") - 1, (f_s8*)String }
 
 #define F_Min(X, Y) (X < Y ? X : Y)
 #define F_Max(X, Y) (X > Y ? X : Y)
+
+#if defined(OS_WINDOWS)
+#define F_Trap() __debugbreak()
+#else
+#define F_Trap() __builtin_trap()
+#endif
+
+void F_Internal_AssertFailed(char *File, int Line, char *Expression);
+
+#define F_Assert(Condition)\
+do {\
+				if(!(Condition)) {\
+								F_Internal_AssertFailed(__FILE__, __LINE__, #Condition);\
+								F_Trap();\
+				}\
+} while(0)
+
+void *F_MemoryCopy(void *Destination, void *Source, f_u64 BytesToCopy);
+void *F_MemoryZero(void *Destination, f_u64 BytesToZero);
+
+#define F_True  ((f_b32)1)
+#define F_False ((f_b32)0)
 
 #define F_RED     "\x1B[31m"
 #define F_GREEN   "\x1B[32m"
@@ -41,14 +70,6 @@ typedef unsigned long long f_b64;
 #define F_BOLD    "\033[1m"
 #define F_DIM       "\x1b[2m"
 #define F_RESET   "\x1B[0m"
-
-
-#if defined(_MSC_VER)
-#define OS_WINDOWS
-#endif
-#if(__APPLE__)
-#define OS_DARWIN
-#endif
 
 
 #define F_Temporary(Arena) for(f_s64 __Mark__ = Arena->At, _I_ = 0; !_I_; (_I_++, F_ArenaResetTo((Arena), __Mark__)))
@@ -169,7 +190,17 @@ typedef struct f_toolchain
 }
 f_toolchain;
 
-f_toolchain F_TOOLCHAIN_CLANG;
+#define F_TOOLCHAIN_CLANG (f_toolchain)\
+{\
+	.CompilerPath = F_Str8("clang"),\
+	.OutputFlag = F_Str8("-o"),\
+	.DebugFlag = F_Str8("-g"),\
+	.OptimiseFlag = F_Str8("-O2"),\
+	.IncludeFlag = F_Str8("-I"),\
+	.SharedFlag = F_Str8("-dynamiclib"),\
+	.CompileOnlyFlag = F_Str8("-c")\
+}
+
 f_toolchain F_TOOLCHAIN_MSVC;
 f_toolchain F_TOOLCHAIN_GCC;
 f_toolchain F_TOOLCHAIN_CARNAGE;
@@ -343,14 +374,6 @@ f_u64 F_OS_TimeStamp (void);
 f_f32 F_MilliSecondsFromTimeStamp (f_u64 TimeStamp);
 f_f32 F_SecondsFromTimeStamp (f_u64 TimeStamp);
 
-typedef enum f_os_error_kind
-{
-	F_OS_ERROR_NONE,
-	F_OS_ERROR_FAILED_TO_OPEN_FILE,
-	F_OS_ERROR_FAILED_TO_WRITE_TO_FILE,
-}
-f_os_error_kind;
-
 typedef struct f_file
 {
 	// In the future this can set more granular error bits
@@ -390,10 +413,6 @@ void  F_OS_FutexWakeAll (void *Address);
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 
-#if defined(_MSC_VER)
-#endif
-#if(__APPLE__)
-
 #if defined(OS_WINDOWS)
 typedef DWORD (WINAPI *f_thread_function)(void *);
 #define F_Internal_ThreadEntry(Argument) DWORD WINAPI F_Internal_ThreadEntry(f_thread_entry_params *Argument)
@@ -411,15 +430,13 @@ void F_PassedBanner(f_str8_list StatList);
 
 #endif
 
-#endif
-#define FRIDAY_IMPLEMENTATION
 #ifdef FRIDAY_IMPLEMENTATION
 
 #include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
 #include <stdio.h> // printf()
-#include <string.h> // memcpy
 #include <assert.h> // assert()
 #include <stdarg.h> // va_list, va_args etc
+#include <string.h> // memset
 #include <sys/mman.h> // mmap, mprotect
 #include <unistd.h> // getpagesize()
 #include <os/os_sync_wait_on_address.h> // os_sync_wake_on_address(), os_sync_wait_on_address()
@@ -435,32 +452,21 @@ void F_PassedBanner(f_str8_list StatList);
 extern char **environ;
 
 
-f_toolchain F_TOOLCHAIN_CLANG = 
+void *F_MemoryCopy(void *Destination, void *Source, f_u64 BytesToCopy)
 {
-	.CompilerPath = F_Str8("clang"),
-	.OutputFlag = F_Str8("-o"),
-	.DebugFlag = F_Str8("-g"),
-	.OptimiseFlag = F_Str8("-O2"),
-	.IncludeFlag = F_Str8("-I"),
-	.SharedFlag = F_Str8("-dynamiclib"),
-	.CompileOnlyFlag = F_Str8("-c")
-};
+	return memcpy(Destination, Source, BytesToCopy);
+}
 
-f_toolchain F_TOOLCHAIN_MSVC =
+void *F_MemoryZero(void *Destination, f_u64 BytesToZero)
 {
-	// TODO
-};
+	return memset(Destination, 0, BytesToZero);
+}
 
-f_toolchain F_TOOLCHAIN_GCC = 
+void F_Internal_AssertFailed(char *File, int Line, char *Expression)
 {
-	// TODO
-};
-
-f_toolchain F_TOOLCHAIN_CARNAGE =
-{
-	// TODO
-};
-
+	// HACK: switch to user provided logger
+	printf("%s:%d:" F_RED " assert" F_RESET ": %s\n", File, Line, Expression);
+}
 
 #if defined(_MSC_VER)
   #include <intrin.h>
@@ -472,13 +478,6 @@ f_toolchain F_TOOLCHAIN_CARNAGE =
 #else
 #error "Unsupported OS or CPU architecture"
 #endif
-
-#define F_Assert(Condition) assert(Condition)
-#define F_MemoryCopy(Destination, Source, BytesToCopy) memcpy(Destination, Source, BytesToCopy)
-#define F_MemoryZero(Destination, BytesToZero) memset(Destination, 0, BytesToZero)
-
-#define F_True  ((f_b32)1)
-#define F_False ((f_b32)0)
 
 f_u8 *F_OS_Reserve(f_s64 NumberOfBytes)
 {
@@ -1251,7 +1250,7 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 	return Entries;
 }
 
-void  F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
+void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 {
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)

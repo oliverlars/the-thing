@@ -1,3 +1,4 @@
+#define FRIDAY_IMPLEMENTATION
 #include "friday2.h"
 
 #include <stdio.h>
@@ -102,7 +103,6 @@ F_LaneEntry(Wave)
 			Link = F_LinkTUs(Wave->GlobalArena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
 		}
 
-
 		f_u64 TotalTime = F_OS_TimeStamp() - TimeStart;
 		f_str8_list Stats = {0};
 		F_Str8ListAppend(Wave->GlobalArena, &Stats, F_Str8PushF(Wave->GlobalArena, F_DIM "project:  " F_RESET "friday2"));
@@ -126,7 +126,6 @@ F_LaneEntry(Wave)
 		f_str8 Source = F_OS_ReadEntireFile(Wave->Arena, &File);
 		f_u64 Hash = F_HashSourceContentsAndIncludes(Wave->GlobalArena, Source, (f_str8_array){0});
 		printf("Hash for friday2.c is: %llu", Hash);
-		//8309539540133370345
 	}
 }
 
