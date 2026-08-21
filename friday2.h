@@ -190,7 +190,7 @@ typedef struct f_toolchain
 }
 f_toolchain;
 
-#define F_TOOLCHAIN_CLANG (f_toolchain)\
+#define F_TOOLCHAIN_CLANG ((f_toolchain)\
 {\
 	.CompilerPath = F_Str8("clang"),\
 	.OutputFlag = F_Str8("-o"),\
@@ -199,7 +199,7 @@ f_toolchain;
 	.IncludeFlag = F_Str8("-I"),\
 	.SharedFlag = F_Str8("-dynamiclib"),\
 	.CompileOnlyFlag = F_Str8("-c")\
-}
+})
 
 f_toolchain F_TOOLCHAIN_MSVC;
 f_toolchain F_TOOLCHAIN_GCC;
@@ -274,6 +274,14 @@ f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush, f_b32 ShouldZero
 void  F_ArenaReset(f_memory_arena *Arena);
 
 void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark);
+
+#define F_ArrayCount(Array) (sizeof(Array) / sizeof((Array)[0]))
+
+#define F_Str8ArrayFromMany(Arena, ...) \
+F_Internal_Str8ArrayFromMany(Arena, (f_str8){ __VA_ARGS__ }, F_ArrayCount((f_str8){ __VA_ARGS__}))
+
+
+f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count);
 
 f_str8       F_Str8PushF         (f_memory_arena *A, char *Format, ...);
 void         F_Str8ListAppend    (f_memory_arena *A, f_str8_list *L, f_str8 S);
@@ -397,6 +405,7 @@ typedef struct f_internal_directory_options
 {
 	f_b32 ExcludeDirectories;
 	f_b32 PrependPath;
+	f_str8_array FilterByExtension;
 }
 f_internal_directory_options;
 
@@ -429,7 +438,7 @@ void F_FailedBanner(f_str8_list StatList);
 void F_PassedBanner(f_str8_list StatList);
 
 #endif
-
+#define FRIDAY_IMPLEMENTATION
 #ifdef FRIDAY_IMPLEMENTATION
 
 #include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
@@ -867,6 +876,17 @@ f_str8 F_Str8PushF(f_memory_arena *Arena, char *Format, ...)
 	return Result;
 }
 
+f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count)
+{
+	f_str8_array Result = {0};
+	Result.Items = F_ArenaPushArrayType(Arena, Str8Count, f_str8);
+	Result.Count = Str8Count;
+
+	F_MemoryCopy(Result.Items, Str8s, Str8Count);
+
+	return Result;
+}
+
 void F_Str8ListAppend(f_memory_arena *Arena, f_str8_list *List, f_str8 StringToAppend)
 {
 	f_str8_list_node *Next = F_ArenaPushType(Arena, f_str8_list_node);
@@ -1235,6 +1255,22 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 		f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && Entry->d_type == DT_DIR);
 		if(!IsActualEntry) continue;
 		if(ShouldExcludeDirectories) continue;
+
+		f_str8 EntryName = F_Str8PushF(Arena, "%s", Entry->d_name);
+
+		f_b32 MatchFound = F_True;
+		if(Options.FilterByExtension.Count > 0)
+		{
+			MatchFound = F_False;
+			for(int I = 0; I < Options.FilterByExtension.Count; I++)
+			{
+				if(F_Str8EndsWith(Options.FilterByExtension.Items[I], EntryName))
+				{
+					MatchFound = F_True;
+				}
+			}
+		}
+		if(!MatchFound) continue;
 		if(Options.PrependPath)
 		{
 			F_Str8ListAppend(Arena, &Entries, F_Str8PushF(Arena, "%.*s/%s", F_Expand(DirectoryPath), Entry->d_name));
