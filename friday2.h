@@ -210,7 +210,7 @@ typedef struct f_compile_options
 	f_str8_array IncludePaths;
 	f_str8 OutputPath;
 	f_str8 OutputName;
-	f_str8 ExtraFlags;
+	f_str8_array ExtraFlags;
 	f_b32 Optimise;
 	f_b32 Debug;
 }
@@ -220,7 +220,7 @@ typedef struct f_link_options
 {
 	f_str8 OutputPath;
 	f_str8 OutputName;
-	f_str8 ExtraFlags;
+	f_str8_array ExtraFlags;
 }
 f_link_options;
 
@@ -998,7 +998,7 @@ f_b32 F_Str8EndsWith(f_str8 String, f_str8 Suffix)
 	if(String.Size < Suffix.Size) return F_False;
 	f_str8 StringTail = (f_str8)
 	{
-		Suffix.Size, String.Bytes + (Suffix.Size - String.Size)
+		Suffix.Size, String.Bytes + (String.Size - Suffix.Size)
 	};
 	f_b32 Result = F_Str8Equal(StringTail, Suffix);
 	return Result;
@@ -1277,9 +1277,10 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 			MatchFound = F_False;
 			for(int I = 0; I < Options.FilterByExtension.Count; I++)
 			{
-				if(F_Str8EndsWith(Options.FilterByExtension.Items[I], EntryName))
+				if(F_Str8EndsWith(EntryName, Options.FilterByExtension.Items[I]))
 				{
 					MatchFound = F_True;
+					break;
 				}
 			}
 		}
@@ -1525,10 +1526,10 @@ f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_comp
 	f_compilation Compilation = {0};
 	if(CompileOptions.OutputPath.Size > 0)
 	{
-		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s/%.*s.o", F_Expand(CompileOptions.OutputPath), F_Expand(CompileOptions.OutputName));	}
+		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s/%.*s", F_Expand(CompileOptions.OutputPath), F_Expand(CompileOptions.OutputName));	}
 	else
 	{
-		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s.o", F_Expand(CompileOptions.OutputName));
+		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s", F_Expand(CompileOptions.OutputName));
 	}
 
 	f_file SourceFile = F_OS_FileFromFilename(Arena, PathToSourceFile);
@@ -1549,8 +1550,15 @@ f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_comp
 	for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
 	{
 		F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I])));
-		F_Str8ListAppend(Arena, &Args, CompileOptions.IncludePaths.Items[I]);
 	}
+
+	printf("COMPILE COMMAND: ");
+	for(f_str8_list_node *Node = Args.First; Node; Node = Node->Next)
+	{
+		printf("%.*s ", F_Expand(Node->String));
+	}
+	printf("\n");
+
 	F_StartProcess(Arena, &Compilation.Process, Args);
 
 	return Compilation;
@@ -1571,13 +1579,26 @@ f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options
 	f_str8_list Args = {0};
 
 	F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
+
+	for(int I = 0; I < LinkOptions.ExtraFlags.Count; I++)
+	{
+		F_Str8ListAppend(Arena, &Args, LinkOptions.ExtraFlags.Items[I]);
+	}
+
+	F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(LinkOptions.OutputPath), F_Expand(LinkOptions.OutputName)));
 	
 	for(int I = 0; I < ObjectFiles.Count; I++)
 	{
 		F_Str8ListAppend(Arena, &Args, ObjectFiles.Items[I]);
 	}
 
-	F_Str8ListAppend(Arena, &Args, Link.OutputPath);
+
+	printf("LINK COMMAND: ");
+	for(f_str8_list_node *Node = Args.First; Node; Node = Node->Next)
+	{
+		printf("%.*s ", F_Expand(Node->String));
+	}
+	printf("\n");
 
 	F_StartProcess(Arena, &Link.Process, Args);
 
