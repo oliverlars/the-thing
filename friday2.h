@@ -32,7 +32,7 @@ typedef unsigned long long f_b64;
 #define F_GigaBytes(X) (1024ull * F_MegaBytes(X))
 
 #define F_Expand(String) (int)String.Size, (char*)String.Bytes
-#define F_Str8(String) (f_str8) { sizeof(String"") - 1, (f_s8*)String }
+#define F_Str8(String) ((f_str8) { sizeof(String"") - 1, (f_s8*)String })
 
 #define F_Min(X, Y) (X < Y ? X : Y)
 #define F_Max(X, Y) (X > Y ? X : Y)
@@ -207,7 +207,7 @@ f_toolchain F_TOOLCHAIN_CARNAGE;
 
 typedef struct f_compile_options
 {
-	f_str8_list IncludePaths;
+	f_str8_array IncludePaths;
 	f_str8 OutputPath;
 	f_str8 OutputName;
 	f_str8 ExtraFlags;
@@ -278,20 +278,21 @@ void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark);
 #define F_ArrayCount(Array) (sizeof(Array) / sizeof((Array)[0]))
 
 #define F_Str8ArrayFromMany(Arena, ...) \
-F_Internal_Str8ArrayFromMany(Arena, (f_str8){ __VA_ARGS__ }, F_ArrayCount((f_str8){ __VA_ARGS__}))
+F_Internal_Str8ArrayFromMany(Arena, ((f_str8[]){ __VA_ARGS__ }), ((sizeof(f_str8[]){ __VA_ARGS__})/sizeof(f_str8)))
 
 
 f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count);
 
-f_str8       F_Str8PushF         (f_memory_arena *A, char *Format, ...);
-void         F_Str8ListAppend    (f_memory_arena *A, f_str8_list *L, f_str8 S);
-f_str8_array F_Str8ArrayFromList (f_memory_arena *A, f_str8_list L);
-f_str8       F_Str8JoinList      (f_memory_arena *Arena, f_str8_list List,   f_str8 Separator);
-f_str8       F_Str8JoinArray     (f_memory_arena *Arena, f_str8_array Array, f_str8 Separator);
-f_b32        F_Str8Equal         (f_str8 A, f_str8 B);
-f_b32        F_Str8EndsWith      (f_str8 S, f_str8 Suffix);
-f_s64        F_Str8ListCount     (f_str8_list List);
-f_s64        F_Str8ListLength    (f_str8_list List);
+f_str8       F_Str8PushF          (f_memory_arena *Arena, char *Format, ...);
+void         F_Str8ListAppend     (f_memory_arena *Arena, f_str8_list *List, f_str8 Sstring);
+void         F_Str8ListAppendMany (f_memory_arena *Arena, f_str8_list *Head, f_str8_list Tail);
+f_str8_array F_Str8ArrayFromList  (f_memory_arena *Arena, f_str8_list List);
+f_str8       F_Str8JoinList       (f_memory_arena *Arena, f_str8_list List,   f_str8 Separator);
+f_str8       F_Str8JoinArray      (f_memory_arena *Arena, f_str8_array Array, f_str8 Separator);
+f_b32        F_Str8Equal          (f_str8 A, f_str8 B);
+f_b32        F_Str8EndsWith       (f_str8 S, f_str8 Suffix);
+f_s64        F_Str8ListCount      (f_str8_list List);
+f_s64        F_Str8ListLength     (f_str8_list List);
 
 
 void F_DispatchAcrossNLanes(f_s64 LaneCount);
@@ -882,9 +883,22 @@ f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, 
 	Result.Items = F_ArenaPushArrayType(Arena, Str8Count, f_str8);
 	Result.Count = Str8Count;
 
-	F_MemoryCopy(Result.Items, Str8s, Str8Count);
+	for(int I = 0; I < Str8Count; I++)
+	{
+		Result.Items[I].Bytes = F_ArenaPushArrayType(Arena, Str8s[I].Size, f_s8);
+		Result.Items[I].Size = Str8s[I].Size;
+		F_MemoryCopy(Result.Items[I].Bytes, Str8s[I].Bytes, Str8s[I].Size);
+	}
 
 	return Result;
+}
+
+void F_Str8ListAppendMany(f_memory_arena *Arena, f_str8_list *Head, f_str8_list Tail)
+{
+	for(f_str8_list_node *Node = Tail.First; Node; Node = Node->Next)
+	{
+		F_Str8ListAppend(Arena, Head, Node->String);
+	}
 }
 
 void F_Str8ListAppend(f_memory_arena *Arena, f_str8_list *List, f_str8 StringToAppend)
@@ -906,7 +920,6 @@ void F_Str8ListAppend(f_memory_arena *Arena, f_str8_list *List, f_str8 StringToA
 f_str8_array F_Str8ArrayFromList(f_memory_arena *Arena, f_str8_list List)
 {
 	f_s64 Count = F_Str8ListCount(List);
-	printf("Count: %lld\n", Count);
 	f_str8_array Result;
 	Result.Items = F_ArenaPushArrayType(Arena, Count, f_str8);
 	Result.Count = Count;
@@ -1271,6 +1284,7 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 			}
 		}
 		if(!MatchFound) continue;
+		
 		if(Options.PrependPath)
 		{
 			F_Str8ListAppend(Arena, &Entries, F_Str8PushF(Arena, "%.*s/%s", F_Expand(DirectoryPath), Entry->d_name));
@@ -1465,7 +1479,7 @@ f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_st
 						Info = F_OS_FileInfoFromFilename(Arena, PathToInclude);
 						for(f_s32 IncludePathIndex = 0; !Info.Exists && IncludePathIndex < IncludePaths.Count; IncludePathIndex++)
 						{
-							PathToFile = F_Str8PushF(Arena, "%.*s/%.*s", F_Expand(IncludePaths.Items[I]), F_Expand(PathToInclude));
+							PathToFile = F_Str8PushF(Arena, "%.*s/%.*s", F_Expand(IncludePaths.Items[IncludePathIndex]), F_Expand(PathToInclude));
 							Info = F_OS_FileInfoFromFilename(Arena, PathToInclude);
 						}
 						if(Info.Exists)
@@ -1532,10 +1546,10 @@ f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_comp
 
 	F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPath)));
 
-	for(f_str8_list_node *Node = CompileOptions.IncludePaths.First; Node; Node = Node->Next)
+	for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
 	{
-		F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(Node->String)));
-		F_Str8ListAppend(Arena, &Args, Node->String);
+		F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I])));
+		F_Str8ListAppend(Arena, &Args, CompileOptions.IncludePaths.Items[I]);
 	}
 	F_StartProcess(Arena, &Compilation.Process, Args);
 
