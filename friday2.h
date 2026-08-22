@@ -435,8 +435,8 @@ typedef void *(*f_thread_function)(void *);
 
 F_LaneEntry(Wave);
 
-void F_FailedBanner(f_str8_list StatList);
-void F_PassedBanner(f_str8_list StatList);
+void F_FailedBanner(f_str8_array Stats);
+void F_PassedBanner(f_str8_array Stats);
 
 #endif
 #define FRIDAY_IMPLEMENTATION
@@ -1621,33 +1621,29 @@ static char *__PassedASCII[] = {
 "  \\/_/     \\/_/\\/_/   \\/_____/   \\/_____/   \\/_____/   \\/____/",
 };
 
-void F_FailedBanner(f_str8_list StatList)
+void F_FailedBanner(f_str8_array Stats)
 {
-	f_str8_list_node *Node = StatList.First;
 	for(int I = 0; I < 5; I++)
 	{
 		f_str8 Stat = F_Str8("");
-		if(Node)
+		if(I < Stats.Count)
 		{
-			Stat = Node->String;
+			Stat = Stats.Items[I];
 		}
 		printf(F_RED "%-64s" F_RESET F_DIM "\u2502" F_RESET "  %.*s\n", __FailedASCII[I],  F_Expand(Stat));
-		if(Node) Node = Node->Next;
 	}
 }
 
-void F_PassedBanner(f_str8_list StatList)
+void F_PassedBanner(f_str8_array Stats)
 {
-		f_str8_list_node *Node = StatList.First;
 	for(int I = 0; I < 5; I++)
 	{
 		f_str8 Stat = F_Str8("");
-		if(Node)
+		if(I < Stats.Count)
 		{
-			Stat = Node->String;
+			Stat = Stats.Items[I];
 		}
 		printf(F_GREEN "%-64s" F_RESET F_DIM "\u2502" F_RESET "  %.*s\n", __PassedASCII[I],  F_Expand(Stat));
-		if(Node) Node = Node->Next;
 	}
 }
 

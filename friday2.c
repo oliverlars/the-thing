@@ -72,7 +72,7 @@ F_LaneEntry(Wave)
 
 
 
-	f_b32 ShouldLink = F_True;
+	f_b32 CompiledSuccessfully = F_True;
 	f_str8_array ObjectFiles = {0};
 	ObjectFiles.Count = SourceFiles.Count;
 	if(F_WaveIsFirstLane(Wave))
@@ -81,6 +81,9 @@ F_LaneEntry(Wave)
 	}
 	F_BroadcastFirstLane(Wave, ObjectFiles);
 
+
+	f_u64 CompileStartTime = F_OS_TimeStamp();
+	f_u64 NumberOfTUsRecompiled = 0;
 	for F_EachWaveSplit(Wave, Index, SourceFiles.Count)
 	{
 		printf("filename %.*s\n", F_Expand(SourceFiles.Items[Index]));
@@ -91,36 +94,48 @@ F_LaneEntry(Wave)
 		f_str8 ObjectFile = F_Str8PushF(Wave->Arena, "%llu.o", Hash);
 		ObjectFiles.Items[Index] = F_Str8PushF(Wave->Arena, "%.*s/%.*s", F_Expand(CompileOptions.OutputPath), F_Expand(ObjectFile));
 		printf("FILE:HASH | %.*s:%llu\n", F_Expand(SourceFiles.Items[Index]), Hash);
-		//if(!F_OS_FileInfoFromFilename(Wave->Arena, ObjectFiles.Items[Index]).Exists)
+		if(!F_OS_FileInfoFromFilename(Wave->Arena, ObjectFiles.Items[Index]).Exists)
 		{
 			CompileOptions.OutputName = ObjectFile;
 			f_compilation Compilation = F_CompileTU(Wave->Arena, SourceFiles.Items[Index], CompileOptions, F_TOOLCHAIN_CLANG);
 			F_WaitForProcess(&Compilation.Process);
-			ShouldLink &= F_ProcessExitedCleanly(&Compilation.Process);
+			CompiledSuccessfully &= F_ProcessExitedCleanly(&Compilation.Process);
+			NumberOfTUsRecompiled++;
 		}
 	}
 
-	ShouldLink = F_WaveAllTrue(Wave, ShouldLink);
+	NumberOfTUsRecompiled = F_WaveSum(Wave, NumberOfTUsRecompiled);
 
+	CompiledSuccessfully = F_WaveAllTrue(Wave, CompiledSuccessfully);
+	f_u64 CompileTotalTime = F_OS_TimeStamp() - CompileStartTime;
+
+	f_b32 FinishedSuccessfully = CompiledSuccessfully;
 	if(F_WaveIsFirstLane(Wave))
 	{
-		if(ShouldLink)
+		f_u64 LinkStartTime = F_OS_TimeStamp();
+		if(CompiledSuccessfully)
 		{
 			f_link Link = F_LinkTUs(Wave->GlobalArena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
 			F_WaitForProcess(&Link.Process);
+			FinishedSuccessfully = F_ProcessExitedCleanly(&Link.Process);
+		}
+		f_str8_array StatList = F_Str8ArrayFromMany(
+			Wave->GlobalArena,
+			F_Str8PushF(Wave->GlobalArena, "compiled %d TUs in %.2fms",  NumberOfTUsRecompiled, F_MilliSecondsFromTimeStamp(CompileTotalTime)),
+			F_Str8PushF(Wave->GlobalArena, "linked in %.2fms",  F_MilliSecondsFromTimeStamp(F_OS_TimeStamp() - LinkStartTime))
+		);
+		if(FinishedSuccessfully)
+		{
+			F_PassedBanner(StatList);
+		}
+		else
+		{
+			F_FailedBanner(StatList);
 		}
 	}
 }
 
 int main(int ArgCount, char **Arguments)
 {
-	//F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs());
-	F_DispatchAcrossNLanes(1);
+	F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs());
 }
-
-/*
-
-clang  -framework Cocoa -framework Metal -framework QuartzCore  -o build/the-thing build/9540935867446464531.o build/43993904911722607.o build/5609599489510449241.o build/5212239408225621290.o build/7136770315221062523.o build/6370771780646960387.o build/1119850315201764335.o build/14831241361877324663.o build/15492044181874365471.o build/1344928503081225400.o build/8005342778149996573.o build/2487373655189650430.o 
-
-clang  -framework Cocoa -framework Metal -framework QuartzCore  -o build/the-thing2 build/11992984539254367672.o build/17559955129005566269.o build/11138700977964269690.o build/4556935579390488136.o build/16909743166938913828.o build/9007981636814547503.o build/15765771869898447467.o build/12550837958979098442.o build/18281941688440889440.o build/1728623339491047175.o build/5834215734801951731.o build/10680307360561197557.o build/3204253810457534359.o
-*/
