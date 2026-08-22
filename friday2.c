@@ -86,14 +86,9 @@ F_LaneEntry(Wave)
 	f_u64 NumberOfTUsRecompiled = 0;
 	for F_EachWaveSplit(Wave, Index, SourceFiles.Count)
 	{
-		printf("filename %.*s\n", F_Expand(SourceFiles.Items[Index]));
-		f_file File = F_OS_FileFromFilename(Wave->Arena, SourceFiles.Items[Index]);
-		f_str8 Source = F_OS_ReadEntireFile(Wave->Arena, &File);
-		F_OS_ReleaseFile(&File);
-		f_u64 Hash = F_HashSourceContentsAndIncludes(Wave->Arena, Source, IncludePaths);
+		f_u64 Hash = F_HashSourceAndIncludes(Wave->Arena, SourceFiles.Items[Index], IncludePaths);
 		f_str8 ObjectFile = F_Str8PushF(Wave->Arena, "%llu.o", Hash);
 		ObjectFiles.Items[Index] = F_Str8PushF(Wave->Arena, "%.*s/%.*s", F_Expand(CompileOptions.OutputPath), F_Expand(ObjectFile));
-		printf("FILE:HASH | %.*s:%llu\n", F_Expand(SourceFiles.Items[Index]), Hash);
 		if(!F_OS_FileInfoFromFilename(Wave->Arena, ObjectFiles.Items[Index]).Exists)
 		{
 			CompileOptions.OutputName = ObjectFile;

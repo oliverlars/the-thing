@@ -370,7 +370,7 @@ f_u64 F_HashBytes(f_u64 HashStart, void *Data, f_u64 NumberOfBytesToHash);
 f_u64 F_HashStr8(f_str8 String);
 
 
-f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_str8_array IncludePaths);
+f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths);
 f_compilation F_CompileTU (f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain);
 
 f_link F_LinkTUs (f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain);
@@ -397,6 +397,7 @@ void   F_OS_ReleaseFile      (f_file *File);
 f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, f_str8 Filename);
 f_file_info F_OS_FileInfoFromFile              (f_file *File);
 f_str8      F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
+f_str8      F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, f_str8 PathToFile);
 void        F_OS_WriteStr8ToFile               (f_file *File, f_str8 StringToWrite);
 f_b32       F_OS_DeleteFile                    (f_memory_arena *Arena, f_str8 PathToFile);
 void        F_OS_RenameFileTo                  (f_memory_arena *Arena, f_str8 From, f_str8 To);
@@ -1089,6 +1090,14 @@ f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 #endif
 }
 
+f_str8 F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, f_str8 PathToFile)
+{
+	f_file File = F_OS_FileFromFilename(Arena, PathToFile);
+	f_str8 Contents = F_OS_ReadEntireFile(Arena, &File);
+	F_OS_ReleaseFile(&File);
+	return Contents;
+}
+
 void F_OS_MakeDirectoryIfNotAlreadyMade(f_memory_arena *Arena, f_str8 Path)
 {
 #if defined(OS_WINDOWS)
@@ -1432,7 +1441,8 @@ void F_Internal_WaitForMultipleProcesses(f_process **Processes, f_u64 ProcessCou
 	}
 }
 
-f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_str8_array IncludePaths)
+
+f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list IncludesSeenAlready)
 {
 #define CharAt(Index) ((Index) < Source.Size ? Source.Bytes[Index] : 0)
 #define AdvanceBy(Index, Amount) ((Index += Amount), Index < Source.Size)
@@ -1442,6 +1452,9 @@ f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_st
 #define SkipUntilMatch(Index, Char) for(;CharAt(Index) != 0 && CharAt(Index) != Char; Advance(Index))
 #define SkipUntilMatch2(Index, CharA, CharB) for(;CharAt(Index) != 0 && CharAt(Index) != CharA && CharAt(Index + 1) != CharB; Advance(Index))
 
+	printf("Hashing: %.*s\n", F_Expand(PathToSource));
+
+	f_str8 Source = F_OS_ReadEntireFileFromPath(Arena, PathToSource);
 	// Hash whilst advancing?
 	f_u64 SourceAndIncludesHash = F_HashStr8(Source);
 	for(f_s64 I = 0; I < Source.Size; I++)
@@ -1474,23 +1487,29 @@ f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_st
 				if(PathToInclude.Size > 0)
 				{
 					f_file_info Info = {0};
-					f_str8 PathToFile = PathToInclude;
-					F_Temporary(Arena)
+					Info = F_OS_FileInfoFromFilename(Arena, PathToInclude);
+					
+					for(f_s32 IncludePathIndex = 0; IncludePathIndex < IncludePaths.Count; IncludePathIndex++)
 					{
-						Info = F_OS_FileInfoFromFilename(Arena, PathToInclude);
-						for(f_s32 IncludePathIndex = 0; !Info.Exists && IncludePathIndex < IncludePaths.Count; IncludePathIndex++)
-						{
-							PathToFile = F_Str8PushF(Arena, "%.*s/%.*s", F_Expand(IncludePaths.Items[IncludePathIndex]), F_Expand(PathToInclude));
-							Info = F_OS_FileInfoFromFilename(Arena, PathToInclude);
-						}
+						f_str8 PrependedPathToInclude = F_Str8PushF(Arena, "%.*s/%.*s", F_Expand(IncludePaths.Items[IncludePathIndex]), F_Expand(PathToInclude));
+						Info = F_OS_FileInfoFromFilename(Arena, PrependedPathToInclude);
 						if(Info.Exists)
 						{
-							f_file File = F_OS_FileFromFilename(Arena, PathToFile);
-							f_str8 IncludeSource = F_OS_ReadEntireFile(Arena, &File);
-							SourceAndIncludesHash = F_HashBytes(SourceAndIncludesHash, IncludeSource.Bytes, IncludeSource.Size);
-							F_HashSourceContentsAndIncludes(Arena, IncludeSource, IncludePaths);
-							F_OS_ReleaseFile(&File);
+							PathToInclude = PrependedPathToInclude;
+							break;
 						}
+					}
+					f_b32 IncludeSeenAlready = F_False;
+					for(f_str8_list_node *Node = IncludesSeenAlready.First; Node; Node = Node->Next)
+					{
+						if(F_Str8Equal(Node->String, PathToInclude)) IncludeSeenAlready = F_True;
+					}
+					if(Info.Exists && !IncludeSeenAlready)
+					{
+						// This isn't perfect but it's actually find since even though the order of hashing with xor doesn't now matter,
+						// it's never an issue with includes.
+						F_Str8ListAppend(Arena, &IncludesSeenAlready, PathToInclude);
+						SourceAndIncludesHash ^= __F_Internal_HashSourceAndIncludes(Arena, PathToInclude, IncludePaths, IncludesSeenAlready);
 					}
 				}
 			} break;
@@ -1501,7 +1520,7 @@ f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_st
 				if(CharAt(I) == '/')
 				{
 					Advance(I);
-					SkipWhiteSpace(I);
+					SkipUntilMatch(I, '\n');
 				}
 				else if(CharAt(I) == '*')
 				{
@@ -1519,6 +1538,12 @@ f_u64 F_HashSourceContentsAndIncludes(f_memory_arena *Arena, f_str8 Source, f_st
 #undef SkipWhiteSpace
 #undef SkipUntilMatch
 #undef SkipUntilMatch2
+}
+
+f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths)
+{
+	f_str8_list IncludesSeenAlready = {0};
+	return __F_Internal_HashSourceAndIncludes(Arena, PathToSource, IncludePaths, IncludesSeenAlready);
 }
 
 f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_compile_options CompileOptions, f_toolchain Toolchain)
@@ -1591,14 +1616,6 @@ f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options
 	{
 		F_Str8ListAppend(Arena, &Args, ObjectFiles.Items[I]);
 	}
-
-
-	printf("LINK COMMAND: ");
-	for(f_str8_list_node *Node = Args.First; Node; Node = Node->Next)
-	{
-		printf("%.*s ", F_Expand(Node->String));
-	}
-	printf("\n");
 
 	F_StartProcess(Arena, &Link.Process, Args);
 
