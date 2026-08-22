@@ -184,7 +184,8 @@ typedef struct f_toolchain
 	f_str8 OutputFlag;
 	f_str8 DebugFlag;
 	f_str8 OptimiseFlag;
-	f_str8 SharedFlag;
+	f_str8 DynamicFlag;
+	f_str8 StaticFlag;
 	f_str8 CompileOnlyFlag;
 	f_str8 LinkOnlyFlag;
 }
@@ -197,7 +198,8 @@ f_toolchain;
 	.DebugFlag = F_Str8("-g"),\
 	.OptimiseFlag = F_Str8("-O2"),\
 	.IncludeFlag = F_Str8("-I"),\
-	.SharedFlag = F_Str8("-dynamiclib"),\
+	.DynamicFlag = F_Str8("-dynamiclib"),\
+	.StaticFlag = F_Str8("-emit-static-lib"),\
 	.CompileOnlyFlag = F_Str8("-c")\
 })
 
@@ -216,11 +218,20 @@ typedef struct f_compile_options
 }
 f_compile_options;
 
+typedef enum f_output_kind
+{
+	F_OUTPUT_EXECUTABLE,
+	F_OUTPUT_DYNAMIC,
+	F_OUTPUT_STATIC,
+}
+f_output_kind;
+
 typedef struct f_link_options
 {
 	f_str8 OutputPath;
 	f_str8 OutputName;
 	f_str8_array ExtraFlags;
+	f_output_kind OutputKind;
 }
 f_link_options;
 
@@ -830,8 +841,10 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount)
 		
 		Params[I].WaveArgument = Waves + I;
 		Params[I].LaneEntry = F_LaneEntry;
-		F_OS_ThreadStart(Threads + I, (f_thread_function)F_Internal_ThreadEntry, Params + I);
+		if(I >= 1) F_OS_ThreadStart(Threads + I, (f_thread_function)F_Internal_ThreadEntry, Params + I);
 	}
+
+	Params[0].LaneEntry(Params[0].WaveArgument);
 
 	F_OS_WaitForThreads(Threads, LaneCount);
 }
@@ -1452,8 +1465,6 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSou
 #define SkipUntilMatch(Index, Char) for(;CharAt(Index) != 0 && CharAt(Index) != Char; Advance(Index))
 #define SkipUntilMatch2(Index, CharA, CharB) for(;CharAt(Index) != 0 && CharAt(Index) != CharA && CharAt(Index + 1) != CharB; Advance(Index))
 
-	printf("Hashing: %.*s\n", F_Expand(PathToSource));
-
 	f_str8 Source = F_OS_ReadEntireFileFromPath(Arena, PathToSource);
 	// Hash whilst advancing?
 	f_u64 SourceAndIncludesHash = F_HashStr8(Source);
@@ -1608,6 +1619,15 @@ f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options
 	for(int I = 0; I < LinkOptions.ExtraFlags.Count; I++)
 	{
 		F_Str8ListAppend(Arena, &Args, LinkOptions.ExtraFlags.Items[I]);
+	}
+
+	if(LinkOptions.OutputKind == F_OUTPUT_DYNAMIC)
+	{
+		F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s", F_Expand(Toolchain.DynamicFlag)));
+	}
+	else if(LinkOptions.OutputKind == F_OUTPUT_STATIC)
+	{
+		F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s", F_Expand(Toolchain.StaticFlag)));
 	}
 
 	F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(LinkOptions.OutputPath), F_Expand(LinkOptions.OutputName)));
