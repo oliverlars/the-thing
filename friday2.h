@@ -294,6 +294,9 @@ F_Internal_Str8ArrayFromMany(Arena, ((f_str8[]){ __VA_ARGS__ }), ((sizeof(f_str8
 
 f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count);
 
+#define F_Str8ListAppendF(Arena, List, ...) \
+F_Str8ListAppend(Arena, List, F_Str8PushF(Arena, __VA_ARGS__))
+
 f_str8       F_Str8PushF          (f_memory_arena *Arena, char *Format, ...);
 void         F_Str8ListAppend     (f_memory_arena *Arena, f_str8_list *List, f_str8 Sstring);
 void         F_Str8ListAppendMany (f_memory_arena *Arena, f_str8_list *Head, f_str8_list Tail);
@@ -433,6 +436,12 @@ void  F_OS_WaitForThreads      (f_thread *Thread, f_s32 NumberOfThreadsToWaitFor
 void  F_OS_FutexWait    (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll (void *Address);
 
+void F_Print(f_str8 String);
+#define F_PrintF(Arena, ...) \
+F_Print(F_Str8PushF(Arena, __VA_ARGS__))
+
+f_file F_OS_StandardOut(void);
+
 f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 
 #if defined(OS_WINDOWS)
@@ -447,8 +456,29 @@ typedef void *(*f_thread_function)(void *);
 
 F_LaneEntry(Wave);
 
-void F_FailedBanner(f_str8_array Stats);
-void F_PassedBanner(f_str8_array Stats);
+
+typedef enum f_build_status
+{
+	F_BUILD_COMPILING,
+	F_BUILD_COMPILE_FAILED,
+	F_BUILD_LINKING,
+	F_BUILD_SUCCEEDED,
+	F_BUILD_FAILED,
+}
+f_build_status;
+
+typedef struct f_build_report
+{
+	f_compile_options CompileOptions;
+	f_link_options    LinkOptions;
+	f_toolchain       Toolchain;
+	f_u64             TotalTUsToCompile;
+	f_u64             TUsCompiledSoFar;
+	f_build_status    Status;
+}
+f_build_report;
+
+void F_Report(f_memory_arena *Arena, f_build_report Report);
 
 #endif
 #define FRIDAY_IMPLEMENTATION
@@ -550,6 +580,25 @@ f_f32 F_MilliSecondsFromTimeStamp(f_u64 TimeStamp)
 f_f32 F_SecondsFromTimeStamp(f_u64 TimeStamp)
 {
 	return F_MilliSecondsFromTimeStamp(TimeStamp) * 1000.0;
+}
+
+f_file F_OS_StandardOut(void)
+{
+	f_file File = {0};
+#if defined(OS_WINDOWS)
+#error "TODO: implement on Windows"
+#elif defined(OS_DARWIN)
+	File.Handle = STDOUT_FILENO;
+#else
+#error "Unsupported OS"
+#endif
+	return File;
+}
+
+void F_Print(f_str8 String)
+{
+	f_file StdOut = F_OS_StandardOut();
+	F_OS_WriteStr8ToFile(&StdOut, String);
 }
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs(void)
@@ -962,9 +1011,12 @@ f_str8 F_Str8JoinArray(f_memory_arena *Arena, f_str8_array Array, f_str8 Separat
 	for(f_s64 I = 0; I < Array.Count; I++)
 	{
 		F_MemoryCopy(Result.Bytes + Start, Array.Items[I].Bytes, Array.Items[I].Size);
-		Start += Separator.Size;
-		F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
 		Start += Array.Items[I].Size;
+		if(I < Array.Count - 1)
+		{
+			F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
+			Start += Separator.Size;
+		}
 	}
 	return Result;
 }
@@ -975,7 +1027,7 @@ f_str8 F_Str8JoinList(f_memory_arena *Arena, f_str8_list List, f_str8 Separator)
 	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
 	{
 		TotalStringSize += Node->String.Size;
-		if(Node->Next != List.Last) TotalStringSize += Separator.Size;
+		if(Node != List.Last) TotalStringSize += Separator.Size;
 	}
 	f_str8 Result;
 	Result.Bytes = F_ArenaPushArrayType(Arena, TotalStringSize, f_s8);
@@ -986,8 +1038,11 @@ f_str8 F_Str8JoinList(f_memory_arena *Arena, f_str8_list List, f_str8 Separator)
 	{
 		F_MemoryCopy(Result.Bytes + Start, Node->String.Bytes, Node->String.Size);
 		Start += Node->String.Size;
-		F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
-		Start += Separator.Size;
+		if(Node != List.Last)
+		{
+			F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
+			Start += Separator.Size;
+		}
 	}
 	return Result;
 }
@@ -1057,7 +1112,7 @@ void F_OS_WriteStr8ToFile(f_file *File, f_str8 FileToWrite)
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
 	f_s32 Status = write(File->Handle, FileToWrite.Bytes, FileToWrite.Size);
-	File->Errors = Status != 0;
+	File->Errors = Status < 0;
 #else
 #error "Unsupported OS"
 #endif
@@ -1096,7 +1151,7 @@ f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 	f_file_info Info = F_OS_FileInfoFromFile(File);
 	f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
 	f_s32 Status = read(File->Handle, Backing, Info.SizeInBytes);
-	File->Errors = Status != 0;
+	File->Errors = Status < 0;
 	return (f_str8) { Info.SizeInBytes, Backing };
 #else
 #error "Unsupported OS"
@@ -1310,11 +1365,11 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 		
 		if(Options.PrependPath)
 		{
-			F_Str8ListAppend(Arena, &Entries, F_Str8PushF(Arena, "%.*s/%s", F_Expand(DirectoryPath), Entry->d_name));
+			F_Str8ListAppendF(Arena, &Entries, "%.*s/%s", F_Expand(DirectoryPath), Entry->d_name);
 		}
 		else
 		{
-			F_Str8ListAppend(Arena, &Entries, F_Str8PushF(Arena, "%s", Entry->d_name));
+			F_Str8ListAppendF(Arena, &Entries, "%s", Entry->d_name);
 		}
 	}
 #else
@@ -1349,6 +1404,7 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 	posix_spawn_file_actions_t SpawnActions;
 	posix_spawn_file_actions_init(&SpawnActions);
 	posix_spawn_file_actions_adddup2(&SpawnActions, FileDescriptors[1], STDOUT_FILENO);
+	posix_spawn_file_actions_adddup2(&SpawnActions, FileDescriptors[1], STDERR_FILENO);
 	posix_spawn_file_actions_addclose(&SpawnActions, FileDescriptors[0]);
 	posix_spawn_file_actions_addclose(&SpawnActions, FileDescriptors[1]);
 
@@ -1581,19 +1637,12 @@ f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_comp
 	F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
 	F_Str8ListAppend(Arena, &Args, PathToSourceFile);
 
-	F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPath)));
+	F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPath));
 
 	for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
 	{
-		F_Str8ListAppend(Arena, &Args, F_Str8PushF(Arena, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I])));
+		F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
 	}
-
-	printf("COMPILE COMMAND: ");
-	for(f_str8_list_node *Node = Args.First; Node; Node = Node->Next)
-	{
-		printf("%.*s ", F_Expand(Node->String));
-	}
-	printf("\n");
 
 	F_StartProcess(Arena, &Compilation.Process, Args);
 
