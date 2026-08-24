@@ -3,11 +3,15 @@
 
 #define FRIDAY_VERSION "2"
 
-#if defined(_MSC_VER)
+#if defined(_WIN32)
 #define OS_WINDOWS
 #endif
-#if(__APPLE__)
+#if defined(__APPLE__)
 #define OS_DARWIN
+#endif
+
+#if !defined(OS_WINDOWS)
+#error "WTF"
 #endif
 
 typedef signed char f_s8;
@@ -445,8 +449,8 @@ f_file F_OS_StandardOut(void);
 f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 
 #if defined(OS_WINDOWS)
-typedef DWORD (WINAPI *f_thread_function)(void *);
-#define F_Internal_ThreadEntry(Argument) DWORD WINAPI F_Internal_ThreadEntry(f_thread_entry_params *Argument)
+typedef unsigned long (__stdcall *f_thread_function)(void *);
+#define F_Internal_ThreadEntry(Argument) unsigned long __stdcall F_Internal_ThreadEntry(f_thread_entry_params *Argument)
 #elif defined(OS_DARWIN)
 typedef void *(*f_thread_function)(void *);
 #define F_Internal_ThreadEntry(Argument) void *F_Internal_ThreadEntry(f_thread_entry_params *Argument)
@@ -489,6 +493,10 @@ void F_Report(f_memory_arena *Arena, f_build_report Report);
 #include <assert.h> // assert()
 #include <stdarg.h> // va_list, va_args etc
 #include <string.h> // memset
+
+#if defined(OS_WINDOWS)
+#include <windows.h>
+#elif defined(OS_DARWIN)
 #include <sys/mman.h> // mmap, mprotect
 #include <unistd.h> // getpagesize()
 #include <os/os_sync_wait_on_address.h> // os_sync_wake_on_address(), os_sync_wait_on_address()
@@ -500,6 +508,7 @@ void F_Report(f_memory_arena *Arena, f_build_report Report);
 #include <spawn.h> // posix_spawn()
 #include <sys/wait.h> // waitpid()
 #include <dirent.h>
+#endif
 
 extern char **environ;
 
@@ -545,7 +554,7 @@ f_u8 *F_OS_Reserve(f_s64 NumberOfBytes)
 void  F_OS_Commit(void *Address, f_s64 BytesToCommit)
 {
 #if defined(OS_WINDOWS)
-	VirtualAlloc((void*)(Address), NumberOfBytes, MEM_COMMIT, PAGE_READWRITE);
+	VirtualAlloc((void*)(Address), BytesToCommit, MEM_COMMIT, PAGE_READWRITE);
 #elif defined(OS_DARWIN)
 	mprotect(Address, BytesToCommit, PROT_READ|PROT_WRITE);
 #else
@@ -557,7 +566,9 @@ f_u64 F_OS_TimeStamp(void)
 {
 	f_u64 Result;
 #if defined(OS_WINDOWS)
-	Result = 
+	LARGE_INTEGER Stamp = {0};
+	QueryPerformanceCounter(&Stamp);
+	Result = Stamp.QuadPart;
 #elif defined(OS_DARWIN)
 	Result = mach_absolute_time();
 #endif
