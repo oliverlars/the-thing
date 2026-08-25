@@ -533,7 +533,7 @@ void F_Internal_AssertFailed(char *File, int Line, char *Expression)
   #include <intrin.h>
 #define F_Yield() YieldProcessor()
 #elif defined(__i386__) || defined(__x86_64__)
-#define F_YIELD() __builtin_ia32_pause()
+#define F_Yield() __builtin_ia32_pause()
 #elif defined(__aarch64__)
 #define F_Yield() __asm__ __volatile__("isb sy" ::: "memory")
 #else
@@ -577,15 +577,21 @@ f_u64 F_OS_TimeStamp(void)
 
 f_f32 F_MilliSecondsFromTimeStamp(f_u64 TimeStamp)
 {
+	f_f32 MilliSeconds;
 #if defined(OS_WINDOWS)
+	LARGE_INTEGER Frequency;
+	QueryPerformanceFrequency(&Frequency);
+	f_u64 TimeStampInMilliseconds = TimeStamp * 1000 / Frequency.QuadPart;
+	MilliSeconds = TimeStampInMilliseconds;
 #elif defined(OS_DARWIN)
 	mach_timebase_info_data_t Info;
 	mach_timebase_info(&Info);
 
-	return (f_f32)((f_f32)(TimeStamp) * Info.numer / Info.denom) / 1000000.0;
+	MilliSeconds = (f_f32)((f_f32)(TimeStamp) * Info.numer / Info.denom) / 1000000.0;
 #else
 #error "Unsupported OS"
 #endif
+	return MilliSeconds;
 }
 
 f_f32 F_SecondsFromTimeStamp(f_u64 TimeStamp)
@@ -597,7 +603,7 @@ f_file F_OS_StandardOut(void)
 {
 	f_file File = {0};
 #if defined(OS_WINDOWS)
-#error "TODO: implement on Windows"
+	File.Handle = (f_u64)GetStdHandle(STD_OUTPUT_HANDLE);
 #elif defined(OS_DARWIN)
 	File.Handle = STDOUT_FILENO;
 #else
@@ -654,7 +660,7 @@ f_s64 F_OS_PageSize(void)
 void F_OS_ThreadStart(f_thread *Thread, f_thread_function ThreadEntry, void *EntryArgument)
 {
 #if defined(OS_WINDOWS)
-	CreateThread(0, 0, Entry, EntryArgument, 0, &Thread.Handle);
+	CreateThread(0, 0, ThreadEntry, EntryArgument, 0, &Thread->Handle);
 #elif defined(OS_DARWIN)
 	pthread_create((pthread_t*)&Thread->Handle, F_Null, ThreadEntry, EntryArgument);
 #else
@@ -1095,8 +1101,20 @@ char *F_CStrFromStr8(f_memory_arena *Arena, f_str8 String)
 f_file_info F_OS_FileInfoFromFile(f_file *File)
 {
 	f_file_info FileInfo = {0};
+	if(File->Errors) return FileInfo;
 #if defined(OS_WINDOWS)
-#error "Implement F_OS_FileInfo for OS_WINDOWS"
+	BY_HANDLE_FILE_INFORMATION Win32FileInfo = {0};
+	GetFileInformationByHandle((HANDLE)File->Handle, &Win32FileInfo);
+	FileInfo.Exists = F_True;
+	ULARGE_INTEGER LastModified;
+	LastModified.HighPart = Win32FileInfo.ftLastWriteTime.dwHighDateTime;
+	LastModified.LowPart = Win32FileInfo.ftLastWriteTime.dwLowDateTime;
+
+	FileInfo.LastModifiedInMillisecondsSinceEpoch = (LastModified.QuadPart - 116444736000000000LL) / 10000000LL;
+	ULARGE_INTEGER SizeInBytes;
+	LastModified.HighPart = Win32FileInfo.nFileSizeHigh;
+	LastModified.LowPart = Win32FileInfo.nFileSizeLow;
+	FileInfo.SizeInBytes = SizeInBytes.QuadPart;
 #elif defined(OS_DARWIN)
 	struct stat FileStat = {0};
 	f_s32 Status = fstat(File->Handle, &FileStat);
