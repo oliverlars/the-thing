@@ -1198,7 +1198,7 @@ f_str8 F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, f_str8 PathToFile)
 void F_OS_MakeDirectoryIfNotAlreadyMade(f_memory_arena *Arena, f_str8 Path)
 {
 #if defined(OS_WINDOWS)
-#error "TODO"
+	CreateDirectoryA(F_CStrFromStr8(Arena, Path), F_Null);
 #elif defined(OS_DARWIN)
 	F_Temporary(Arena)
 	{
@@ -1213,7 +1213,8 @@ f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 {
 	f_file_info FileInfo = {0};
 #if defined(OS_WINDOWS)
-#error "Implement F_OS_FileInfo for OS_WINDOWS"
+	f_file File = F_OS_FileFromFilename(Arena, Filename);
+	FileInfo = F_OS_FileInfoFromFile(&File);
 #elif defined(OS_DARWIN)
 	struct stat FileStat = {0};
 	if(stat(F_CStrFromStr8(Arena, Filename), &FileStat) == 0)
@@ -1233,10 +1234,18 @@ f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 
 f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
 {
-#if defined(OS_WINDOWS)
-#error "TODO"
-#elif defined(OS_DARWIN)
 	f_file File = {0};
+#if defined(OS_WINDOWS)
+	File.Handle = (f_u64)CreateFileA(
+		F_CStrFromStr8(Arena, Filename),
+		GENERIC_READ | GENERIC_WRITE,
+		0,
+		F_Null,
+		OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL,
+		F_Null
+	);
+#elif defined(OS_DARWIN)
 	f_u64 Handle = open(F_CStrFromStr8(Arena, Filename), O_RDWR);
 	if(Handle != 0)
 	{
@@ -1364,7 +1373,17 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 {
 	f_str8_list Entries = { 0 };
 #if defined(OS_WINDOWS)
-#error "TODO"
+ // Error handling or something
+	WIN32_FIND_DATA FindData;
+
+	HANDLE FoundHandle;
+
+	FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, DirectoryPath), &FindData);
+	do
+	{
+		F_Str8ListAppendF(Arena, &Entries, "%s", FindData.cFileName);
+	}
+	while (FindNextFile(FoundHandle, &FindData) != 0);
 #elif defined(OS_DARWIN)
 	DIR *Directory = opendir(F_CStrFromStr8(Arena, DirectoryPath));
 	struct dirent *Entry;
