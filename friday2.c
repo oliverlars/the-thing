@@ -5,6 +5,8 @@
 
 #include <stdlib.h>
 
+
+#if defined(OS_DARWIN)
 F_LaneEntry(Wave)
 {
 
@@ -129,6 +131,14 @@ F_LaneEntry(Wave)
 		}
 	}
 }
+#else
+
+F_LaneEntry(Wave)
+{
+	printf("Lane: %llu\n", Wave->Lane);
+}
+
+#endif
 
 int main(int ArgCount, char **Arguments)
 {

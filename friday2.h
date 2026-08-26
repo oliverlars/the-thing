@@ -434,7 +434,15 @@ F_OS_Internal_ListOfEntriesInDirectory(Arena, DirectoryPath, (f_internal_directo
 
 f_str8_list F_OS_Internal_ListOfEntriesInDirectory (f_memory_arena *Arena, f_str8 Directory, f_internal_directory_options Options);
 
-void  F_OS_ThreadStart         (f_thread *Thread, void *(*Entry)(void *), void *EntryArgument);
+#if defined(OS_WINDOWS)
+typedef unsigned long (__stdcall *f_thread_function)(void *);
+#define F_Internal_ThreadEntry(Argument) unsigned long __stdcall F_Internal_ThreadEntry(f_thread_entry_params *Argument)
+#elif defined(OS_DARWIN)
+typedef void *(*f_thread_function)(void *);
+#define F_Internal_ThreadEntry(Argument) void *F_Internal_ThreadEntry(f_thread_entry_params *Argument)
+#endif
+
+void  F_OS_ThreadStart         (f_thread *Thread, f_thread_function ThreadEntry, void *EntryArgument);
 void  F_OS_WaitForSingleThread (f_thread Thread);
 void  F_OS_WaitForThreads      (f_thread *Thread, f_s32 NumberOfThreadsToWaitFor);
 void  F_OS_FutexWait    (void *Address, f_u64 Expected);
@@ -448,13 +456,6 @@ f_file F_OS_StandardOut(void);
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 
-#if defined(OS_WINDOWS)
-typedef unsigned long (__stdcall *f_thread_function)(void *);
-#define F_Internal_ThreadEntry(Argument) unsigned long __stdcall F_Internal_ThreadEntry(f_thread_entry_params *Argument)
-#elif defined(OS_DARWIN)
-typedef void *(*f_thread_function)(void *);
-#define F_Internal_ThreadEntry(Argument) void *F_Internal_ThreadEntry(f_thread_entry_params *Argument)
-#endif
 
 #define F_LaneEntry(Wave) void F_LaneEntry(f_wave *Wave)
 
@@ -660,7 +661,8 @@ f_s64 F_OS_PageSize(void)
 void F_OS_ThreadStart(f_thread *Thread, f_thread_function ThreadEntry, void *EntryArgument)
 {
 #if defined(OS_WINDOWS)
-	CreateThread(0, 0, ThreadEntry, EntryArgument, 0, &Thread->Handle);
+	DWORD ThreadId;
+	Thread->Handle = (f_u64)CreateThread(0, 0, ThreadEntry, EntryArgument, 0, (LPDWORD)&ThreadId);
 #elif defined(OS_DARWIN)
 	pthread_create((pthread_t*)&Thread->Handle, F_Null, ThreadEntry, EntryArgument);
 #else
@@ -912,7 +914,7 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount)
 
 	Params[0].LaneEntry(Params[0].WaveArgument);
 
-	F_OS_WaitForThreads(Threads, LaneCount);
+	F_OS_WaitForThreads(Threads + 1, LaneCount - 1);
 }
 
 f_s64 F_Str8ListCount(f_str8_list List)
@@ -1112,8 +1114,8 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 
 	FileInfo.LastModifiedInMillisecondsSinceEpoch = (LastModified.QuadPart - 116444736000000000LL) / 10000000LL;
 	ULARGE_INTEGER SizeInBytes;
-	LastModified.HighPart = Win32FileInfo.nFileSizeHigh;
-	LastModified.LowPart = Win32FileInfo.nFileSizeLow;
+	SizeInBytes.HighPart = Win32FileInfo.nFileSizeHigh;
+	SizeInBytes.LowPart = Win32FileInfo.nFileSizeLow;
 	FileInfo.SizeInBytes = SizeInBytes.QuadPart;
 #elif defined(OS_DARWIN)
 	struct stat FileStat = {0};
@@ -1175,16 +1177,23 @@ f_b32 F_OS_RenameFile(f_memory_arena *Arena, f_str8 From, f_str8 To)
 f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 {
 		if(File->Errors) return F_Str8("");
+		f_file_info Info = F_OS_FileInfoFromFile(File);
+		f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
 #if defined(OS_WINDOWS)
+	File->Errors = ReadFile(
+  File->Handle,
+  Backing,
+  Info.SizeInBytes,
+  F_Null,
+  F_Null
+);
 #elif defined(OS_DARWIN)
-	f_file_info Info = F_OS_FileInfoFromFile(File);
-	f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
 	f_s32 Status = read(File->Handle, Backing, Info.SizeInBytes);
 	File->Errors = Status < 0;
-	return (f_str8) { Info.SizeInBytes, Backing };
 #else
 #error "Unsupported OS"
 #endif
+	return (f_str8) { (f_s64)Info.SizeInBytes, Backing };
 }
 
 f_str8 F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, f_str8 PathToFile)
@@ -1429,6 +1438,30 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 {
 #if defined(OS_WINDOWS)
+	STARTUPINFO StartupInfo = {0};
+	PROCESS_INFORMATION ProcessInfo = {0};
+	f_b32 ProcessStatus = CreateProcessA(
+			F_Null,
+			F_CStrFromStr8(Arena, F_Str8JoinList(Arena, Args, F_Str8(" "))),
+			F_Null,
+			F_Null,
+			F_True,
+			0,
+			0,
+			F_Null,
+			&StartupInfo,
+			&ProcessInfo
+	);
+	if(ProcessStatus)
+	{
+		Process->StdOut = 0;
+		Process->State = F_PROCESS_RUNNING;
+	}
+	else
+	{
+		Process->State = F_PROCESS_FAILED_TO_LAUNCH;
+		Process->ExitCode = (f_exit_code){ProcessStatus, 0};
+	}
 #elif defined(OS_DARWIN)
 
 	Process->StdOutSinceLastPoll.Bytes = F_ArenaPushArrayType(Arena, F_PROCESS_STDOUT_CAPACITY, f_s8);
@@ -1534,6 +1567,7 @@ f_b32 F_ProcessExitedCleanly(f_process *Process)
 {
 	f_b32 Result = F_True;
 #if defined(OS_WINDOWS)
+
 #elif defined(OS_DARWIN)
 	if(Process->ExitCode.Values[0] || Process->ExitCode.Values[1])
 	{
