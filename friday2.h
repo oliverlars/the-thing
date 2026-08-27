@@ -536,7 +536,7 @@ void F_Internal_AssertFailed(char *File, int Line, char *Expression)
 #elif defined(__i386__) || defined(__x86_64__)
 #define F_Yield() __builtin_ia32_pause()
 #elif defined(__aarch64__)
-#define F_Yield() __asm__ __volatile__("isb sy" ::: "memory")
+#define F_Yield() __builtin_arm_isb(15)
 #else
 #error "Unsupported OS or CPU architecture"
 #endif
