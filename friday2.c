@@ -135,7 +135,14 @@ F_LaneEntry(Wave)
 
 F_LaneEntry(Wave)
 {
-	printf("Lane: %llu\n", Wave->Lane);
+	if(F_WaveIsFirstLane(Wave))
+	{
+		f_str8_list Entries = F_OS_ListOfEntriesInDirectory(Wave->Arena, F_Str8("source"), .PrependPath = F_True, .FilterByExtension = F_Str8ArrayFromMany(Wave->Arena, F_Str8(".c")));
+		for(f_str8_list_node *Node = Entries.First; Node; Node = Node->Next)
+		{
+			printf("%.*s\n", F_Expand(Node->String));
+		}
+	}
 }
 
 #endif

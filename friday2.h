@@ -1387,12 +1387,38 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 
 	HANDLE FoundHandle;
 
-	FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, DirectoryPath), &FindData);
+	FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%.*s\\*", F_Expand(DirectoryPath))), &FindData);
 	do
 	{
-		F_Str8ListAppendF(Arena, &Entries, "%s", FindData.cFileName);
+		f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+		f_b32 IsActualEntry = F_True;
+		if(ShouldExcludeDirectories) continue;
+		if(!IsActualEntry) continue;
+		f_str8 EntryName = F_Str8PushF(Arena, "%s", FindData.cFileName);
+		f_b32 MatchFound = F_True;
+		if(Options.FilterByExtension.Count > 0)
+		{
+			MatchFound = F_False;
+			for(f_s32 I = 0; I < Options.FilterByExtension.Count; I++)
+			{
+				if(F_Str8EndsWith(EntryName, Options.FilterByExtension.Items[I]))
+				{
+					MatchFound = F_True;
+				}
+			}
+
+		}
+		if(!MatchFound) continue;
+		if(Options.PrependPath)
+		{
+			F_Str8ListAppendF(Arena, &Entries, "%.*s\\%.*s", F_Expand(DirectoryPath), F_Expand(EntryName));
+		}
+		else
+		{
+			F_Str8ListAppendF(Arena, &Entries, "%.*s", F_Expand(EntryName));
+		}
 	}
-	while (FindNextFile(FoundHandle, &FindData) != 0);
+	while (FindNextFile(FoundHandle, &FindData));
 #elif defined(OS_DARWIN)
 	DIR *Directory = opendir(F_CStrFromStr8(Arena, DirectoryPath));
 	struct dirent *Entry;
