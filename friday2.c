@@ -142,6 +142,18 @@ F_LaneEntry(Wave)
 		{
 			printf("%.*s\n", F_Expand(Node->String));
 		}
+		f_process Process = {0};
+		f_str8_list Args = {0};
+		F_Str8ListAppend(Wave->Arena, &Args, F_Str8("test.exe"));
+		F_StartProcess(Wave->Arena, &Process, Args);
+		for(;F_PollProcess(&Process);)
+		{
+			printf("STDOUT: %.*s\n", F_Expand(Process.StdOutSinceLastPoll));
+		}
+		if(F_ProcessExitedCleanly(&Process))
+		{
+			printf("EXITED CLEANLY");
+		}
 	}
 }
 

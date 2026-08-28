@@ -1181,7 +1181,7 @@ f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 		f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
 #if defined(OS_WINDOWS)
 	File->Errors = ReadFile(
-  File->Handle,
+  (HANDLE)File->Handle,
   Backing,
   Info.SizeInBytes,
   F_Null,
@@ -1465,6 +1465,7 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 {
 #if defined(OS_WINDOWS)
 	STARTUPINFO StartupInfo = {0};
+	StartupInfo.dwFlags = STARTF_USESTDHANDLES;
 	PROCESS_INFORMATION ProcessInfo = {0};
 	f_b32 ProcessStatus = CreateProcessA(
 			F_Null,
@@ -1478,9 +1479,10 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 			&StartupInfo,
 			&ProcessInfo
 	);
+	CreatePipe(&StartupInfo.hStdOutput, &StartupInfo.hStdInput, F_Null, 0);
 	if(ProcessStatus)
 	{
-		Process->StdOut = 0;
+		Process->StdOut = StartupInfo.hStdOutput;
 		Process->State = F_PROCESS_RUNNING;
 	}
 	else
@@ -1538,6 +1540,19 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 f_b32 F_PollProcess(f_process *Process)
 {
 #if defined(OS_WINDOWS)
+	for (;;) 
+	{
+		DWORD BytesRead = 0;
+		F_Assert(ReadFile(Process->StdOut, Process->StdOutSinceLastPoll.Bytes, F_PROCESS_STDOUT_CAPACITY, &BytesRead, NULL));
+		if(BytesRead)
+		{
+			Process->StdOutSinceLastPoll.Size = (f_u64)BytesRead;
+		}
+		else
+		{
+			break;
+		}
+	}
 #elif defined(OS_DARWIN)
 	Process->StdOutSinceLastPoll.Size = 0;
 
@@ -1593,7 +1608,10 @@ f_b32 F_ProcessExitedCleanly(f_process *Process)
 {
 	f_b32 Result = F_True;
 #if defined(OS_WINDOWS)
-
+	if(Process->ExitCode.Values[0] || Process->ExitCode.Values[1])
+	{
+		Result = F_False;
+	}
 #elif defined(OS_DARWIN)
 	if(Process->ExitCode.Values[0] || Process->ExitCode.Values[1])
 	{
