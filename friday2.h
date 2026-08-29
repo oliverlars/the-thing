@@ -162,7 +162,7 @@ f_exit_code;
 
 typedef struct f_process
 {
-	f_s32 ID;
+	f_u64 ID;
 	f_process_state State; 
 	f_exit_code ExitCode;
 	void *StdOut;
@@ -1141,6 +1141,13 @@ void F_OS_WriteStr8ToFile(f_file *File, f_str8 FileToWrite)
 {
 	if(File->Errors) return;
 #if defined(OS_WINDOWS)
+		DWORD Written = 0;
+	File->Errors = !WriteFile(
+		(HANDLE)File->Handle,
+		FileToWrite.Bytes,
+		(DWORD)FileToWrite.Size,
+		&Written, F_Null
+	);
 #elif defined(OS_DARWIN)
 	f_s32 Status = write(File->Handle, FileToWrite.Bytes, FileToWrite.Size);
 	File->Errors = Status < 0;
@@ -1180,7 +1187,7 @@ f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 		f_file_info Info = F_OS_FileInfoFromFile(File);
 		f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
 #if defined(OS_WINDOWS)
-	File->Errors = ReadFile(
+	File->Errors = !ReadFile(
   (HANDLE)File->Handle,
   Backing,
   Info.SizeInBytes,
@@ -1463,9 +1470,24 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 
 void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 {
+	Process->StdOutSinceLastPoll.Bytes = F_ArenaPushArrayType(Arena, F_PROCESS_STDOUT_CAPACITY, f_s8);
+
 #if defined(OS_WINDOWS)
+	
+	SECURITY_ATTRIBUTES Attributes = {0};
+	Attributes.nLength = sizeof(SECURITY_ATTRIBUTES);
+	Attributes.bInheritHandle = F_True;
+	Attributes.lpSecurityDescriptor = F_Null;
+	HANDLE ReadPipe, WritePipe;
+	CreatePipe(&ReadPipe, &WritePipe, &Attributes, 0);
+	SetHandleInformation(ReadPipe, HANDLE_FLAG_INHERIT, 0);
+
 	STARTUPINFO StartupInfo = {0};
 	StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+	StartupInfo.cb = sizeof(STARTUPINFO);
+	StartupInfo.hStdOutput = WritePipe;
+	StartupInfo.hStdError = WritePipe;
+	StartupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 	PROCESS_INFORMATION ProcessInfo = {0};
 	f_b32 ProcessStatus = CreateProcessA(
 			F_Null,
@@ -1474,16 +1496,18 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 			F_Null,
 			F_True,
 			0,
-			0,
+			F_Null,
 			F_Null,
 			&StartupInfo,
 			&ProcessInfo
 	);
-	CreatePipe(&StartupInfo.hStdOutput, &StartupInfo.hStdInput, F_Null, 0);
+	CloseHandle(WritePipe);
 	if(ProcessStatus)
 	{
-		Process->StdOut = StartupInfo.hStdOutput;
+		Process->ID = (f_u64)ProcessInfo.hProcess;
+		Process->StdOut = ReadPipe;
 		Process->State = F_PROCESS_RUNNING;
+		CloseHandle(ProcessInfo.hThread);
 	}
 	else
 	{
@@ -1491,8 +1515,6 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 		Process->ExitCode = (f_exit_code){ProcessStatus, 0};
 	}
 #elif defined(OS_DARWIN)
-
-	Process->StdOutSinceLastPoll.Bytes = F_ArenaPushArrayType(Arena, F_PROCESS_STDOUT_CAPACITY, f_s8);
 
 	f_s32 MaxArguments = 1024;
 	char **CompilerArguments = F_ArenaPushArrayType(Arena, MaxArguments, char*);
@@ -1539,25 +1561,40 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 
 f_b32 F_PollProcess(f_process *Process)
 {
-#if defined(OS_WINDOWS)
-	for (;;) 
-	{
-		DWORD BytesRead = 0;
-		F_Assert(ReadFile(Process->StdOut, Process->StdOutSinceLastPoll.Bytes, F_PROCESS_STDOUT_CAPACITY, &BytesRead, NULL));
-		if(BytesRead)
-		{
-			Process->StdOutSinceLastPoll.Size = (f_u64)BytesRead;
-		}
-		else
-		{
-			break;
-		}
-	}
-#elif defined(OS_DARWIN)
 	Process->StdOutSinceLastPoll.Size = 0;
 
-
 	if(Process->State != F_PROCESS_RUNNING) return F_False;
+#if defined(OS_WINDOWS)
+		DWORD BytesRead = 0;
+	DWORD BytesAvailable = 0;
+	DWORD BytesLeft = 0;
+
+	f_b32 StillRunning = WaitForSingleObject((HANDLE)Process->ID, 0) == WAIT_TIMEOUT;
+
+	if(PeekNamedPipe(Process->StdOut, F_Null, 0, F_Null, &BytesAvailable, &BytesLeft)
+	   && BytesAvailable > 0)
+	{
+		BytesAvailable = F_Min(BytesAvailable, F_PROCESS_STDOUT_CAPACITY);
+		if(ReadFile(Process->StdOut, Process->StdOutSinceLastPoll.Bytes,
+		            BytesAvailable, &BytesRead, F_Null))
+		{
+			Process->StdOutSinceLastPoll.Size = (f_s64)BytesRead;
+		}
+	}
+
+	if(!StillRunning && Process->StdOutSinceLastPoll.Size == 0)
+	{
+		DWORD ExitCode = 0;
+		GetExitCodeProcess((HANDLE)Process->ID, &ExitCode);
+		Process->ExitCode = (f_exit_code){ ExitCode, 0 };
+		Process->State = F_PROCESS_EXITED;
+		CloseHandle(Process->StdOut);
+		Process->StdOut = F_Null;
+		return F_False;
+	}
+
+	return F_True;
+#elif defined(OS_DARWIN)
 
 	f_u64 BytesRead = read((f_s32)((f_u64)Process->StdOut), Process->StdOutSinceLastPoll.Bytes, F_PROCESS_STDOUT_CAPACITY);
 	if(BytesRead > 0)
@@ -1623,9 +1660,14 @@ f_b32 F_ProcessExitedCleanly(f_process *Process)
 	return Result;
 }
 
+
 void F_WaitForProcess(f_process *Process)
 {
-	while(F_PollProcess(Process));
+	while(F_PollProcess(Process))
+	{
+		if(Process->StdOutSinceLastPoll.Size > 0) F_Print(Process->StdOutSinceLastPoll);
+	}
+	if(Process->StdOutSinceLastPoll.Size > 0) F_Print(Process->StdOutSinceLastPoll);
 }
 
 void F_Internal_WaitForMultipleProcesses(f_process **Processes, f_u64 ProcessCount)

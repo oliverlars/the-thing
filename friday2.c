@@ -146,9 +146,11 @@ F_LaneEntry(Wave)
 		f_str8_list Args = {0};
 		F_Str8ListAppend(Wave->Arena, &Args, F_Str8("test.exe"));
 		F_StartProcess(Wave->Arena, &Process, Args);
+		int SomeValue = 0;
 		for(;F_PollProcess(&Process);)
 		{
-			printf("STDOUT: %.*s\n", F_Expand(Process.StdOutSinceLastPoll));
+			printf("%.*s", F_Expand(Process.StdOutSinceLastPoll));
+			SomeValue = 10;
 		}
 		if(F_ProcessExitedCleanly(&Process))
 		{
