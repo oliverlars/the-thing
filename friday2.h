@@ -179,6 +179,10 @@ typedef struct f_watch
 f_watch;
 
 
+
+// TODO: Set up proper archiver flags since 
+// msvc needs to use lib.exe to combine object files
+// into static library
 typedef struct f_toolchain
 {
 	f_str8 CompilerPath;
@@ -207,7 +211,18 @@ f_toolchain;
 	.CompileOnlyFlag = F_Str8("-c")\
 })
 
-f_toolchain F_TOOLCHAIN_MSVC;
+#define F_TOOLCHAIN_MSVC ((f_toolchain)\
+{\
+	.CompilerPath = F_Str8("cl"),\
+	.OutputFlag = F_Str8("/OUT"),\
+	.DebugFlag = F_Str8("/Zi"),\
+	.OptimiseFlag = F_Str8("/O2"),\
+	.IncludeFlag = F_Str8("/I"),\
+	.DynamicFlag = F_Str8("/LD"),\
+	.StaticFlag = F_Str8("/c /MT"),\
+	.CompileOnlyFlag = F_Str8("/c")\
+})
+
 f_toolchain F_TOOLCHAIN_GCC;
 f_toolchain F_TOOLCHAIN_CARNAGE;
 
