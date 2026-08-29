@@ -501,7 +501,6 @@ f_build_report;
 void F_Report(f_memory_arena *Arena, f_build_report Report);
 
 #endif
-#define FRIDAY_IMPLEMENTATION
 #ifdef FRIDAY_IMPLEMENTATION
 
 #include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
@@ -1127,7 +1126,7 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 	LastModified.HighPart = Win32FileInfo.ftLastWriteTime.dwHighDateTime;
 	LastModified.LowPart = Win32FileInfo.ftLastWriteTime.dwLowDateTime;
 
-	FileInfo.LastModifiedInMillisecondsSinceEpoch = (LastModified.QuadPart - 116444736000000000LL) / 10000000LL;
+	FileInfo.LastModifiedInMillisecondsSinceEpoch = (LastModified.QuadPart - 116444736000000000LL) / 10000LL;
 	ULARGE_INTEGER SizeInBytes;
 	SizeInBytes.HighPart = Win32FileInfo.nFileSizeHigh;
 	SizeInBytes.LowPart = Win32FileInfo.nFileSizeLow;
@@ -1175,6 +1174,7 @@ f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
 {
 	f_b32 Result = F_True;
 #if defined(OS_WINDOWS)
+	F_Temporary(Arena) Result = DeleteFileA(F_CStrFromStr8(Arena, PathToFile)) != 0;
 #elif defined(OS_DARWIN)
 	F_Temporary(Arena) Result = remove(F_CStrFromStr8(Arena, PathToFile)) == 0;
 #else
@@ -1183,16 +1183,15 @@ f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
 	return Result;
 }
 
-f_b32 F_OS_RenameFile(f_memory_arena *Arena, f_str8 From, f_str8 To)
+void F_OS_RenameFileTo(f_memory_arena *Arena, f_str8 From, f_str8 To)
 {
-	f_b32 Result = F_True;
 #if defined(OS_WINDOWS)
+	F_Temporary(Arena) MoveFileExA(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
 #elif defined(OS_DARWIN)
-	F_Temporary(Arena) Result = rename(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To)) == 0;
+	F_Temporary(Arena) rename(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To)) == 0;
 #else
 #error "Unsupported OS"
 #endif
-	return Result;
 }
 
 
@@ -1270,12 +1269,17 @@ f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
 	File.Handle = (f_u64)CreateFileA(
 		F_CStrFromStr8(Arena, Filename),
 		GENERIC_READ | GENERIC_WRITE,
-		0,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		F_Null,
 		OPEN_EXISTING,
 		FILE_ATTRIBUTE_NORMAL,
 		F_Null
 	);
+	if(File.Handle == INVALID_HANDLE_VALUE)
+	{
+		File.Handle = 0;
+		File.Errors = F_True;
+	}
 #elif defined(OS_DARWIN)
 	f_u64 Handle = open(F_CStrFromStr8(Arena, Filename), O_RDWR);
 	if(Handle != 0)
@@ -1295,11 +1299,13 @@ f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
 void F_OS_ReleaseFile(f_file *File)
 {
 #if defined(OS_WINDOWS)
+	CloseHandle((HANDLE)File->Handle);
 #elif defined(OS_DARWIN)
 	close(File->Handle);
 #else
 #error "Unsupported OS"
 #endif
+	File->Handle = 0;
 }
 
 f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
@@ -1402,6 +1408,7 @@ f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch, f_u64 ChangeGranula
 
 f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8 DirectoryPath, f_internal_directory_options Options)
 {
+#define IsCStrDotOrDotDot(Name) (Name[0] == '.' && (Name[1] == 0 || (Name[1] == '.' && Name[2] == 0)))
 	f_str8_list Entries = { 0 };
 #if defined(OS_WINDOWS)
  // Error handling or something
@@ -1410,10 +1417,11 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 	HANDLE FoundHandle;
 
 	FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%.*s\\*", F_Expand(DirectoryPath))), &FindData);
+	if(FoundHandle == INVALID_HANDLE_VALUE) return Entries;
 	do
 	{
 		f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
-		f_b32 IsActualEntry = F_True;
+		f_b32 IsActualEntry = !IsCStrDotOrDotDot(FindData.cFileName);
 		if(ShouldExcludeDirectories) continue;
 		if(!IsActualEntry) continue;
 		f_str8 EntryName = F_Str8PushF(Arena, "%s", FindData.cFileName);
@@ -1440,13 +1448,13 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 			F_Str8ListAppendF(Arena, &Entries, "%.*s", F_Expand(EntryName));
 		}
 	}
-	while (FindNextFile(FoundHandle, &FindData));
+	while (FindNextFile(FoundHandle, &FindData) && FoundHandle != INVALID_HANDLE_VALUE);
 #elif defined(OS_DARWIN)
 	DIR *Directory = opendir(F_CStrFromStr8(Arena, DirectoryPath));
 	struct dirent *Entry;
 	while((Entry = readdir(Directory)))
 	{
-		f_b32 IsActualEntry = Entry->d_name[0] != '.';
+		f_b32 IsActualEntry = !IsCStrDotOrDotDot(Entry->d_name);
 		f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && Entry->d_type == DT_DIR);
 		if(!IsActualEntry) continue;
 		if(ShouldExcludeDirectories) continue;
@@ -1604,6 +1612,7 @@ f_b32 F_PollProcess(f_process *Process)
 		Process->ExitCode = (f_exit_code){ ExitCode, 0 };
 		Process->State = F_PROCESS_EXITED;
 		CloseHandle(Process->StdOut);
+		CloseHandle((HANDLE)Process->ID);
 		Process->StdOut = F_Null;
 		return F_False;
 	}
