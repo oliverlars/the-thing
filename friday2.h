@@ -10,10 +10,6 @@
 #define OS_DARWIN
 #endif
 
-#if !defined(OS_WINDOWS)
-#error "WTF"
-#endif
-
 typedef signed char f_s8;
 typedef signed short int f_s16;
 typedef signed int f_s32;
@@ -300,6 +296,7 @@ f_thread_entry_params;
 #define F_ArenaPushArrayTypeNoZero(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)), F_False)
 #define F_ArenaPushNoZero(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush, F_False)
 
+f_memory_arena *F_ArenaReserveButCommitFirstPage(f_s64 NumberOfBytesToReserve);
 f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush, f_b32 ShouldZero);
 void  F_ArenaReset(f_memory_arena *Arena);
 
@@ -316,6 +313,7 @@ f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, 
 #define F_Str8ListAppendF(Arena, List, ...) \
 F_Str8ListAppend(Arena, List, F_Str8PushF(Arena, __VA_ARGS__))
 
+char         *F_CStrFromStr8      (f_memory_arena *Arena, f_str8 String);
 f_str8       F_Str8PushF          (f_memory_arena *Arena, char *Format, ...);
 void         F_Str8ListAppend     (f_memory_arena *Arena, f_str8_list *List, f_str8 Sstring);
 void         F_Str8ListAppendMany (f_memory_arena *Arena, f_str8_list *Head, f_str8_list Tail);
@@ -1176,7 +1174,7 @@ f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
 #if defined(OS_WINDOWS)
 	F_Temporary(Arena) Result = DeleteFileA(F_CStrFromStr8(Arena, PathToFile)) != 0;
 #elif defined(OS_DARWIN)
-	F_Temporary(Arena) Result = remove(F_CStrFromStr8(Arena, PathToFile)) == 0;
+	F_Temporary(Arena) Result = remove(F_CStrFromStr8(Arena, PathToFile));
 #else
 #error "Unsupported OS"
 #endif
@@ -1188,7 +1186,7 @@ void F_OS_RenameFileTo(f_memory_arena *Arena, f_str8 From, f_str8 To)
 #if defined(OS_WINDOWS)
 	F_Temporary(Arena) MoveFileExA(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
 #elif defined(OS_DARWIN)
-	F_Temporary(Arena) rename(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To)) == 0;
+	F_Temporary(Arena) rename(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To));
 #else
 #error "Unsupported OS"
 #endif

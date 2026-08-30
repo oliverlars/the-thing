@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 
-#if defined(OS_DARWIN)
+#if 1
 F_LaneEntry(Wave)
 {
 

@@ -7,7 +7,8 @@
 
 #include "app.h"
 
-#include "friday.h"
+#define FRIDAY_IMPLEMENTATION
+#include "friday2.h"
 
 #include <dlfcn.h>
 
@@ -16,9 +17,10 @@ typedef struct platform_context
 	app_memory *Memory;
 	void (*AppUpdate)(void *UserData, v2i ViewportSize);
 
-
-	f_build_options AppBuildOptions;
 	f_memory_arena *FridayArena;
+
+	f_str8_list SourceFiles;
+	f_str8_list IncludePaths;
 
 	u64 AppLibModified;
 	u64 LoadCounter;
@@ -31,73 +33,23 @@ platform_context;
 u64 *SourceFileTimeStamps;
 u64 SourceFileTimeStampsCount;
 
-F_Entry(InputWaveInfo)
+F_LaneEntry(Wave)
 {
-	f_wave_info *WaveInfo = (f_wave_info*)InputWaveInfo;
-	f_shared_wave_info *Shared = WaveInfo->Shared;
 
-	f_memory_arena Arena = {0};
-	Arena.Start = F_MemoryReserve(F_GigaBytes(1));
-
-	b32 ShouldRebuildApp = False;
-	f_str8_array RelativeSourceFilePaths = {0};
-	f_str8_array ObjectFileNames = {0};
-	if(F_WaveIsFirstLane(WaveInfo))
-	{
-		RelativeSourceFilePaths = F_Str8ArrayFromList(&WaveInfo->Shared->Arena, Shared->BuildOptions.SourceFiles);
-		ObjectFileNames.Count = RelativeSourceFilePaths.Count;
-		ObjectFileNames.Items = (f_str8*)F_ArenaPush(&WaveInfo->Shared->Arena, sizeof(f_str8)*RelativeSourceFilePaths.Count);
-	}
-	
-	F_BroadcastToAllLanes(WaveInfo, RelativeSourceFilePaths);
-
-	f_s64 Count = F_LaneValueFromTotal(WaveInfo, RelativeSourceFilePaths.Count);
-	f_s64 Index = F_ExclusiveWavePrefixSum(WaveInfo, Count);
-
-	f_b32 AnyFilesChanged = F_False;
-	for(int I = Index; I < Index + Count; I++)
-	{
-		f_str8 Path = RelativeSourceFilePaths.Items[I];
-
-		struct stat FileStat = {0};
-		u64 LastModified = 0;
-		if(stat(F_CStrFromStr8(&Arena, Path), &FileStat) == 0)
-		{
-			LastModified = (u64)FileStat.st_mtime;
-		}
-
-		if(LastModified != SourceFileTimeStamps[I])
-		{
-			SourceFileTimeStamps[I] = LastModified;
-			AnyFilesChanged = F_True;
-		}
-	}
-
-	ShouldRebuildApp = F_WaveAnyTrue(WaveInfo, AnyFilesChanged);
-	if(ShouldRebuildApp)
-	{
-		F_Build(WaveInfo, &Arena, Shared->BuildOptions);
-	}
-
-	return 0;
 }
 
 
-static void AppCodeReload(platform_context *Context)
+static void AppCodeReload(f_memory_arena *Arena, platform_context *Context)
 {
 	u64 Modified = OS_LastModified(Str8("build/app.dynlib"));
-	if(Modified == 0 || Modified == Context->AppLibModified) return;
-
-	m_scratch_arena Scratch = ScratchBegin(0, 0);
-
-
+	if(Modified == Context->AppLibModified) return;
 
 	// dlopen caches by path, so each load needs a filename nothing has used yet.
-	str8 CopyPath = Str8PushF(Scratch.Arena, "build/app-?u64.dynlib", Context->LoadCounter);
-	str8 CopyCommand = Str8PushF(Scratch.Arena, "cp build/app.dynlib ?S", CopyPath);
-	system(CStrFromStr8(Scratch.Arena, CopyCommand));
+	f_str8 CopyPath = F_Str8PushF(Arena, "build/app-?u64.dynlib", Context->LoadCounter);
+	f_str8 CopyCommand = F_Str8PushF(Arena, "cp build/app.dynlib ?S", CopyPath);
+	system(F_CStrFromStr8(Arena, CopyCommand));
 
-	void *Library = dlopen(CStrFromStr8(Scratch.Arena, CopyPath), RTLD_NOW | RTLD_LOCAL);
+	void *Library = dlopen(F_CStrFromStr8(Arena, CopyPath), RTLD_NOW | RTLD_LOCAL);
 	if(Library)
 	{
 		void (*Update)(void*, v2i) = dlsym(Library, "AppUpdate");
@@ -120,15 +72,13 @@ static void AppCodeReload(platform_context *Context)
 	{
 		LogError("dlopen failed: ?cstr", dlerror());
 	}
-
-	ScratchEnd(Scratch);
 }
 
 static void PlatformFrame(void *UserData, v2i ViewportSize)
 {
 	platform_context *Context = (platform_context*)UserData;
 
-	AppCodeReload(Context);
+	AppCodeReload(Context->FridayArena, Context);
 
 	Context->AppUpdate(Context->Memory, ViewportSize);
 	Context->FrameCounter++;
@@ -192,7 +142,7 @@ int main(int ArgCount, char **Args)
 	platform_context PlatformContext = {0};
 	PlatformContext.Memory = &AppMemory;
 
-	AppCodeReload(&PlatformContext);
+	AppCodeReload(PlatformContext.FridayArena, &PlatformContext);
 	if(!PlatformContext.AppUpdate)
 	{
 		LogError("no app code to run — build build/app.dynlib first");
@@ -200,41 +150,50 @@ int main(int ArgCount, char **Args)
 	}
 
 
-	f_build_options AppBuildOptions = {0};
-	AppBuildOptions.OutputType = F_OUTPUT_DYNAMIC_LIBRARY;
-	AppBuildOptions.OutputName = F_Str8("app.dynlib");
-	AppBuildOptions.OutputPath = F_Str8("build/");
-	AppBuildOptions.SourceFiles = (f_str8_list){0};
-	f_memory_arena FridayArena = {0};
-	FridayArena.Start = F_MemoryReserve(F_GigaBytes(1));
+	f_compile_options AppCompileOptions = {0};
+	AppCompileOptions.OutputName = F_Str8("app.dynlib");
+	AppCompileOptions.OutputPath = F_Str8("build/");
+	f_memory_arena *FridayArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(1));
 
-	F_Str8ListAppend(&FridayArena, &AppBuildOptions.IncludePaths, F_Str8("include/"));
-	F_Str8ListAppend(&FridayArena, &AppBuildOptions.IncludePaths, F_Str8("external/"));
-	F_Str8ListAppend(&FridayArena, &AppBuildOptions.IncludePaths, F_Str8("build/"));
-	F_Str8ListAppend(&FridayArena, &AppBuildOptions.ExtraLinkFlags,
-		F_Str8("-framework Cocoa -framework Metal -framework QuartzCore ")
+	f_link_options AppLinkOptions  = {0};
+
+	F_Str8ListAppendMany(FridayArena, &PlatformContext.SourceFiles,
+		F_OS_ListOfEntriesInDirectory(FridayArena, 
+			F_Str8("source"), .ExcludeDirectories = F_True, .FilterByExtension = 
+			F_Str8ArrayFromMany(FridayArena, F_Str8(".c"), F_Str8(".m")))
 	);
 
-	F_Str8ListAppend(&FridayArena, &AppBuildOptions.SourceFiles, F_Str8("app.c"));
-	F_AppendSourceFilesInFolder(&FridayArena, &AppBuildOptions.SourceFiles, F_Str8("source"));
-	F_AppendSourceFilesInFolder(&FridayArena, &AppBuildOptions.SourceFiles, F_Str8("source/darwin"));
-	F_AppendSourceFilesInFolder(&FridayArena, &AppBuildOptions.SourceFiles, F_Str8("external"));
-	F_Str8ListAppend(&FridayArena, &AppBuildOptions.SourceFiles, F_Str8("build/embedded_fonts.c"));
+	F_Str8ListAppendMany(FridayArena, &PlatformContext.SourceFiles,
+		F_OS_ListOfEntriesInDirectory(FridayArena, 
+			F_Str8("source/darwin"), .ExcludeDirectories = F_True, .FilterByExtension = 
+			F_Str8ArrayFromMany(FridayArena, F_Str8(".c"), F_Str8(".m")))
+	);
+
+	F_Str8ListAppendMany(FridayArena, &PlatformContext.SourceFiles,
+		F_OS_ListOfEntriesInDirectory(FridayArena, 
+			F_Str8("external/"), .ExcludeDirectories = F_True, .FilterByExtension = 
+			F_Str8ArrayFromMany(FridayArena, F_Str8(".c"), F_Str8(".m")))
+	);
+
+	F_Str8ListAppend(FridayArena, &PlatformContext.IncludePaths, F_Str8("include/"));
+	F_Str8ListAppend(FridayArena, &PlatformContext.IncludePaths, F_Str8("external/"));
+	F_Str8ListAppend(FridayArena, &PlatformContext.IncludePaths, F_Str8("build/"));
+	AppLinkOptions.ExtraFlags = F_Str8ArrayFromMany(FridayArena,
+		F_Str8("-framework"), F_Str8("Cocoa"), F_Str8("-framework"), F_Str8("Metal"), F_Str8("-framework"), F_Str8("QuartzCore ")
+	);
+
+	F_Str8ListAppend(FridayArena, &PlatformContext.SourceFiles, F_Str8("app.c"));
+	F_Str8ListAppend(FridayArena, &PlatformContext.SourceFiles, F_Str8("build/embedded_fonts.c"));
 
 	SourceFileTimeStampsCount = 0;
-	for(f_str8_list_node *Node = AppBuildOptions.SourceFiles.First; Node; Node = Node->Next)
+	for(f_str8_list_node *Node = PlatformContext.SourceFiles.First; Node; Node = Node->Next)
 	{
 		SourceFileTimeStampsCount += 1;
 	}
 
-	SourceFileTimeStamps = (u64*)(F_ArenaPush(&FridayArena, sizeof(u64)*SourceFileTimeStampsCount));
+	SourceFileTimeStamps = (u64*)(F_ArenaPush(FridayArena, sizeof(u64)*SourceFileTimeStampsCount));
 
-	f_shared_wave_info *Shared = (f_shared_wave_info*)F_ArenaPush(&FridayArena, sizeof(f_shared_wave_info));
-	Shared->ArgCount = ArgCount;
-	Shared->Args = Args;
-	Shared->Arena = FridayArena;
-	Shared->BuildOptions = AppBuildOptions;
-	F_Dispatch(Shared, F_GetNumberOfCPUs());
+	F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs());
 
 	OS_Run(&Window, PlatformFrame, &PlatformContext);
 	return 0;
