@@ -375,7 +375,7 @@ void *OS_NextDrawable(os_window *Window)
 	return (__bridge void*)Drawable;
 }
 
-void OS_UpdateWindow(os_window *Window)
+b32 OS_UpdateWindow(os_window *Window)
 {
 	@autoreleasepool {
 		[NSApp finishLaunching];
@@ -400,9 +400,10 @@ void OS_UpdateWindow(os_window *Window)
 				[NSApp sendEvent:Event];
 			}
 
-			if (GlobalAppDelegate.ShouldQuit) return;
+			if (GlobalAppDelegate.ShouldQuit) return False;
 
 			v2i Size = v2i(OS_WindowWidth(Window), OS_WindowHeight(Window));
 		}
 	}
+	return True;
 }

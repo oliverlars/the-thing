@@ -398,8 +398,11 @@ f_b32        F_AnyFilesChangedInWatch (f_wave *Wave, f_watch *Watch, f_u64 Chang
 
 f_u64 F_HashBytes(f_u64 HashStart, void *Data, f_u64 NumberOfBytesToHash);
 
+#define F_Hash(HashStart, Variable) F_HashBytes(HashStart, &(Variable), sizeof Variable)
+
 f_u64 F_HashStr8(f_str8 String);
 
+f_u64 F_HashCompileOptions(f_compile_options CompileOptions);
 
 f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths);
 f_compilation F_CompileTU (f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain);
@@ -1797,6 +1800,27 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSou
 #undef SkipUntilMatch2
 }
 
+
+f_u64 F_HashCompileOptions(f_compile_options CompileOptions)
+{
+	f_u64 Hash = F_HashStart;
+	Hash = F_Hash(Hash, CompileOptions.Debug);
+	Hash = F_Hash(Hash, CompileOptions.Optimise);
+	for(f_s32 I = 0; I < CompileOptions.IncludePaths.Count; I++)
+	{
+		f_str8 Include = CompileOptions.IncludePaths.Items[I];
+		Hash = F_HashBytes(Hash, Include.Bytes, Include.Size);
+	}
+
+	for(f_s32 I = 0; I < CompileOptions.ExtraFlags.Count; I++)
+	{
+		f_str8 Flag = CompileOptions.ExtraFlags.Items[I];
+		Hash = F_HashBytes(Hash, Flag.Bytes, Flag.Size);
+	}
+
+	return Hash;
+}
+
 f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths)
 {
 	f_str8_list IncludesSeenAlready = {0};
@@ -1826,6 +1850,11 @@ f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_comp
 	F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
 	F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
 	F_Str8ListAppend(Arena, &Args, PathToSourceFile);
+
+	if(CompileOptions.Debug)
+	{
+		F_Str8ListAppendF(Arena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
+	}
 
 	F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPath));
 

@@ -89,6 +89,7 @@ F_LaneEntry(Wave)
 	for F_EachWaveSplit(Wave, Index, SourceFiles.Count)
 	{
 		f_u64 Hash = F_HashSourceAndIncludes(Wave->Arena, SourceFiles.Items[Index], IncludePaths);
+		Hash ^= F_HashCompileOptions(CompileOptions);
 		f_str8 ObjectFile = F_Str8PushF(Wave->Arena, "%llu.o", Hash);
 		ObjectFiles.Items[Index] = F_Str8PushF(Wave->Arena, "%.*s/%.*s", F_Expand(CompileOptions.OutputPath), F_Expand(ObjectFile));
 		if(!F_OS_FileInfoFromFilename(Wave->Arena, ObjectFiles.Items[Index]).Exists)
