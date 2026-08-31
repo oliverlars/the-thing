@@ -28,24 +28,15 @@ typedef struct platform_context
 }
 platform_context;
 
+platform_context PlatformContext;
 
-// HACK!!!
-u64 *SourceFileTimeStamps;
-u64 SourceFileTimeStampsCount;
-
-F_LaneEntry(Wave)
-{
-
-}
-
-
-static void AppCodeReload(f_memory_arena *Arena, platform_context *Context)
+void AppCodeReload(f_memory_arena *Arena)
 {
 	u64 Modified = OS_LastModified(Str8("build/app.dynlib"));
-	if(Modified == Context->AppLibModified) return;
+	if(Modified == PlatformContext.AppLibModified) return;
 
 	// dlopen caches by path, so each load needs a filename nothing has used yet.
-	f_str8 CopyPath = F_Str8PushF(Arena, "build/app-?u64.dynlib", Context->LoadCounter);
+	f_str8 CopyPath = F_Str8PushF(Arena, "build/app-?u64.dynlib", PlatformContext.LoadCounter);
 	f_str8 CopyCommand = F_Str8PushF(Arena, "cp build/app.dynlib ?S", CopyPath);
 	system(F_CStrFromStr8(Arena, CopyCommand));
 
@@ -58,10 +49,10 @@ static void AppCodeReload(f_memory_arena *Arena, platform_context *Context)
 			// The old image is deliberately left loaded: string literals and
 			// Metal completion blocks handed out by it are still referenced
 			// from arena memory that outlives the swap.
-			Context->AppUpdate = Update;
-			Context->AppLibModified = Modified;
-			Context->LoadCounter++;
-			LogInfo("Reloaded app.dynlib (load ?u64)", Context->LoadCounter);
+			PlatformContext.AppUpdate = Update;
+			PlatformContext.AppLibModified = Modified;
+			PlatformContext.LoadCounter++;
+			LogInfo("Reloaded app.dynlib (load ?u64)", PlatformContext.LoadCounter);
 		}
 		else
 		{
@@ -74,15 +65,20 @@ static void AppCodeReload(f_memory_arena *Arena, platform_context *Context)
 	}
 }
 
-static void PlatformFrame(void *UserData, v2i ViewportSize)
+F_LaneEntry(Wave)
 {
-	platform_context *Context = (platform_context*)UserData;
+	if(F_WaveIsFirstLane(Wave))
+	{
 
-	AppCodeReload(Context->FridayArena, Context);
+		AppCodeReload(PlatformContext.FridayArena);
 
-	Context->AppUpdate(Context->Memory, ViewportSize);
-	Context->FrameCounter++;
+		OS_UpdateWindow(PlatformContext.Memory->Window);
+
+		PlatformContext.AppUpdate(PlatformContext.Memory, v2i(640, 580));
+		PlatformContext.FrameCounter++;
+	}
 }
+
 
 int main(int ArgCount, char **Args)
 {
@@ -139,10 +135,9 @@ int main(int ArgCount, char **Args)
 		}
 	}
 
-	platform_context PlatformContext = {0};
 	PlatformContext.Memory = &AppMemory;
 
-	AppCodeReload(PlatformContext.FridayArena, &PlatformContext);
+	AppCodeReload(PlatformContext.FridayArena);
 	if(!PlatformContext.AppUpdate)
 	{
 		LogError("no app code to run — build build/app.dynlib first");
@@ -185,16 +180,6 @@ int main(int ArgCount, char **Args)
 	F_Str8ListAppend(FridayArena, &PlatformContext.SourceFiles, F_Str8("app.c"));
 	F_Str8ListAppend(FridayArena, &PlatformContext.SourceFiles, F_Str8("build/embedded_fonts.c"));
 
-	SourceFileTimeStampsCount = 0;
-	for(f_str8_list_node *Node = PlatformContext.SourceFiles.First; Node; Node = Node->Next)
-	{
-		SourceFileTimeStampsCount += 1;
-	}
-
-	SourceFileTimeStamps = (u64*)(F_ArenaPush(FridayArena, sizeof(u64)*SourceFileTimeStampsCount));
-
 	F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs());
-
-	OS_Run(&Window, PlatformFrame, &PlatformContext);
 	return 0;
 }

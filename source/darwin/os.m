@@ -375,39 +375,34 @@ void *OS_NextDrawable(os_window *Window)
 	return (__bridge void*)Drawable;
 }
 
-void OS_Run(os_window *Window, os_frame_fn FrameFn, void *UserData)
+void OS_UpdateWindow(os_window *Window)
 {
 	@autoreleasepool {
 		[NSApp finishLaunching];
 
 		NSWindow *NSWin = (__bridge NSWindow*)Window->Handle;
+		@autoreleasepool {
+			OS_ResetTransitions();
 
-		while (True)
-		{
-			@autoreleasepool {
-				OS_ResetTransitions();
-
-				NSEvent *Event;
-				while ((Event = [NSApp nextEventMatchingMask:NSEventMaskAny
-				                                  untilDate:[NSDate distantPast]
-				                                     inMode:NSDefaultRunLoopMode
-				                                    dequeue:YES]))
+			NSEvent *Event;
+			while ((Event = [NSApp nextEventMatchingMask:NSEventMaskAny
+																																					untilDate:[NSDate distantPast]
+																																								inMode:NSDefaultRunLoopMode
+																																							dequeue:YES]))
+			{
+				os_event Mapped = OS_EventFromNSEvent(Event, NSWin, GlobalView);
+				if (Mapped.Type != OS_EVENT_NONE)
 				{
-					os_event Mapped = OS_EventFromNSEvent(Event, NSWin, GlobalView);
-					if (Mapped.Type != OS_EVENT_NONE)
-					{
-						OS_PushEvent(Mapped);
-						OS_UpdateInputState(Mapped);
-					}
-					
-					[NSApp sendEvent:Event];
+					OS_PushEvent(Mapped);
+					OS_UpdateInputState(Mapped);
 				}
-
-				if (GlobalAppDelegate.ShouldQuit) break;
-
-				v2i Size = v2i(OS_WindowWidth(Window), OS_WindowHeight(Window));
-				FrameFn(UserData, Size);
+				
+				[NSApp sendEvent:Event];
 			}
+
+			if (GlobalAppDelegate.ShouldQuit) return;
+
+			v2i Size = v2i(OS_WindowWidth(Window), OS_WindowHeight(Window));
 		}
 	}
 }

@@ -110,7 +110,7 @@ typedef struct os_event
 typedef void (*os_frame_fn)(void *UserData, v2i ViewportSize);
 
 os_window OS_MakeWindow(str8 Name, int Width, int Height);
-void OS_Run(os_window *Window, os_frame_fn FrameFn, void *UserData);
+void OS_UpdateWindow(os_window *Window);
 
 void *OS_NextDrawable(os_window *Window); // CAMetalDrawable* (autoreleased)
 
