@@ -1907,6 +1907,8 @@ f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options
 
 	F_StartProcess(Arena, &Link.Process, Args);
 
+	F_Print(F_Str8JoinList(Arena, Args, F_Str8(" ")));
+
 	return Link;
 }
 
