@@ -35,7 +35,7 @@ void AppCodeReload(f_memory_arena *Arena)
 {
 	f_u64 Mark = Arena->At;
 	u64 Modified = OS_LastModified(Str8("build/app.dynlib"));
-	if(Modified > 0 && Modified == PlatformContext.AppLibModified) return;
+	if(Modified == PlatformContext.AppLibModified) return;
 
 	// dlopen caches by path, so each load needs a filename nothing has used yet.
 	f_str8 CopyPath = F_Str8PushF(Arena, "build/app-%llu.dynlib", PlatformContext.LoadCounter);
@@ -78,6 +78,7 @@ F_LaneEntry(Wave)
 	{
 		CompileOptions.IncludePaths = F_Str8ArrayFromList(PlatformContext.FridayArena, PlatformContext.IncludePaths);
 		CompileOptions.Debug = F_True;
+		CompileOptions.ExtraFlags = F_Str8ArrayFromMany(PlatformContext.FridayArena, F_Str8("-fobjc-arc"));
 	}
 	F_BroadcastFirstLane(Wave, CompileOptions);
 
@@ -85,7 +86,6 @@ F_LaneEntry(Wave)
 	f_link_options LinkOptions = {0};
 	if(F_WaveIsFirstLane(Wave))
 	{
-		LinkOptions.OutputName = F_Str8PushF(PlatformContext.FridayArena, "build/app-%llu.dynlib", PlatformContext.LoadCounter);
 		LinkOptions.OutputKind = F_OUTPUT_DYNAMIC;
 		LinkOptions.ExtraFlags = PlatformContext.ExtraFlags;
 	}
@@ -121,16 +121,17 @@ F_LaneEntry(Wave)
 		{
 			if(F_WaveIsFirstLane(Wave))
 			{
+				LinkOptions.OutputName = F_Str8PushF(Arena, "build/app.dynlib");
 				f_link Link = F_LinkTUs(Arena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
 				F_WaitForProcess(&Link.Process);
 			}
 		}
 	}
 
-
+	F_WaveBarrier(Wave);
 	for(;;)
 	{
-
+		OS_BeginFrame();
 		f_str8_array FilesChanged = F_FilesChangedInWatch(Arena, Wave, &Watch, F_DEFAULT_TIMEOUT_MS);
 		if(FilesChanged.Count > 0)
 		{
@@ -150,11 +151,14 @@ F_LaneEntry(Wave)
 			{
 				if(F_WaveIsFirstLane(Wave))
 				{
+					LinkOptions.OutputName = F_Str8PushF(Arena, "build/app-%llu.dynlib", PlatformContext.LoadCounter);
 					f_link Link = F_LinkTUs(Arena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
 					F_WaitForProcess(&Link.Process);
 				}
 			}
 		}
+
+		F_WaveBarrier(Wave);
 
 		if(F_WaveIsFirstLane(Wave))
 		{
@@ -166,6 +170,7 @@ F_LaneEntry(Wave)
 			PlatformContext.AppUpdate(PlatformContext.Memory, v2i(1280*2, 720*2));
 			PlatformContext.FrameCounter++;
 		}
+		OS_EndFrame();
 	}
 }
 
@@ -177,16 +182,16 @@ int main(int ArgCount, char **Args)
 	SetThreadLocalContextPointer(&MainThreadContext);
 
 	per_thread_context *Ctx = GetThreadLocalContext();
-	Ctx->ScratchArenas[0] = ArenaInitialise(GigaBytes(1));
-	Ctx->ScratchArenas[1] = ArenaInitialise(GigaBytes(1));
-	Ctx->LogArena = ArenaInitialise(MegaBytes(64));
+	Ctx->ScratchArenas[0] = ArenaInitialise(GigaBytes(4));
+	Ctx->ScratchArenas[1] = ArenaInitialise(GigaBytes(4));
+	Ctx->LogArena = ArenaInitialise(MegaBytes(1024));
 	Ctx->Logger = LoggerInitialise(Ctx->LogArena);
 	Ctx->Logger->Arena = Ctx->LogArena;
 
 
 	app_memory AppMemory = {0};
-	AppMemory.FrameArenas[0] = ArenaInitialise(MegaBytes(256));
-	AppMemory.FrameArenas[1] = ArenaInitialise(MegaBytes(256));
+	AppMemory.FrameArenas[0] = ArenaInitialise(GigaBytes(4));
+	AppMemory.FrameArenas[1] = ArenaInitialise(GigaBytes(4));
 	AppMemory.PermanentArena = Arena;
 	AppMemory.ThreadContext = &MainThreadContext;
 	SetTemporaryArena(AppMemory.FrameArenas[0]);

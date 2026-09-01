@@ -1856,6 +1856,11 @@ f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_comp
 		F_Str8ListAppendF(Arena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
 	}
 
+	for(int I = 0; I < CompileOptions.ExtraFlags.Count; I++)
+	{
+		F_Str8ListAppend(Arena, &Args, CompileOptions.ExtraFlags.Items[I]);
+	}
+
 	F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPath));
 
 	for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)

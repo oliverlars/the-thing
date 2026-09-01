@@ -22,6 +22,8 @@ F_LaneEntry(Wave)
 	);
 	CompileOptions.Debug = F_True;
 
+	CompileOptions.ExtraFlags = F_Str8ArrayFromMany(Wave->Arena, F_Str8("-fobjc-arc"));
+
 	f_str8_array IncludePaths = F_Str8ArrayFromMany(Wave->Arena,
 	F_Str8("include/"),
 	F_Str8("external/"),

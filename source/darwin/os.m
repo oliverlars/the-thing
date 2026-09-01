@@ -368,6 +368,21 @@ v2f OS_MousePosition(os_window *Window)
 	return v2f(X, Y);
 }
 
+void *objc_autoreleasePoolPush(void);
+void  objc_autoreleasePoolPop(void *Token);
+
+void *Pool;
+
+void OS_BeginFrame()
+{
+	Pool = objc_autoreleasePoolPush();
+}
+
+void OS_EndFrame()
+{
+	objc_autoreleasePoolPop(Pool);
+}
+
 void *OS_NextDrawable(os_window *Window)
 {
 	CAMetalLayer *Layer = (__bridge CAMetalLayer*)Window->Layer;

@@ -112,6 +112,10 @@ typedef void (*os_frame_fn)(void *UserData, v2i ViewportSize);
 os_window OS_MakeWindow(str8 Name, int Width, int Height);
 b32 OS_UpdateWindow(os_window *Window);
 
+void OS_BeginFrame();
+
+void OS_EndFrame();
+
 void *OS_NextDrawable(os_window *Window); // CAMetalDrawable* (autoreleased)
 
 int OS_WindowWidth(os_window *Window);
