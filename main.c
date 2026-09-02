@@ -131,32 +131,38 @@ F_LaneEntry(Wave)
 	F_WaveBarrier(Wave);
 	for(;;)
 	{
-		OS_BeginFrame();
-		f_str8_array FilesChanged = F_FilesChangedInWatch(Arena, Wave, &Watch, F_DEFAULT_TIMEOUT_MS);
-		if(FilesChanged.Count > 0)
+		if(F_WaveIsFirstLane(Wave)) OS_BeginFrame();
+		
+		if(F_AnyFilesChangedInWatch(Wave, &Watch, F_DEFAULT_TIMEOUT_MS))
 		{
 			f_b32 CompileSucceeded = F_True;
-			for F_EachWaveSplit(Wave, I, FilesChanged.Count)
+			for F_EachWaveSplit(Wave, I, Watch.FileCount)
 			{
-				f_u64 Hash = F_HashSourceAndIncludes(Wave->Arena, FilesChanged.Items[I], IncludePaths);
-				Hash ^= F_HashCompileOptions(CompileOptions);
-				f_str8 ObjectFile = F_Str8PushF(Wave->Arena, "%llu.o", Hash);
-				ObjectFiles.Items[I] = F_Str8PushF(Wave->Arena, "build/%.*s", F_Expand(ObjectFile));
-				CompileOptions.OutputName = ObjectFile;
-				f_compilation Compilation = F_CompileTU(Arena, FilesChanged.Items[I], CompileOptions, F_TOOLCHAIN_CLANG);
-				F_WaitForProcess(&Compilation.Process);
-				CompileSucceeded &= F_ProcessExitedCleanly(&Compilation.Process);
-			}
-			if(F_WaveAnyTrue(Wave, CompileSucceeded))
-			{
-				if(F_WaveIsFirstLane(Wave))
+				f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave->Arena, Watch.Files[I]);
+				if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch.TimeStamps[I] > 0) printf("Change time in ms: %llu\n", FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch.TimeStamps[I]);
+				if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch.TimeStamps[I] > 0)
 				{
-					LinkOptions.OutputName = F_Str8PushF(Arena, "build/app-%llu.dynlib", PlatformContext.LoadCounter);
-					f_link Link = F_LinkTUs(Arena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
-					F_WaitForProcess(&Link.Process);
+					Watch.TimeStamps[I] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
+					f_u64 Hash = F_HashSourceAndIncludes(Wave->Arena, Watch.Files[I], IncludePaths);
+					CompileOptions.OutputName = F_Str8PushF(Wave->Arena, "build/%llu.o", Hash);
+					ObjectFiles.Items[I] = CompileOptions.OutputName;
+					Hash ^= F_HashCompileOptions(CompileOptions);
+					f_compilation Compilation = F_CompileTU(Arena, Watch.Files[I], CompileOptions, F_TOOLCHAIN_CLANG);
+					F_WaitForProcess(&Compilation.Process);
+					CompileSucceeded &= F_ProcessExitedCleanly(&Compilation.Process);
 				}
 			}
-		}
+
+				if(F_WaveAnyTrue(Wave, CompileSucceeded))
+				{
+					if(F_WaveIsFirstLane(Wave))
+					{
+						LinkOptions.OutputName = F_Str8PushF(Arena, "build/app-%llu.dynlib", PlatformContext.LoadCounter);
+						f_link Link = F_LinkTUs(Arena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
+						F_WaitForProcess(&Link.Process);
+					}
+				}
+			}
 
 		F_WaveBarrier(Wave);
 
@@ -170,7 +176,7 @@ F_LaneEntry(Wave)
 			PlatformContext.AppUpdate(PlatformContext.Memory, v2i(1280*2, 720*2));
 			PlatformContext.FrameCounter++;
 		}
-		OS_EndFrame();
+		if(F_WaveIsFirstLane(Wave)) OS_EndFrame();
 	}
 }
 
