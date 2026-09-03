@@ -157,7 +157,7 @@ F_LaneEntry(Wave)
 				{
 					if(F_WaveIsFirstLane(Wave))
 					{
-						LinkOptions.OutputName = F_Str8PushF(Arena, "build/app-%llu.dynlib", PlatformContext.LoadCounter);
+						LinkOptions.OutputName = F_Str8PushF(Arena, "build/app.dynlib");
 						f_link Link = F_LinkTUs(Arena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
 						F_WaitForProcess(&Link.Process);
 					}
