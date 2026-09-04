@@ -17,17 +17,17 @@ F_LaneEntry(Wave)
 		F_OS_MakeDirectoryIfNotAlreadyMade(Wave->GlobalArena, F_Str8("build"));
 	}
 
-	LinkOptions.ExtraFlags = F_Str8ArrayFromMany(Wave->Arena, 
-		F_Str8("-framework"),  F_Str8("Cocoa"), F_Str8("-framework"), F_Str8("Metal"), F_Str8("-framework"), F_Str8("QuartzCore")
+	LinkOptions.ExtraFlags = F_Str8ArrayFromCStrs(Wave->Arena, 
+		"-framework",  "Cocoa", "-framework", "Metal", "-framework", "QuartzCore"
 	);
 	CompileOptions.Debug = F_True;
 
-	CompileOptions.ExtraFlags = F_Str8ArrayFromMany(Wave->Arena, F_Str8("-fobjc-arc"));
+	CompileOptions.ExtraFlags = F_Str8ArrayFromCStrs(Wave->Arena, "-fobjc-arc");
 
-	f_str8_array IncludePaths = F_Str8ArrayFromMany(Wave->Arena,
-	F_Str8("include/"),
-	F_Str8("external/"),
-	F_Str8("build/"),
+	f_str8_array IncludePaths = F_Str8ArrayFromCStrs(Wave->Arena,
+	"include/",
+	"external/",
+	"build/",
 	);
 
 	CompileOptions.IncludePaths = IncludePaths;
@@ -62,7 +62,7 @@ F_LaneEntry(Wave)
 				F_Str8("external"),
 				.ExcludeDirectories = F_True,
 				.PrependPath = F_True,
-				.FilterByExtension = F_Str8ArrayFromMany(Wave->GlobalArena, F_Str8(".c")),
+				.FilterByExtension = F_Str8ArrayFromCStrs(Wave->GlobalArena, ".c"),
 			)
 		);
 
@@ -119,7 +119,7 @@ F_LaneEntry(Wave)
 			F_WaitForProcess(&Link.Process);
 			FinishedSuccessfully = F_ProcessExitedCleanly(&Link.Process);
 		}
-		f_str8_array StatList = F_Str8ArrayFromMany(
+		f_str8_array StatList = F_Str8ArrayFromStr8s(
 			Wave->GlobalArena,
 			F_Str8PushF(Wave->GlobalArena, "compiled %d TUs in %.2fms",  NumberOfTUsRecompiled, F_MilliSecondsFromTimeStamp(CompileTotalTime)),
 			F_Str8PushF(Wave->GlobalArena, "linked in %.2fms",  F_MilliSecondsFromTimeStamp(F_OS_TimeStamp() - LinkStartTime))

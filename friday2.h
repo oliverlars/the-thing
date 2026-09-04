@@ -304,11 +304,13 @@ void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark);
 
 #define F_ArrayCount(Array) (sizeof(Array) / sizeof((Array)[0]))
 
-#define F_Str8ArrayFromMany(Arena, ...) \
-F_Internal_Str8ArrayFromMany(Arena, ((f_str8[]){ __VA_ARGS__ }), ((sizeof(f_str8[]){ __VA_ARGS__})/sizeof(f_str8)))
+#define F_Str8ArrayFromCStrs(Arena, ...) \
+F_Internal_Str8ArrayFromStr8s(Arena, ((char *[]){ __VA_ARGS__ }), ((sizeof(char *[]){ __VA_ARGS__})/sizeof(char *)))
 
+#define F_Str8ArrayFromStr8s(Arena, ...) \
+F_Internal_Str8ArrayFromStr8s(Arena, ((f_str8[]){ __VA_ARGS__ }), ((sizeof(f_str8[]){ __VA_ARGS__})/sizeof(f_str8)))
 
-f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count);
+f_str8_array F_Internal_Str8Array(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count);
 
 #define F_Str8ListAppendF(Arena, List, ...) \
 F_Str8ListAppend(Arena, List, F_Str8PushF(Arena, __VA_ARGS__))
@@ -974,7 +976,24 @@ f_str8 F_Str8PushF(f_memory_arena *Arena, char *Format, ...)
 	return Result;
 }
 
-f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count)
+f_str8_array F_Internal_Str8ArrayFromCStrs(f_memory_arena *Arena, char **CStrs, f_u64 Str8Count)
+{
+	f_str8_array Result = {0};
+	Result.Items = F_ArenaPushArrayType(Arena, Str8Count, f_str8);
+	Result.Count = Str8Count;
+
+	for(int I = 0; I < Str8Count; I++)
+	{
+		f_s32 CStrLength = strlen(CStrs[I]);
+		Result.Items[I].Bytes = F_ArenaPushArrayType(Arena, CStrLength, f_s8);
+		Result.Items[I].Size = CStrLength;
+		F_MemoryCopy(Result.Items[I].Bytes, CStrs[I], CStrs[I]);
+	}
+
+	return Result;
+}
+
+f_str8_array F_Internal_Str8ArrayFromStr8s(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count)
 {
 	f_str8_array Result = {0};
 	Result.Items = F_ArenaPushArrayType(Arena, Str8Count, f_str8);
@@ -989,6 +1008,7 @@ f_str8_array F_Internal_Str8ArrayFromMany(f_memory_arena *Arena, f_str8 *Str8s, 
 
 	return Result;
 }
+
 
 void F_Str8ListAppendMany(f_memory_arena *Arena, f_str8_list *Head, f_str8_list Tail)
 {
