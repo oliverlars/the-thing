@@ -78,7 +78,7 @@ F_LaneEntry(Wave)
 	{
 		CompileOptions.IncludePaths = F_Str8ArrayFromList(PlatformContext.FridayArena, PlatformContext.IncludePaths);
 		CompileOptions.Debug = F_True;
-		CompileOptions.ExtraFlags = F_Str8ArrayFromMany(PlatformContext.FridayArena, F_Str8("-fobjc-arc"));
+		CompileOptions.ExtraFlags = F_Str8ArrayFromCStrs(PlatformContext.FridayArena, "-fobjc-arc");
 	}
 	F_BroadcastFirstLane(Wave, CompileOptions);
 
@@ -102,7 +102,6 @@ F_LaneEntry(Wave)
 	f_str8_array SourceFiles = F_Str8ArrayFromList(PlatformContext.FridayArena, PlatformContext.SourceFiles);
 	f_str8_array IncludePaths = F_Str8ArrayFromList(PlatformContext.FridayArena, PlatformContext.IncludePaths);
 
-	f_memory_arena *Arena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(1));
 	{
 		f_b32 CompileSucceeded = F_True;
 		for F_EachWaveSplit(Wave, I, SourceFiles.Count)
@@ -121,8 +120,8 @@ F_LaneEntry(Wave)
 		{
 			if(F_WaveIsFirstLane(Wave))
 			{
-				LinkOptions.OutputName = F_Str8PushF(Arena, "build/app.dynlib");
-				f_link Link = F_LinkTUs(Arena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
+				LinkOptions.OutputName = F_Str8PushF(Wave->Arena, "build/app.dynlib");
+				f_link Link = F_LinkTUs(Wave->Arena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
 				F_WaitForProcess(&Link.Process);
 			}
 		}

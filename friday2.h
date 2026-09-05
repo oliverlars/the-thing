@@ -156,6 +156,12 @@ typedef struct f_exit_code
 }
 f_exit_code;
 
+typedef struct f_module
+{
+	f_u64 Handle;
+}
+f_module;
+
 typedef struct f_process
 {
 	f_u64 ID;
@@ -241,6 +247,38 @@ typedef enum f_output_kind
 }
 f_output_kind;
 
+typedef struct f_build_options
+{
+	f_output_kind  Kind;
+
+		f_str8        PathToOutput;
+
+	f_str8_array   SourceFiles;
+	f_str8_array   IncludeDirectories;
+
+	f_b32          Debug;
+	f_b32          Optimise;
+	f_str8_array   Defines;
+	f_str8_array   Libraries;
+	f_str8_array   Frameworks;
+
+	f_str8_array   CompilerSpecificFlags;
+	f_toolchain    Toolchain;
+}
+f_build_options;
+
+typedef struct f_build_report
+{
+	f_b32  Succeeded;
+	f_b32  Changed;
+	f_str8 OutputPath;
+	f_str8 Diagnostics;
+	f_s64  TUsCompiled;
+	f_f32  CompiledTimeInMilliseconds;
+	f_f32  LinkedTimeInMilliseconds;
+}
+f_build_report;
+
 typedef struct f_link_options
 {
 	f_str8 OutputPath;
@@ -283,8 +321,8 @@ f_thread;
 
 typedef struct f_thread_entry_params
 {
-	void (*LaneEntry)(f_wave *WaveArgument);
-	f_wave *WaveArgument;
+	void (*LaneEntry)();
+	f_wave Wave;
 }
 f_thread_entry_params;
 
@@ -305,7 +343,7 @@ void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark);
 #define F_ArrayCount(Array) (sizeof(Array) / sizeof((Array)[0]))
 
 #define F_Str8ArrayFromCStrs(Arena, ...) \
-F_Internal_Str8ArrayFromStr8s(Arena, ((char *[]){ __VA_ARGS__ }), ((sizeof(char *[]){ __VA_ARGS__})/sizeof(char *)))
+F_Internal_Str8ArrayFromCStrs(Arena, ((char *[]){ __VA_ARGS__ }), ((sizeof(char *[]){ __VA_ARGS__})/sizeof(char *)))
 
 #define F_Str8ArrayFromStr8s(Arena, ...) \
 F_Internal_Str8ArrayFromStr8s(Arena, ((f_str8[]){ __VA_ARGS__ }), ((sizeof(f_str8[]){ __VA_ARGS__})/sizeof(f_str8)))
@@ -330,50 +368,51 @@ f_s64        F_Str8ListLength     (f_str8_list List);
 
 void F_DispatchAcrossNLanes(f_s64 LaneCount);
 
-f_b32           F_WaveIsFirstLane        (f_wave *Wave);
-f_u64           F_WaveInclusivePrefixSum (f_wave *Wave, f_u64 Value);
-f_u64           F_WaveExclusivePrefixSum (f_wave *Wave, f_u64 Value);
+f_b32           F_IsFirstLane        ();
+f_u64           F_WaveInclusivePrefixSum (f_u64 Value);
+f_u64           F_WaveExclusivePrefixSum (f_u64 Value);
 
-f_u64           F_WaveSum (f_wave *Wave, f_u64 Value);
+f_u64           F_WaveSum (f_u64 Value);
 
-#define         F_WaveAnyTrue(Wave, Value) F_Internal_WaveAnyTrue(Wave, Value != 0)
-#define         F_WaveAllTrue(Wave, Value) F_Internal_WaveAllTrue(Wave, Value != 0)
-f_b32           F_Internal_WaveAnyTrue   (f_wave *Wave, f_b32 Condition);
-f_b32           F_Internal_WaveAllTrue   (f_wave *Wave, f_b32 Condition);
-#define         F_WaveCountTrue(Wave, Value) F_Internal_WaveCountTrue(Wave, Value != 0)
-f_u64           F_Internal_WaveCountTrue (f_wave *Wave, f_b32 Condition);
+#define         F_WaveAnyTrue(Value) F_Internal_WaveAnyTrue(Value != 0)
+#define         F_WaveAllTrue(Value) F_Internal_WaveAllTrue(Value != 0)
+f_b32           F_Internal_WaveAnyTrue   (f_b32 Condition);
+f_b32           F_Internal_WaveAllTrue   (f_b32 Condition);
+#define         F_WaveCountTrue(Value) F_Internal_WaveCountTrue(Value != 0)
+f_u64           F_Internal_WaveCountTrue (f_b32 Condition);
 
 // One bit per lane, set if that lane's Value was true. TODO: > 64 lanes
-#define         F_WaveBallot(Wave, Value) F_Internal_WaveBallot(Wave, Value != 0)
-f_u64           F_Internal_WaveBallot    (f_wave *Wave, f_b32 Condition);
+#define         F_WaveBallot(Value) F_Internal_WaveBallot(Value != 0)
+f_u64           F_Internal_WaveBallot    (f_b32 Condition);
 f_u64           F_CountBits              (f_u64 Bits);
 
-#define F_BroadcastLane(Wave, Variable, SourceLane) \
+#define F_BroadcastLane(Variable, SourceLane) \
       do {\
-              f_wave *F_W_ = (Wave);\
-              if(F_W_->Lane == (SourceLane)) F_W_->BroadcastPointers[0] = &(Variable);\
-              F_WaveBarrier(F_W_);\
-              F_MemoryCopy(&(Variable), F_W_->BroadcastPointers[0], sizeof(Variable));\
-              F_WaveBarrier(F_W_);\
+              if(Wave.Lane == (SourceLane)) Wave.BroadcastPointers[0] = &(Variable);\
+              F_WaveBarrier();\
+              F_MemoryCopy(&(Variable), Wave.BroadcastPointers[0], sizeof(Variable));\
+              F_WaveBarrier();\
       } while(0)
  
-#define F_BroadcastFirstLane(Wave, Variable) F_BroadcastLane(Wave, Variable, 0)
+#define F_BroadcastFirstLane(Variable) F_BroadcastLane(Variable, 0)
 
-void            F_WaveBarrier (f_wave *Wave);
+void            F_WaveBarrier ();
 
 #define __F_Concat_(A, B) A##B
 #define __F_Concat(A, B) __F_Concat_(A, B)
 
-#define F_EachWaveSplit(Wave, Index, Count) \
-    (f_s64 Index                       = (Wave)->Lane, \
+#define F_EachWaveSplit(Index, Count) \
+    (f_s64 Index                       = Wave.Lane, \
            __F_Concat(F_ForEnd__,  __LINE__) = (f_s64)(Count), \
-           __F_Concat(F_ForStep__, __LINE__) = (Wave)->LaneCount; \
+           __F_Concat(F_ForStep__, __LINE__) = Wave.LaneCount; \
      Index < __F_Concat(F_ForEnd__, __LINE__); \
      Index += __F_Concat(F_ForStep__, __LINE__))
 
 void  F_StartProcess   (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
 f_b32 F_PollProcess    (f_process *Process);
 void  F_WaitForProcess (f_process *Process);
+
+f_module F_ModuleFromPath ();
 
 f_b32 F_ProcessExitedCleanly(f_process *Process);
 
@@ -390,10 +429,10 @@ void F_Internal_WaitForMultipleProcesses (f_process **Processes, f_u64 ProcessCo
 
 #define F_DEFAULT_TIMEOUT_MS (16)
 
-f_watch      F_WatchFilesFromArray    (f_wave *Wave, f_str8_array FilePaths);
+f_watch      F_WatchFilesFromArray    (f_str8_array FilePaths);
 
-f_str8_array F_FilesChangedInWatch    (f_memory_arena *Arena, f_wave *Wave, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
-f_b32        F_AnyFilesChangedInWatch (f_wave *Wave, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
+f_str8_array F_FilesChangedInWatch    (f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
+f_b32        F_AnyFilesChangedInWatch (f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
 
 
 #define F_HashStart (0xCBF29CE484222325ULL)
@@ -408,8 +447,9 @@ f_u64 F_HashCompileOptions(f_compile_options CompileOptions);
 
 f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths);
 f_compilation F_CompileTU (f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain);
-
 f_link F_LinkTUs (f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain);
+
+
 
 f_u8 *F_OS_Reserve   (f_s64 NumberOfBytes);
 void  F_OS_Commit    (void *Address, f_s64 BytesToCommit);
@@ -474,10 +514,7 @@ f_file F_OS_StandardOut(void);
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 
-
-#define F_LaneEntry(Wave) void F_LaneEntry(f_wave *Wave)
-
-F_LaneEntry(Wave);
+void F_LaneEntry();
 
 
 typedef enum f_build_status
@@ -490,21 +527,22 @@ typedef enum f_build_status
 }
 f_build_status;
 
-typedef struct f_build_report
-{
-	f_compile_options CompileOptions;
-	f_link_options    LinkOptions;
-	f_toolchain       Toolchain;
-	f_u64             TotalTUsToCompile;
-	f_u64             TUsCompiledSoFar;
-	f_build_status    Status;
-}
-f_build_report;
-
 void F_Report(f_memory_arena *Arena, f_build_report Report);
 
+f_memory_arena *F_PersistentArena();
+f_memory_arena *F_TransientArena();
+
 #endif
+
 #ifdef FRIDAY_IMPLEMENTATION
+
+#if defined(OS_WINDOWS)
+#define thread_local __declspec(thread)
+#else
+#define thread_local __thread
+#endif
+
+thread_local f_wave Wave;
 
 #include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
 #include <stdio.h> // printf()
@@ -529,7 +567,6 @@ void F_Report(f_memory_arena *Arena, f_build_report Report);
 #endif
 
 extern char **environ;
-
 
 void *F_MemoryCopy(void *Destination, void *Source, f_u64 BytesToCopy)
 {
@@ -772,42 +809,42 @@ f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush, f_b32 ShouldZero
 	return Result;
 }
 
-f_b32 F_WaveIsFirstLane(f_wave *Wave)
+f_b32 F_IsFirstLane()
 {
 	F_WaveBarrier(Wave);
-	return Wave->Lane == 0;
+	return Wave.Lane == 0;
 }
 
-f_u64 F_Internal_WaveCountTrue(f_wave *Wave, f_b32 Condition)
+f_u64 F_Internal_WaveCountTrue(f_b32 Condition)
 {
-	if(F_WaveIsFirstLane(Wave)) atomic_store_explicit(Wave->Vote, 0, memory_order_relaxed);
-	F_WaveBarrier(Wave);
-	atomic_fetch_add_explicit(Wave->Vote, (Condition != 0), memory_order_relaxed);
-	F_WaveBarrier(Wave);
-	f_u64 Result = atomic_load_explicit(Wave->Vote, memory_order_relaxed);
-	F_WaveBarrier(Wave);
+	if(F_IsFirstLane()) atomic_store_explicit(Wave.Vote, 0, memory_order_relaxed);
+	F_WaveBarrier();
+	atomic_fetch_add_explicit(Wave.Vote, (Condition != 0), memory_order_relaxed);
+	F_WaveBarrier();
+	f_u64 Result = atomic_load_explicit(Wave.Vote, memory_order_relaxed);
+	F_WaveBarrier();
 	return Result;
 }
 
-f_b32 F_Internal_WaveAnyTrue(f_wave *Wave, f_b32 Condition)
+f_b32 F_Internal_WaveAnyTrue(f_b32 Condition)
 {
-	return F_Internal_WaveCountTrue(Wave, Condition) > 0;
+	return F_Internal_WaveCountTrue(Condition) > 0;
 }
 
-f_b32 F_Internal_WaveAllTrue(f_wave *Wave, f_b32 Condition)
+f_b32 F_Internal_WaveAllTrue(f_b32 Condition)
 {
-	return F_Internal_WaveCountTrue(Wave, Condition) == (f_u64)Wave->LaneCount;
+	return F_Internal_WaveCountTrue(Condition) == (f_u64)Wave.LaneCount;
 }
 
-f_u64 F_Internal_WaveBallot(f_wave *Wave, f_b32 Condition)
+f_u64 F_Internal_WaveBallot(f_b32 Condition)
 {
-	F_Assert(Wave->LaneCount <= 64);
-	if(F_WaveIsFirstLane(Wave)) atomic_store_explicit(Wave->Ballot, 0, memory_order_relaxed);
-	F_WaveBarrier(Wave);
-	if(Condition) atomic_fetch_or_explicit(Wave->Ballot, 1ull << Wave->Lane, memory_order_relaxed);
-	F_WaveBarrier(Wave);
-	f_u64 Result = atomic_load_explicit(Wave->Ballot, memory_order_relaxed);
-	F_WaveBarrier(Wave);
+	F_Assert(Wave.LaneCount <= 64);
+	if(F_IsFirstLane()) atomic_store_explicit(Wave.Ballot, 0, memory_order_relaxed);
+	F_WaveBarrier();
+	if(Condition) atomic_fetch_or_explicit(Wave.Ballot, 1ull << Wave.Lane, memory_order_relaxed);
+	F_WaveBarrier();
+	f_u64 Result = atomic_load_explicit(Wave.Ballot, memory_order_relaxed);
+	F_WaveBarrier();
 	return Result;
 }
 
@@ -818,56 +855,56 @@ f_u64 F_CountBits(f_u64 Bits)
 	return Result;
 }
 
-f_u64 F_WaveExclusivePrefixSum (f_wave *Wave, f_u64 Value)
+f_u64 F_WaveExclusivePrefixSum (f_u64 Value)
 {
-	Wave->BroadcastPointers[Wave->Lane] = &Value;
+	Wave.BroadcastPointers[Wave.Lane] = &Value;
 	F_WaveBarrier(Wave);
 
 	f_u64 ValueForThisLane = 0;
-	for(f_u64 I = 0; I < Wave->Lane; I++)
+	for(f_u64 I = 0; I < Wave.Lane; I++)
 	{
-		ValueForThisLane += *(f_u64 *)Wave->BroadcastPointers[I];
+		ValueForThisLane += *(f_u64 *)Wave.BroadcastPointers[I];
 	}
 	F_WaveBarrier(Wave);
 	return ValueForThisLane;
 }
 
-f_u64 F_WaveInclusivePrefixSum (f_wave *Wave, f_u64 Value)
+f_u64 F_WaveInclusivePrefixSum (f_u64 Value)
 {
-	return F_WaveExclusivePrefixSum(Wave, Value) + Value;
+	return F_WaveExclusivePrefixSum(Value) + Value;
 }
 
-f_u64 F_WaveSum(f_wave *Wave, f_u64 Value)
+f_u64 F_WaveSum(f_u64 Value)
 {
-	Wave->BroadcastPointers[Wave->Lane] = &Value;
+	Wave.BroadcastPointers[Wave.Lane] = &Value;
 	F_WaveBarrier(Wave);
 	f_u64 Sum = 0;
-	for(f_u64 I = 0; I < Wave->LaneCount; I++)
+	for(f_u64 I = 0; I < Wave.LaneCount; I++)
 	{
-		Sum += *(f_u64 *)Wave->BroadcastPointers[I];
+		Sum += *(f_u64 *)Wave.BroadcastPointers[I];
 	}
 	F_WaveBarrier(Wave);
 	return Sum;
 }
 
-void F_WaveBarrier(f_wave *Wave)
+void F_WaveBarrier()
 {
-	f_s64 Generation = atomic_load_explicit(&Wave->Barrier->Generation, memory_order_relaxed);
-	f_s64 LanesArrived = atomic_fetch_add_explicit(&Wave->Barrier->LanesWaiting, 1, memory_order_release);
+	f_s64 Generation = atomic_load_explicit(&Wave.Barrier->Generation, memory_order_relaxed);
+	f_s64 LanesArrived = atomic_fetch_add_explicit(&Wave.Barrier->LanesWaiting, 1, memory_order_release);
 
-	if(LanesArrived == Wave->Barrier->LaneCount - 1)
+	if(LanesArrived == Wave.Barrier->LaneCount - 1)
 	{
 		atomic_thread_fence(memory_order_acquire);
-		atomic_store_explicit(&Wave->Barrier->LanesWaiting, 0, memory_order_relaxed);
-		atomic_store_explicit(&Wave->Barrier->Generation, Generation + 1, memory_order_release);
-		F_OS_FutexWakeAll(&Wave->Barrier->Generation);
+		atomic_store_explicit(&Wave.Barrier->LanesWaiting, 0, memory_order_relaxed);
+		atomic_store_explicit(&Wave.Barrier->Generation, Generation + 1, memory_order_release);
+		F_OS_FutexWakeAll(&Wave.Barrier->Generation);
 	}
 	else
 	{
 		f_s64 Spins = 0;
 		for(;;)
 		{
-			if(atomic_load_explicit(&Wave->Barrier->Generation, memory_order_acquire) != Generation) break;
+			if(atomic_load_explicit(&Wave.Barrier->Generation, memory_order_acquire) != Generation) break;
 
 			if(Spins < 4096)
 			{
@@ -875,7 +912,7 @@ void F_WaveBarrier(f_wave *Wave)
 			}
 			else
 			{
-				F_OS_FutexWait(&Wave->Barrier->Generation, Generation);
+				F_OS_FutexWait(&Wave.Barrier->Generation, Generation);
 			}
 			Spins++;
 		}
@@ -885,13 +922,14 @@ void F_WaveBarrier(f_wave *Wave)
 #if defined(OS_WINDOWS)
 F_Internal_ThreadEntry(ThreadParams)
 {
-	ThreadParams->LaneEntry(ThreadParams->WaveArgument);
+	Wave = ThreadParams->Wave;
+	ThreadParams->LaneEntry();
 	return 0;
 }
 #elif defined(OS_DARWIN)
 F_Internal_ThreadEntry(ThreadParams)
 {
-	ThreadParams->LaneEntry(ThreadParams->WaveArgument);
+	ThreadParams->LaneEntry(ThreadParams->Wave);
 	return F_Null;
 }
 #else
@@ -900,36 +938,38 @@ F_Internal_ThreadEntry(ThreadParams)
 
 void F_DispatchAcrossNLanes(f_s64 LaneCount)
 {
-	f_memory_arena *GlobalArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
-	void **BroadcastPointers   = F_ArenaPushArrayType(GlobalArena, LaneCount, void*);
-	f_thread              *Threads = F_ArenaPushArrayType(GlobalArena, LaneCount, f_thread);
-	f_wave                *Waves   = F_ArenaPushArrayType(GlobalArena, LaneCount, f_wave);
-	f_thread_entry_params *Params  = F_ArenaPushArrayType(GlobalArena, LaneCount, f_thread_entry_params);
+	f_memory_arena *FirstLaneArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
+
+	void **BroadcastPointers   = F_ArenaPushArrayType(FirstLaneArena, LaneCount, void*);
+	f_thread              *Threads = F_ArenaPushArrayType(FirstLaneArena, LaneCount, f_thread);
+	f_thread_entry_params *Params  = F_ArenaPushArrayType(FirstLaneArena, LaneCount, f_thread_entry_params);
 	f_barrier Barrier = {0};
 	Barrier.LaneCount = LaneCount;
-
-	// Only defined for the first lane
-	Waves[0].GlobalArena = GlobalArena;
 
 	_Atomic(f_u64) Vote = 0;
 	_Atomic(f_u64) Ballot = 0;
 	for(int I = 0; I < LaneCount; I++)
 	{
-		Waves[I].Lane = I;
-		Waves[I].LaneCount = LaneCount;
-		Waves[I].Barrier = &Barrier;
-		Waves[I].BroadcastPointers = BroadcastPointers;
-		Waves[I].Vote = &Vote;
-		Waves[I].Ballot = &Ballot;
-		// Need a better idea for this
-		Waves[I].Arena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
-		
-		Params[I].WaveArgument = Waves + I;
+		Params[I].Wave.Lane = I;
+		Params[I].Wave.LaneCount = LaneCount;
+		Params[I].Wave.Barrier = &Barrier;
+		Params[I].Wave.BroadcastPointers = BroadcastPointers;
+		Params[I].Wave.Vote = &Vote;
+		Params[I].Wave.Ballot = &Ballot;
 		Params[I].LaneEntry = F_LaneEntry;
-		if(I >= 1) F_OS_ThreadStart(Threads + I, (f_thread_function)F_Internal_ThreadEntry, Params + I);
+		if(I >= 1)
+		{
+			Params[I].Wave.Arena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
+			F_OS_ThreadStart(Threads + I, (f_thread_function)F_Internal_ThreadEntry, Params + I);
+		}
+		else
+		{
+			Params[0].Wave.Arena = FirstLaneArena;
+		}
 	}
 
-	Params[0].LaneEntry(Params[0].WaveArgument);
+	Wave = Params[0].Wave;
+	Params[0].LaneEntry();
 
 	F_OS_WaitForThreads(Threads + 1, LaneCount - 1);
 }
@@ -987,7 +1027,7 @@ f_str8_array F_Internal_Str8ArrayFromCStrs(f_memory_arena *Arena, char **CStrs, 
 		f_s32 CStrLength = strlen(CStrs[I]);
 		Result.Items[I].Bytes = F_ArenaPushArrayType(Arena, CStrLength, f_s8);
 		Result.Items[I].Size = CStrLength;
-		F_MemoryCopy(Result.Items[I].Bytes, CStrs[I], CStrs[I]);
+		F_MemoryCopy(Result.Items[I].Bytes, CStrs[I], CStrLength);
 	}
 
 	return Result;
@@ -1329,21 +1369,21 @@ void F_OS_ReleaseFile(f_file *File)
 	File->Handle = 0;
 }
 
-f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
+f_watch F_WatchFilesFromArray(f_str8_array FilePaths)
 {
 	f_watch Result = {0};
-	if(F_WaveIsFirstLane(Wave))
+	if(F_IsFirstLane(Wave))
 	{
-		Result.Files = F_ArenaPushArrayType(Wave->GlobalArena, FilePaths.Count, f_str8);
-		Result.TimeStamps = F_ArenaPushArrayType(Wave->GlobalArena, FilePaths.Count, f_u64);
+		Result.Files = F_ArenaPushArrayType(Wave.GlobalArena, FilePaths.Count, f_str8);
+		Result.TimeStamps = F_ArenaPushArrayType(Wave.GlobalArena, FilePaths.Count, f_u64);
 		Result.FileCount = FilePaths.Count;
 	}
 	
-	F_BroadcastFirstLane(Wave, Result);
+	F_BroadcastFirstLane(Result);
 
-	for F_EachWaveSplit(Wave, I, FilePaths.Count)
+	for F_EachWaveSplit(I, FilePaths.Count)
 	{
-		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave->Arena, FilePaths.Items[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave.Arena, FilePaths.Items[I]);
 		Result.TimeStamps[I] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
 		Result.Files[I] = FilePaths.Items[I];
 		Result.FileCount = FilePaths.Count;
@@ -1352,22 +1392,22 @@ f_watch F_WatchFilesFromArray(f_wave *Wave, f_str8_array FilePaths)
 	return Result;
 }
 
-f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
+f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_str8_array Result = {0};
-	if(F_WaveIsFirstLane(Wave))
+	if(F_IsFirstLane(Wave))
 	{
 		Result.Items = F_ArenaPushArrayType(Arena, Watch->FileCount, f_str8);
 	}
-	F_BroadcastFirstLane(Wave, Result);
+	F_BroadcastFirstLane(Result);
 
-	f_s64 Mark = Wave->Arena->At;
-	f_b32 *FileChanged = F_ArenaPushArrayType(Wave->Arena, Watch->FileCount, f_b32);
+	f_s64 Mark = Wave.Arena->At;
+	f_b32 *FileChanged = F_ArenaPushArrayType(Wave.Arena, Watch->FileCount, f_b32);
 
 	f_u64 FilesChangedThisLane = 0;
-	for F_EachWaveSplit(Wave, I, Watch->FileCount)
+	for F_EachWaveSplit(I, Watch->FileCount)
 	{
-		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave->Arena, Watch->Files[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave.Arena, Watch->Files[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > 0) printf("Change time in ms: %llu\n", FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
@@ -1377,8 +1417,8 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch 
 		}
 	}
 
-	f_u64 WriteIndex = F_WaveExclusivePrefixSum(Wave, FilesChangedThisLane);
-	for F_EachWaveSplit(Wave, I, Watch->FileCount)
+	f_u64 WriteIndex = F_WaveExclusivePrefixSum(FilesChangedThisLane);
+	for F_EachWaveSplit(I, Watch->FileCount)
 	{
 		if(FileChanged[I])
 		{
@@ -1387,10 +1427,10 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_wave *Wave, f_watch 
 	}
 
 	// After its own writes the last lane has walked the whole array, so it has the total
-	f_u64  TotalFilesChanged = F_WaveSum(Wave, WriteIndex);
+	f_u64  TotalFilesChanged = F_WaveSum(WriteIndex);
 	Result.Count = (f_s64)TotalFilesChanged;
 
-	F_ArenaResetTo(Wave->Arena, Mark);
+	F_ArenaResetTo(Wave.Arena, Mark);
 	return Result;
 }
 
@@ -1411,20 +1451,20 @@ f_u64 F_HashStr8(f_str8 String)
 	return F_HashBytes(F_HashStart, String.Bytes, String.Size);
 }
 
-f_b32 F_AnyFilesChangedInWatch(f_wave *Wave, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
+f_b32 F_AnyFilesChangedInWatch(f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_b32 AnyChanged = F_False;
-	f_s64 Mark = Wave->Arena->At;
-	for F_EachWaveSplit(Wave, I, Watch->FileCount)
+	f_s64 Mark = Wave.Arena->At;
+	for F_EachWaveSplit(I, Watch->FileCount)
 	{
-		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave->Arena, Watch->Files[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Wave.Arena, Watch->Files[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
 			AnyChanged = F_True;
 		}
 	}
-	F_ArenaResetTo(Wave->Arena, Mark);
-	return F_WaveAnyTrue(Wave, AnyChanged);
+	F_ArenaResetTo(Wave.Arena, Mark);
+	return F_WaveAnyTrue(AnyChanged);
 }
 
 f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8 DirectoryPath, f_internal_directory_options Options)
