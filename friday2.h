@@ -177,6 +177,22 @@ typedef struct f_watch
 }
 f_watch;
 
+typedef struct f_translation_unit
+{
+	f_str8 *PathsForSourceAndIncludes;
+	f_u64   Hash;
+	f_u64  *TimeStamps;
+	f_u64   FileCount;
+}
+f_translation_unit;
+
+typedef struct f_build_watch
+{
+	f_translation_unit *TUs;
+	f_u64               TUCount;
+}
+f_build_watch;
+
 
 
 // TODO: Set up proper archiver flags since 
@@ -398,7 +414,7 @@ void            F_WaveBarrier ();
 #define __F_Concat_(A, B) A##B
 #define __F_Concat(A, B) __F_Concat_(A, B)
 
-#define F_EachWaveSplit(Index, Count) \
+#define F_EachInLaneSpan(Index, Count) \
     (f_s64 Index                       = Lane.ID, \
            __F_Concat(F_ForEnd__,  __LINE__) = (f_s64)(Count), \
            __F_Concat(F_ForStep__, __LINE__) = Lane.LaneCount; \
@@ -430,6 +446,9 @@ f_watch      F_WatchFilesFromArray    (f_str8_array FilePaths);
 
 f_str8_array F_FilesChangedInWatch    (f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
 f_b32        F_AnyFilesChangedInWatch (f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
+
+
+f_b32 *F_MaskOfFilesChangedInTU (f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds);
 
 
 #define F_HashStart (0xCBF29CE484222325ULL)
@@ -535,6 +554,8 @@ f_memory_arena *F_TransientArena();
 
 #ifdef FRIDAY_IMPLEMENTATION
 
+
+
 #ifdef FRIDAY_MAIN
 
 int main(int ArgCount, char **Arguments)
@@ -594,7 +615,6 @@ void F_Internal_AssertFailed(char *File, int Line, char *Expression)
 }
 
 #if defined(_MSC_VER)
-  #include <intrin.h>
 #define F_Yield() YieldProcessor()
 #elif defined(__i386__) || defined(__x86_64__)
 #define F_Yield() __builtin_ia32_pause()
@@ -774,7 +794,7 @@ void F_OS_FutexWakeAll(void *Address)
 #if defined(OS_WINDOWS)
 	WakeByAddressAll(Address);
 #elif defined(OS_DARWIN)
-	os_sync_wake_by_address_all(Address, sizeof Address, OS_SYNC_WAKE_BY_ADDRESS_NONE);
+	os_sync_wake_by_address_all(Address, sizeof(f_u64), OS_SYNC_WAKE_BY_ADDRESS_NONE);
 #else
 #error "Unsupported OS"
 #endif
@@ -1388,26 +1408,6 @@ void F_OS_ReleaseFile(f_file *File)
 	File->Handle = 0;
 }
 
-
-/*
-
-
-
-
-CHANGE NAME FROM WAVE TO LANE!!!!!!!!!!!!
-
-
-
-
-
-
-
-
-
-
-
-*/
-
 f_watch F_WatchFilesFromArray(f_str8_array FilePaths)
 {
 	f_watch Result = {0};
@@ -1420,7 +1420,7 @@ f_watch F_WatchFilesFromArray(f_str8_array FilePaths)
 	
 	F_BroadcastFirstLane(Result);
 
-	for F_EachWaveSplit(I, FilePaths.Count)
+	for F_EachInLaneSpan(I, FilePaths.Count)
 	{
 		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, FilePaths.Items[I]);
 		Result.TimeStamps[I] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
@@ -1429,6 +1429,32 @@ f_watch F_WatchFilesFromArray(f_str8_array FilePaths)
 	}
 
 	return Result;
+}
+
+f_b32 *F_MaskOfFilesChangedInTU(f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds)
+{
+	f_b32 *FilesChangedMask = F_Null;
+	if(F_IsFirstLane())
+	{
+		FilesChangedMask = F_ArenaPushArrayType(Arena, TU->FileCount, f_b32);
+	}
+	F_BroadcastFirstLane(FilesChangedMask);
+
+	f_s64 Mark = Lane.Arena->At;
+
+	for F_EachInLaneSpan(I, TU->FileCount)
+	{
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, TU->PathsForSourceAndIncludes[I]);
+		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[I] > 0) printf("Change time in ms: %llu\n", FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[I]);
+		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[I] > ChangeGranularityInMilliseconds)
+		{
+			TU->TimeStamps[I] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
+			FilesChangedMask[I] = F_True;
+		}
+	}
+
+	F_ArenaResetTo(Lane.Arena, Mark);
+	return FilesChangedMask;
 }
 
 f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
@@ -1444,7 +1470,7 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 
 	f_b32 *FileChanged = F_ArenaPushArrayType(Lane.Arena, Watch->FileCount, f_b32);
 
 	f_u64 FilesChangedThisLane = 0;
-	for F_EachWaveSplit(I, Watch->FileCount)
+	for F_EachInLaneSpan(I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, Watch->Files[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > 0) printf("Change time in ms: %llu\n", FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I]);
@@ -1457,7 +1483,7 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 
 	}
 
 	f_u64 WriteIndex = F_WaveExclusivePrefixSum(FilesChangedThisLane);
-	for F_EachWaveSplit(I, Watch->FileCount)
+	for F_EachInLaneSpan(I, Watch->FileCount)
 	{
 		if(FileChanged[I])
 		{
@@ -1494,7 +1520,7 @@ f_b32 F_AnyFilesChangedInWatch(f_watch *Watch, f_u64 ChangeGranularityInMillisec
 {
 	f_b32 AnyChanged = F_False;
 	f_s64 Mark = Lane.Arena->At;
-	for F_EachWaveSplit(I, Watch->FileCount)
+	for F_EachInLaneSpan(I, Watch->FileCount)
 	{
 		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, Watch->Files[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
@@ -2057,6 +2083,5 @@ void F_PassedBanner(f_str8_array Stats)
 		printf(F_GREEN "%-64s" F_RESET F_DIM "\u2502" F_RESET "  %.*s\n", __PassedASCII[I],  F_Expand(Stat));
 	}
 }
-
 
 #endif

@@ -89,7 +89,7 @@ F_LaneEntry
 
 	f_u64 CompileStartTime = F_OS_TimeStamp();
 	f_u64 NumberOfTUsRecompiled = 0;
-	for F_EachWaveSplit(Index, SourceFiles.Count)
+	for F_EachInLaneSpan(Index, SourceFiles.Count)
 	{
 		f_u64 Hash = F_HashSourceAndIncludes(Lane.Arena, SourceFiles.Items[Index], IncludePaths);
 		Hash ^= F_HashCompileOptions(CompileOptions);
