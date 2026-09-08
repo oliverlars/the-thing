@@ -1431,6 +1431,45 @@ f_watch F_WatchFilesFromArray(f_str8_array FilePaths)
 	return Result;
 }
 
+f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready);
+
+f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths)
+{
+	f_build_watch BuildWatch = {0};
+	if(F_IsFirstLane())
+	{
+		BuildWatch.TUs = F_ArenaPushArrayType(Arena, SourceFilePaths.Count, f_translation_unit);
+		BuildWatch.TUCount = SourceFilePaths.Count;
+	}
+	F_BroadcastFirstLane(BuildWatch);
+
+
+	for F_EachInLaneSpan(I, SourceFilePaths.Count)
+	{
+		f_str8_list IncludesSeenAlreadyList = {0};
+		BuildWatch.TUs[I].Hash = __F_Internal_HashSourceAndIncludes(Lane.Arena, SourceFilePaths.Items[I], IncludePaths, &IncludesSeenAlreadyList);
+		f_str8_array IncludesSeenAlready = F_Str8ArrayFromList(Lane.Arena, IncludesSeenAlreadyList);
+		BuildWatch.TUs[I].FileCount = 1 + IncludesSeenAlready.Count;
+		BuildWatch.TUs[I].PathsForSourceAndIncludes = F_ArenaPushArrayType(Lane.Arena, BuildWatch.TUs[I].FileCount, f_str8);
+		BuildWatch.TUs[I].TimeStamps = F_ArenaPushArrayType(Lane.Arena, BuildWatch.TUs[I].FileCount, f_u64);
+		for(f_s32 FileIndex = 0; I < BuildWatch.TUs[I].FileCount; FileIndex++) 
+		{
+			f_file_info FileInfo;
+			if(FileIndex == 0)
+			{
+				FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, SourceFilePaths.Items[I]);
+			}
+			else
+			{
+				FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, IncludesSeenAlready.Items[FileIndex - 1]);
+			}
+			BuildWatch.TUs[I].TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch; 
+		}
+	}
+
+	return BuildWatch;
+}
+
 f_b32 *F_MaskOfFilesChangedInTU(f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_b32 *FilesChangedMask = F_Null;
@@ -1829,7 +1868,7 @@ void F_Internal_WaitForMultipleProcesses(f_process **Processes, f_u64 ProcessCou
 }
 
 
-f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list IncludesSeenAlready)
+f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready)
 {
 #define CharAt(Index) ((Index) < Source.Size ? Source.Bytes[Index] : 0)
 #define AdvanceBy(Index, Amount) ((Index += Amount), Index < Source.Size)
@@ -1885,7 +1924,7 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSou
 						}
 					}
 					f_b32 IncludeSeenAlready = F_False;
-					for(f_str8_list_node *Node = IncludesSeenAlready.First; Node; Node = Node->Next)
+					for(f_str8_list_node *Node = IncludesSeenAlready->First; Node; Node = Node->Next)
 					{
 						if(F_Str8Equal(Node->String, PathToInclude)) IncludeSeenAlready = F_True;
 					}
@@ -1893,7 +1932,7 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSou
 					{
 						// This isn't perfect but it's actually find since even though the order of hashing with xor doesn't now matter,
 						// it's never an issue with includes.
-						F_Str8ListAppend(Arena, &IncludesSeenAlready, PathToInclude);
+						F_Str8ListAppend(Arena, IncludesSeenAlready, PathToInclude);
 						SourceAndIncludesHash ^= __F_Internal_HashSourceAndIncludes(Arena, PathToInclude, IncludePaths, IncludesSeenAlready);
 					}
 				}
@@ -1949,7 +1988,7 @@ f_u64 F_HashCompileOptions(f_compile_options CompileOptions)
 f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths)
 {
 	f_str8_list IncludesSeenAlready = {0};
-	return __F_Internal_HashSourceAndIncludes(Arena, PathToSource, IncludePaths, IncludesSeenAlready);
+	return __F_Internal_HashSourceAndIncludes(Arena, PathToSource, IncludePaths, &IncludesSeenAlready);
 }
 
 f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_compile_options CompileOptions, f_toolchain Toolchain)
