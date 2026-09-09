@@ -74,7 +74,6 @@ void *F_MemoryZero(void *Destination, f_u64 BytesToZero);
 
 #define F_Temporary(Arena) for(f_s64 __Mark__ = Arena->At, _I_ = 0; !_I_; (_I_++, F_ArenaResetTo((Arena), __Mark__)))
 
-
 typedef struct f_memory_arena
 {
 	f_u8 *Start;
@@ -339,6 +338,22 @@ typedef struct f_thread_entry_params
 }
 f_thread_entry_params;
 
+
+typedef struct f_error
+{
+	f_str8 Message;
+	struct f_error *Next;
+	struct f_error *Previous;
+}
+f_error;
+
+typedef struct f_error_stream
+{
+	f_error *First;
+	f_error *Last;
+}
+f_error_stream;
+
 #define F_ArenaPushType(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type), F_True)
 #define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)), F_True)
 #define F_ArenaPush(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush, F_True)
@@ -365,6 +380,23 @@ f_str8_array F_Internal_Str8Array(f_memory_arena *Arena, f_str8 *Str8s, f_u64 St
 
 #define F_Str8ListAppendF(Arena, List, ...) \
 F_Str8ListAppend(Arena, List, F_Str8PushF(Arena, __VA_ARGS__))
+
+#define F_ListAppend(Arena, List, ToAppend)\
+{\
+	u8 *Next = F_ArenaPush(Arena, sizeof(ToAppend));\
+	if(List->Last)\
+	{\
+		List->Last->Next = Next;\
+		List->Last = Next;\
+	}\
+	else\
+	{\
+		List->Last = Next;\
+		List->First = Next;\
+	}\
+	Next->String = StringToAppend;\
+}
+
 
 char         *F_CStrFromStr8      (f_memory_arena *Arena, f_str8 String);
 f_str8       F_Str8PushF          (f_memory_arena *Arena, char *Format, ...);
@@ -466,7 +498,6 @@ f_compilation F_CompileTU (f_memory_arena *Arena, f_str8 SourceFile, f_compile_o
 f_link F_LinkTUs (f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain);
 
 
-
 f_u8 *F_OS_Reserve   (f_s64 NumberOfBytes);
 void  F_OS_Commit    (void *Address, f_s64 BytesToCommit);
 f_s64 F_OS_PageSize  (void);
@@ -554,7 +585,7 @@ f_memory_arena *F_TransientArena();
 
 #ifdef FRIDAY_IMPLEMENTATION
 
-
+f_memory_arena F_ErrorArena;
 
 #ifdef FRIDAY_MAIN
 
@@ -764,7 +795,7 @@ void  F_OS_WaitForSingleThread(f_thread Thread)
 #endif
 }
 
-void  F_OS_WaitForThreads(f_thread *Threads, f_s32 NumberOfThreadsToWaitFor)
+void F_OS_WaitForThreads(f_thread *Threads, f_s32 NumberOfThreadsToWaitFor)
 {
 #if defined(OS_WINDOWS)
 	WaitForMultipleObjects(NumberOfThreadsToWaitFor, (const HANDLE*)Threads, TRUE, INFINITE);
@@ -823,6 +854,11 @@ void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark)
 
 f_u8 *F_Raw_ArenaPush(f_memory_arena *Arena, f_s64 BytesToPush, f_b32 ShouldZero)
 {
+	if(!Arena->Start) 
+	{
+		f_memory_arena *NewArena = F_ArenaReserveButCommitFirstPage(F_MegaBytes(32));
+		Arena[0] = NewArena[0];
+	}
 	if(BytesToPush > Arena->Committed - Arena->At)
 	{
 		f_s64 PagesToCommitInBytes = (BytesToPush + F_OS_PageSize() - 1) & ~(F_OS_PageSize() - 1);
