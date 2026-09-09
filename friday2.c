@@ -11,6 +11,19 @@
 F_LaneEntry
 {
 
+	f_file Test = F_OS_FileFromFilename(Lane.Arena, F_Str8("asdfasdf"));
+
+	if(Test.Errors)
+	{
+		printf("ooga booga\n");
+		for(f_str8_list_node *Error = Test.ErrorStream.First; Error; Error = Error->Next)
+		{
+			printf("%.*s\n", F_Expand(Error->String));
+		}
+	}
+	
+	return;
+
 	f_compile_options CompileOptions = {0};
 	f_link_options    LinkOptions    = {0};
 	if(F_IsFirstLane())

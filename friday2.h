@@ -338,22 +338,6 @@ typedef struct f_thread_entry_params
 }
 f_thread_entry_params;
 
-
-typedef struct f_error
-{
-	f_str8 Message;
-	struct f_error *Next;
-	struct f_error *Previous;
-}
-f_error;
-
-typedef struct f_error_stream
-{
-	f_error *First;
-	f_error *Last;
-}
-f_error_stream;
-
 #define F_ArenaPushType(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type), F_True)
 #define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)), F_True)
 #define F_ArenaPush(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush, F_True)
@@ -381,22 +365,6 @@ f_str8_array F_Internal_Str8Array(f_memory_arena *Arena, f_str8 *Str8s, f_u64 St
 #define F_Str8ListAppendF(Arena, List, ...) \
 F_Str8ListAppend(Arena, List, F_Str8PushF(Arena, __VA_ARGS__))
 
-#define F_ListAppend(Arena, List, ToAppend)\
-{\
-	u8 *Next = F_ArenaPush(Arena, sizeof(ToAppend));\
-	if(List->Last)\
-	{\
-		List->Last->Next = Next;\
-		List->Last = Next;\
-	}\
-	else\
-	{\
-		List->Last = Next;\
-		List->First = Next;\
-	}\
-	Next->String = StringToAppend;\
-}
-
 
 char         *F_CStrFromStr8      (f_memory_arena *Arena, f_str8 String);
 f_str8       F_Str8PushF          (f_memory_arena *Arena, char *Format, ...);
@@ -410,6 +378,8 @@ f_b32        F_Str8EndsWith       (f_str8 S, f_str8 Suffix);
 f_s64        F_Str8ListCount      (f_str8_list List);
 f_s64        F_Str8ListLength     (f_str8_list List);
 
+
+#define F_AppendErrorF(ErrorList, ...) F_Str8ListAppend(&F_ErrorArena, ErrorList, F_Str8PushF(&F_ErrorArena, __VA_ARGS__))
 
 void F_DispatchAcrossNLanes (f_s64 LaneCount, char **Args, int ArgCount);
 
@@ -510,6 +480,7 @@ typedef struct f_file
 {
 	// In the future this can set more granular error bits
 	f_u64 Errors;
+	f_str8_list ErrorStream;
 	f_u64 Handle;
 }
 f_file;
@@ -1273,6 +1244,7 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 	if(Status) 
 	{
 		File->Errors = F_True;
+		F_AppendErrorF(File->ErrorStream, "Failed to get file information");
 		return (f_file_info){0};
 	}
 	FileInfo.SizeInBytes = FileStat.st_size;
@@ -1392,6 +1364,10 @@ f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 			+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
 		FileInfo.LastModifiedInMillisecondsSinceEpoch = MillisecondsSinceEpoch;
 	}
+	else
+	{
+		F_AppendErrorF(File->ErrorStream, "Failed to get file information for %.*s", F_Expand(Filename));
+	}
 #else
 #error "Unsupported OS"
 #endif
@@ -1415,6 +1391,7 @@ f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
 	{
 		File.Handle = 0;
 		File.Errors = F_True;
+		F_AppendErrorF(&File.ErrorStream, "Could not open file '%.*s'", F_Expand(Filename));
 	}
 #elif defined(OS_DARWIN)
 	f_u64 Handle = open(F_CStrFromStr8(Arena, Filename), O_RDWR);
