@@ -41,28 +41,21 @@ void AppCodeReload(f_memory_arena *Arena)
 	f_str8 CopyPath = F_Str8PushF(Arena, "build/app-%llu.dynlib", PlatformContext.LoadCounter);
 	f_str8 CopyCommand = F_Str8PushF(Arena, "cp build/app.dynlib %.*s", F_Expand(CopyPath));
 	system(F_CStrFromStr8(Arena, CopyCommand));
-	void *Library = dlopen(F_CStrFromStr8(Arena, CopyPath), RTLD_NOW | RTLD_LOCAL);
-	if(Library)
+	f_dll DLL = F_OS_DLLFromPath(CopyPath);
+	void (*Update)(void*, v2i) = F_OS_DLLSymbolFromName(DLL, F_Str8("AppUpdate"));
+	if(Update)
 	{
-		void (*Update)(void*, v2i) = dlsym(Library, "AppUpdate");
-		if(Update)
-		{
-			// The old image is deliberately left loaded: string literals and
-			// Metal completion blocks handed out by it are still referenced
-			// from arena memory that outlives the swap.
-			PlatformContext.AppUpdate = Update;
-			PlatformContext.AppLibModified = Modified;
-			PlatformContext.LoadCounter++;
-			LogInfo("Reloaded app.dynlib (load ?u64)", PlatformContext.LoadCounter);
-		}
-		else
-		{
-			LogError("app.dynlib has no AppUpdate, keeping previous code");
-		}
+		// The old image is deliberately left loaded: string literals and
+		// Metal completion blocks handed out by it are still referenced
+		// from arena memory that outlives the swap.
+		PlatformContext.AppUpdate = Update;
+		PlatformContext.AppLibModified = Modified;
+		PlatformContext.LoadCounter++;
+		LogInfo("Reloaded app.dynlib (load ?u64)", PlatformContext.LoadCounter);
 	}
 	else
 	{
-		LogError("dlopen failed: ?cstr", dlerror());
+		LogError("app.dynlib has no AppUpdate, keeping previous code");
 	}
 	Arena->At = Mark;
 }

@@ -496,7 +496,7 @@ void        F_OS_RenameFileTo                  (f_memory_arena *Arena, f_str8 Fr
 void        F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, f_str8 Path);
 
 f_dll  F_OS_DLLOpen (f_str8 Path);
-void *F_OS_DLLSymbolFromName(f_dll *DLL, f_str8 ProcedureName);
+void *F_OS_DLLSymbolFromName (f_dll DLL, f_str8 ProcedureName);
 
 typedef struct f_internal_directory_options
 {
@@ -1295,7 +1295,7 @@ f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
 	return Result;
 }
 
-f_dll  F_OS_DLLOpen(f_str8 Path)
+f_dll  F_OS_DLLFromPath(f_str8 Path)
 {
 	f_dll DLL = {0};
 #if defined(OS_WINDOWS)
@@ -1309,14 +1309,14 @@ f_dll  F_OS_DLLOpen(f_str8 Path)
 	return DLL;
 }
 
-void *F_OS_DLLSymbolFromName(f_dll *DLL, f_str8 ProcedureName)
+void *F_OS_DLLSymbolFromName(f_dll DLL, f_str8 ProcedureName)
 {
 	f_u64 Mark = Lane.Arena->At;
 	void *Procedure;
 #if defined(OS_WINDOWS)
-	Procedure = GetProcAddress(DLL->Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
+	Procedure = GetProcAddress(DLL.Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
 #elif defined(OS_DARWIN)
-	Procedure = dlsym(Library, F_CStrFromStr8(Lane.Arena, ProcedureName));
+	Procedure = dlsym(DLL.Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
 #else
 #error "Unsupported OS"
 #endif
