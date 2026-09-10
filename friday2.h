@@ -152,11 +152,11 @@ typedef struct f_exit_code
 }
 f_exit_code;
 
-typedef struct f_module
+typedef struct f_dll
 {
 	f_u64 Handle;
 }
-f_module;
+f_dll;
 
 typedef struct f_process
 {
@@ -427,8 +427,6 @@ void  F_StartProcess   (f_memory_arena *Arena, f_process *Process, f_str8_list A
 f_b32 F_PollProcess    (f_process *Process);
 void  F_WaitForProcess (f_process *Process);
 
-f_module F_ModuleFromPath ();
-
 f_b32 F_ProcessExitedCleanly(f_process *Process);
 
 #define F_WaitForMultipleProcesses(...)\
@@ -497,6 +495,9 @@ f_b32       F_OS_DeleteFile                    (f_memory_arena *Arena, f_str8 Pa
 void        F_OS_RenameFileTo                  (f_memory_arena *Arena, f_str8 From, f_str8 To);
 void        F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, f_str8 Path);
 
+f_dll  F_OS_DLLOpen (f_str8 Path);
+void *F_OS_DLLSymbolFromName(f_dll *DLL, f_str8 ProcedureName);
+
 typedef struct f_internal_directory_options
 {
 	f_b32 ExcludeDirectories;
@@ -546,6 +547,9 @@ typedef enum f_build_status
 	F_BUILD_FAILED,
 }
 f_build_status;
+
+
+f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
 
 void F_Report(f_memory_arena *Arena, f_build_report Report);
 
@@ -1289,6 +1293,35 @@ f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
 #error "Unsupported OS"
 #endif
 	return Result;
+}
+
+f_dll  F_OS_DLLOpen(f_str8 Path)
+{
+	f_dll DLL = {0};
+#if defined(OS_WINDOWS)
+	f_u64 Mark = Lane.Arena->At;
+	DLL.Handle = LoadLibraryA(F_CStrFromStr8(Lane.Arena, Path));
+	Lane.Arena->At = Mark;
+#elif defined(OS_DARWIN)
+	DLL.Handle = dlopen(F_CStrFromStr8(Lane.Arena, CopyPath), RTLD_NOW | RTLD_LOCAL);
+#else
+#endif
+	return DLL;
+}
+
+void *F_OS_DLLSymbolFromName(f_dll *DLL, f_str8 ProcedureName)
+{
+	f_u64 Mark = Lane.Arena->At;
+	void *Procedure;
+#if defined(OS_WINDOWS)
+	Procedure = GetProcAddress(DLL->Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
+#elif defined(OS_DARWIN)
+	Procedure = dlsym(Library, F_CStrFromStr8(Lane.Arena, ProcedureName));
+#else
+#error "Unsupported OS"
+#endif
+	Lane.Arena->At = Mark;
+	return Procedure;
 }
 
 void F_OS_RenameFileTo(f_memory_arena *Arena, f_str8 From, f_str8 To)
