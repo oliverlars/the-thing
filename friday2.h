@@ -71,7 +71,6 @@ void *F_MemoryZero(void *Destination, f_u64 BytesToZero);
 #define F_DIM       "\x1b[2m"
 #define F_RESET   "\x1B[0m"
 
-
 #define F_Temporary(Arena) for(f_s64 __Mark__ = Arena->At, _I_ = 0; !_I_; (_I_++, F_ArenaResetTo((Arena), __Mark__)))
 
 typedef struct f_memory_arena
@@ -191,8 +190,6 @@ typedef struct f_build_watch
 	f_u64               TUCount;
 }
 f_build_watch;
-
-
 
 // TODO: Set up proper archiver flags since 
 // msvc needs to use lib.exe to combine object files
@@ -526,8 +523,8 @@ void  F_OS_FutexWait    (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll (void *Address);
 
 void F_Print(f_str8 String);
-#define F_PrintF(Arena, ...) \
-F_Print(F_Str8PushF(Arena, __VA_ARGS__))
+#define F_PrintF(...) \
+F_Temporary(Lane.Arena) F_Print(F_Str8PushF(Lane.Arena, __VA_ARGS__))
 
 f_file F_OS_StandardOut(void);
 
@@ -548,6 +545,12 @@ typedef enum f_build_status
 }
 f_build_status;
 
+
+f_u64 *F_BuildCache(f_memory_arena *Arena, f_str8 Path)
+{
+	f_str8 Source = F_OS_ReadEntireFileFromPath(Arena, Path);
+	return (f_u64*)Source.Bytes;
+}
 
 f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
 
@@ -1358,10 +1361,32 @@ f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 	return (f_str8) { (f_s64)Info.SizeInBytes, Backing };
 }
 
+f_b32 F_FileHasErrors(f_file File)
+{
+	return File.ErrorStream.First || File.Errors;
+}
+
+void F_LogError(f_str8 Message)
+{
+	F_PrintF(F_RED "error" F_RESET ":" "%s\n", Message);
+}
+
+void F_LogErrorStream(f_str8_list Messages)
+{
+	for(f_str8_list_node *Node = Messages.First; Node; Node = Node->Next)
+	{
+		F_LogError(Node->String);
+	}
+}
+
 f_str8 F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, f_str8 PathToFile)
 {
 	f_file File = F_OS_FileFromFilename(Arena, PathToFile);
 	f_str8 Contents = F_OS_ReadEntireFile(Arena, &File);
+	if(F_FileHasErrors(File))
+	{
+		F_LogErrorStream(File.ErrorStream);
+	}
 	F_OS_ReleaseFile(&File);
 	return Contents;
 }
