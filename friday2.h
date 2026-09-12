@@ -480,7 +480,20 @@ typedef struct f_file
 }
 f_file;
 
-f_file F_OS_FileFromFilename (f_memory_arena *Arena, f_str8 Filename);
+typedef struct f_internal_file_options
+{
+	// Create the file if missing, or clear its contents if it exists.
+	f_b32 Overwrite;
+}
+f_internal_file_options;
+
+#define F_OS_FileFromFilename(Arena, Filename, ...) \
+F_OS_Internal_FileFromFilename(Arena, Filename, (f_internal_file_options){ __VA_ARGS__ })
+
+#define F_OS_WriteStr8ToPath(Arena, PathToFile, StringToWrite, ...) \
+F_OS_Internal_WriteStr8ToPath(Arena, PathToFile, StringToWrite, (f_internal_file_options){ __VA_ARGS__ })
+
+f_file F_OS_Internal_FileFromFilename (f_memory_arena *Arena, f_str8 Filename, f_internal_file_options Options);
 void   F_OS_ReleaseFile      (f_file *File);
 
 f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, f_str8 Filename);
@@ -488,6 +501,7 @@ f_file_info F_OS_FileInfoFromFile              (f_file *File);
 f_str8      F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
 f_str8      F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, f_str8 PathToFile);
 void        F_OS_WriteStr8ToFile               (f_file *File, f_str8 StringToWrite);
+void        F_OS_Internal_WriteStr8ToPath      (f_memory_arena *Arena, f_str8 PathToFile, f_str8 StringToWrite, f_internal_file_options Options);
 f_b32       F_OS_DeleteFile                    (f_memory_arena *Arena, f_str8 PathToFile);
 void        F_OS_RenameFileTo                  (f_memory_arena *Arena, f_str8 From, f_str8 To);
 void        F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, f_str8 Path);
@@ -546,11 +560,32 @@ typedef enum f_build_status
 f_build_status;
 
 
-f_u64 *F_BuildCache(f_memory_arena *Arena, f_str8 Path)
+typedef struct f_build_cache
 {
-	f_str8 Source = F_OS_ReadEntireFileFromPath(Arena, Path);
-	return (f_u64*)Source.Bytes;
+	f_u64 *Items;
+	f_s64  Count;
 }
+f_build_cache;
+
+f_build_cache F_BuildCache(f_memory_arena *Arena)
+{
+	f_str8 Source = F_OS_ReadEntireFileFromPath(Arena, F_Str8("friday.cache"));
+	f_build_cache Cache = {0};
+	Cache.Items = (f_u64*)Source.Bytes;
+	Cache.Count = Source.Size / sizeof(f_u64);
+	return Cache;
+}
+
+void F_BuildCacheUpdate(f_memory_arena *Arena, f_build_cache Cache)
+{
+	f_str8 CacheAsString;
+	CacheAsString.Bytes = (f_s8*)Cache.Items;
+	CacheAsString.Size = Cache.Count*sizeof(f_u64);
+	F_OS_WriteStr8ToPath(Arena, F_Str8("friday.cache"), CacheAsString, .Overwrite = F_True);
+}
+
+f_build_cache F_BuildCache(f_memory_arena *Arena);
+void F_BuildCacheUpdate(f_memory_arena *Arena, f_build_cache Cache);
 
 f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
 
@@ -1102,7 +1137,6 @@ f_str8_array F_Internal_Str8ArrayFromStr8s(f_memory_arena *Arena, f_str8 *Str8s,
 	return Result;
 }
 
-
 void F_Str8ListAppendMany(f_memory_arena *Arena, f_str8_list *Head, f_str8_list Tail)
 {
 	for(f_str8_list_node *Node = Tail.First; Node; Node = Node->Next)
@@ -1285,6 +1319,13 @@ void F_OS_WriteStr8ToFile(f_file *File, f_str8 FileToWrite)
 #endif
 }
 
+void F_OS_Internal_WriteStr8ToPath(f_memory_arena *Arena, f_str8 PathToFile, f_str8 StringToWrite, f_internal_file_options Options)
+{
+	f_file File = F_OS_Internal_FileFromFilename(Arena, PathToFile, Options);
+	F_OS_WriteStr8ToFile(&File, StringToWrite);
+	F_OS_ReleaseFile(&File);
+}
+
 f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
 {
 	f_b32 Result = F_True;
@@ -1432,7 +1473,7 @@ f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 	return FileInfo;
 }
 
-f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
+f_file F_OS_Internal_FileFromFilename(f_memory_arena *Arena, f_str8 Filename, f_internal_file_options Options)
 {
 	f_file File = {0};
 #if defined(OS_WINDOWS)
@@ -1441,25 +1482,32 @@ f_file F_OS_FileFromFilename(f_memory_arena *Arena, f_str8 Filename)
 		GENERIC_READ | GENERIC_WRITE,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		F_Null,
-		OPEN_EXISTING,
+		Options.Overwrite ? CREATE_ALWAYS : OPEN_EXISTING,
 		FILE_ATTRIBUTE_NORMAL,
 		F_Null
 	);
-	if(File.Handle == INVALID_HANDLE_VALUE)
+	if((HANDLE)File.Handle == INVALID_HANDLE_VALUE)
 	{
 		File.Handle = 0;
 		File.Errors = F_True;
 		F_AppendErrorF(&File.ErrorStream, "Could not open file '%.*s'", F_Expand(Filename));
 	}
 #elif defined(OS_DARWIN)
-	f_u64 Handle = open(F_CStrFromStr8(Arena, Filename), O_RDWR);
-	if(Handle != 0)
+	f_s32 Handle = open(
+		F_CStrFromStr8(Arena, Filename),
+		O_RDWR | (Options.Overwrite ? O_CREAT | O_TRUNC : 0),
+		0666
+	);
+
+	if(Handle >= 0)
 	{
-		File.Handle = Handle;
+		File.Handle = (f_u64)Handle;
 	}
 	else
 	{
 		File.Errors = F_True;
+		F_AppendErrorF(&File.ErrorStream,
+			"Could not open or create file '%.*s'", F_Expand(Filename));
 	}
 #else
 #error "Unsupported OS"

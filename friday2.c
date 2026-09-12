@@ -10,17 +10,14 @@
 #if 1
 F_LaneEntry
 {
-
-	f_file Test = F_OS_FileFromFilename(Lane.Arena, F_Str8("asdfasdf"));
-
-	if(Test.Errors)
+	f_u64 CacheItems[] = {123, 456, 789 };
+	if(F_IsFirstLane())
 	{
-		printf("ooga booga\n");
-		for(f_str8_list_node *Error = Test.ErrorStream.First; Error; Error = Error->Next)
-		{
-			printf("%.*s\n", F_Expand(Error->String));
-		}
+		f_build_cache Cache = { .Items = CacheItems, .Count = F_ArrayCount(CacheItems) };
+		F_BuildCacheUpdate(Lane.Arena, Cache);
+		Cache = F_BuildCache(Lane.Arena);
 	}
+
 	
 	return;
 
