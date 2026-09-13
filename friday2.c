@@ -76,7 +76,7 @@ F_LaneEntry
 	F_BroadcastFirstLane(SourceFiles);
 
 
-	if(F_IsFirstLane())
+	F_FirstLane()
 	{
 		BuildCache = F_BuildCacheFromOutputPath(Lane.Arena, CompileOptions.OutputPath);
 	}

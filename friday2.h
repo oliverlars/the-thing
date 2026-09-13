@@ -381,6 +381,15 @@ f_s64        F_Str8ListLength     (f_str8_list List);
 void F_DispatchAcrossNLanes (f_s64 LaneCount, char **Args, int ArgCount);
 
 f_b32           F_IsFirstLane        ();
+
+f_s64 F_Internal_FirstLaneBegin(void);
+void  F_Internal_FirstLaneEnd(f_s64 LaneCount);
+
+#define F_FirstLane() \
+    for(f_s64 __F_FirstLaneCount__ = F_Internal_FirstLaneBegin(); \
+        __F_FirstLaneCount__ != 0; \
+        F_Internal_FirstLaneEnd(__F_FirstLaneCount__), __F_FirstLaneCount__ = 0)
+
 f_u64           F_WaveInclusivePrefixSum (f_u64 Value);
 f_u64           F_WaveExclusivePrefixSum (f_u64 Value);
 
@@ -400,10 +409,13 @@ f_u64           F_CountBits              (f_u64 Bits);
 
 #define F_BroadcastLane(Variable, SourceLane) \
       do {\
+          if(Lane.LaneCount == 1) { F_Assert((SourceLane) == 0); }\
+          else {\
               if(Lane.ID == (SourceLane)) Lane.BroadcastPointers[0] = &(Variable);\
               F_WaveBarrier();\
               F_MemoryCopy(&(Variable), Lane.BroadcastPointers[0], sizeof(Variable));\
               F_WaveBarrier();\
+          }\
       } while(0)
  
 #define F_BroadcastFirstLane(Variable) F_BroadcastLane(Variable, 0)
@@ -571,8 +583,8 @@ typedef struct f_build_cache
 f_build_cache;
 
 f_build_cache F_BuildCacheFromOutputPath (f_memory_arena *Arena, f_str8 OutputPath);
-void          F_BuildCacheUpdate         (f_memory_arena *Arena, f_build_cache Cache);
 
+f_b32         F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash);
 
 f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
 
@@ -880,8 +892,28 @@ f_b32 F_IsFirstLane(void)
 	return Lane.ID == 0;
 }
 
+f_s64 F_Internal_FirstLaneBegin(void)
+{
+	F_WaveBarrier();
+	if(Lane.ID != 0)
+	{
+		F_WaveBarrier();
+		return 0;
+	}
+	f_s64 LaneCount = Lane.LaneCount;
+	Lane.LaneCount = 1;
+	return LaneCount;
+}
+
+void F_Internal_FirstLaneEnd(f_s64 LaneCount)
+{
+	Lane.LaneCount = LaneCount;
+	F_WaveBarrier();
+}
+
 f_u64 F_Internal_WaveCountTrue(f_b32 Condition)
 {
+	if(Lane.LaneCount == 1) return Condition != 0;
 	if(F_IsFirstLane()) atomic_store_explicit(Lane.Vote, 0, memory_order_relaxed);
 	F_WaveBarrier();
 	atomic_fetch_add_explicit(Lane.Vote, (Condition != 0), memory_order_relaxed);
@@ -903,6 +935,7 @@ f_b32 F_Internal_WaveAllTrue(f_b32 Condition)
 
 f_u64 F_Internal_WaveBallot(f_b32 Condition)
 {
+	if(Lane.LaneCount == 1) return Condition != 0;
 	F_Assert(Lane.LaneCount <= 64);
 	if(F_IsFirstLane()) atomic_store_explicit(Lane.Ballot, 0, memory_order_relaxed);
 	F_WaveBarrier();
@@ -922,6 +955,7 @@ f_u64 F_CountBits(f_u64 Bits)
 
 f_u64 F_WaveExclusivePrefixSum (f_u64 Value)
 {
+	if(Lane.LaneCount == 1) return 0;
 	Lane.BroadcastPointers[Lane.ID] = &Value;
 	F_WaveBarrier();
 
@@ -941,6 +975,7 @@ f_u64 F_WaveInclusivePrefixSum (f_u64 Value)
 
 f_u64 F_WaveSum(f_u64 Value)
 {
+	if(Lane.LaneCount == 1) return Value;
 	Lane.BroadcastPointers[Lane.ID] = &Value;
 	F_WaveBarrier();
 	f_u64 Sum = 0;
@@ -954,6 +989,7 @@ f_u64 F_WaveSum(f_u64 Value)
 
 void F_WaveBarrier()
 {
+	if(Lane.LaneCount == 1) return;
 	f_s64 Generation = atomic_load_explicit(&Lane.Barrier->Generation, memory_order_relaxed);
 	f_s64 LanesArrived = atomic_fetch_add_explicit(&Lane.Barrier->LanesWaiting, 1, memory_order_release);
 
@@ -1559,12 +1595,9 @@ f_build_cache F_BuildCacheFromOutputPath(f_memory_arena *Arena, f_str8 OutputPat
 	return Cache;
 }
 
-void F_BuildCacheUpdate(f_memory_arena *Arena, f_build_cache Cache)
+F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
 {
-	f_str8 CacheAsString;
-	CacheAsString.Bytes = (f_s8*)Cache.Items;
-	CacheAsString.Size = Cache.Count*sizeof(f_u64);
-	F_OS_WriteStr8ToPath(Arena, F_Str8("friday.cache"), CacheAsString, .Overwrite = F_True);
+	
 }
 
 f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready);
