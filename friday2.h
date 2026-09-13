@@ -1595,9 +1595,14 @@ f_build_cache F_BuildCacheFromOutputPath(f_memory_arena *Arena, f_str8 OutputPat
 	return Cache;
 }
 
-F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
+f_b32 F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
 {
-	
+	f_b32 Found = F_False;
+	for F_EachInLaneSpan(I, Cache.Count)
+	{
+		Found |= Cache.Items[I] == Hash;
+	}
+	return F_WaveAnyTrue(Found);
 }
 
 f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready);
