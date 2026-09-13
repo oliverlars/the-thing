@@ -520,6 +520,9 @@ f_internal_directory_options;
 #define F_OS_ListOfEntriesInDirectory(Arena, DirectoryPath, ...) \
 F_OS_Internal_ListOfEntriesInDirectory(Arena, DirectoryPath, (f_internal_directory_options){ __VA_ARGS__ })
 
+#define F_OS_ArrayOfEntriesInDirectory(Arena, DirectoryPath, ...) \
+F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectory(Arena, DirectoryPath, __VA_ARGS__))
+
 f_str8_list F_OS_Internal_ListOfEntriesInDirectory (f_memory_arena *Arena, f_str8 Directory, f_internal_directory_options Options);
 
 #if defined(OS_WINDOWS)
@@ -567,25 +570,9 @@ typedef struct f_build_cache
 }
 f_build_cache;
 
-f_build_cache F_BuildCache(f_memory_arena *Arena)
-{
-	f_str8 Source = F_OS_ReadEntireFileFromPath(Arena, F_Str8("friday.cache"));
-	f_build_cache Cache = {0};
-	Cache.Items = (f_u64*)Source.Bytes;
-	Cache.Count = Source.Size / sizeof(f_u64);
-	return Cache;
-}
+f_build_cache F_BuildCacheFromOutputPath (f_memory_arena *Arena, f_str8 OutputPath);
+void          F_BuildCacheUpdate         (f_memory_arena *Arena, f_build_cache Cache);
 
-void F_BuildCacheUpdate(f_memory_arena *Arena, f_build_cache Cache)
-{
-	f_str8 CacheAsString;
-	CacheAsString.Bytes = (f_s8*)Cache.Items;
-	CacheAsString.Size = Cache.Count*sizeof(f_u64);
-	F_OS_WriteStr8ToPath(Arena, F_Str8("friday.cache"), CacheAsString, .Overwrite = F_True);
-}
-
-f_build_cache F_BuildCache(f_memory_arena *Arena);
-void F_BuildCacheUpdate(f_memory_arena *Arena, f_build_cache Cache);
 
 f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
 
@@ -1548,6 +1535,36 @@ f_watch F_WatchFilesFromArray(f_str8_array FilePaths)
 	}
 
 	return Result;
+}
+
+f_build_cache F_BuildCacheFromOutputPath(f_memory_arena *Arena, f_str8 OutputPath)
+{
+	f_str8_array ObjectFiles = F_OS_ArrayOfEntriesInDirectory(
+		Arena, OutputPath, .ExcludeDirectories = F_True, .PrependPath = F_True,
+		.FilterByExtension = F_Str8ArrayFromCStrs(Arena, ".o")
+	);
+	f_build_cache Cache = {0};
+	if(F_IsFirstLane()) Cache.Items = F_ArenaPushArrayType(Arena, ObjectFiles.Count, f_u64);
+	Cache.Count = ObjectFiles.Count;
+	F_BroadcastFirstLane(Cache);
+	for F_EachInLaneSpan(I, ObjectFiles.Count)
+	{
+		f_str8 HashAsString = ObjectFiles.Items[I];
+		// Remove extension
+		HashAsString.Size -= 2;
+		f_u64 Hash = 0;
+		while(--HashAsString.Size) Hash = HashAsString.Bytes[HashAsString.Size] + Hash*10;
+		Cache.Items[I] = Hash;
+	}
+	return Cache;
+}
+
+void F_BuildCacheUpdate(f_memory_arena *Arena, f_build_cache Cache)
+{
+	f_str8 CacheAsString;
+	CacheAsString.Bytes = (f_s8*)Cache.Items;
+	CacheAsString.Size = Cache.Count*sizeof(f_u64);
+	F_OS_WriteStr8ToPath(Arena, F_Str8("friday.cache"), CacheAsString, .Overwrite = F_True);
 }
 
 f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready);

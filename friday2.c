@@ -10,19 +10,9 @@
 #if 1
 F_LaneEntry
 {
-	f_u64 CacheItems[] = {123, 456, 789 };
-	if(F_IsFirstLane())
-	{
-		f_build_cache Cache = { .Items = CacheItems, .Count = F_ArrayCount(CacheItems) };
-		F_BuildCacheUpdate(Lane.Arena, Cache);
-		Cache = F_BuildCache(Lane.Arena);
-	}
-
-	
-	return;
-
 	f_compile_options CompileOptions = {0};
 	f_link_options    LinkOptions    = {0};
+	f_build_cache     BuildCache     = {0};
 	if(F_IsFirstLane())
 	{
 		F_OS_MakeDirectoryIfNotAlreadyMade(Lane.Arena, F_Str8("build"));
@@ -86,6 +76,10 @@ F_LaneEntry
 	F_BroadcastFirstLane(SourceFiles);
 
 
+	if(F_IsFirstLane())
+	{
+		BuildCache = F_BuildCacheFromOutputPath(Lane.Arena, CompileOptions.OutputPath);
+	}
 
 	f_b32 CompiledSuccessfully = F_True;
 	f_str8_array ObjectFiles = {0};
