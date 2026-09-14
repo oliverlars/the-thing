@@ -42,26 +42,25 @@ F_LaneEntry
 	{
 		f_str8_list SourceFileList = {0};
 		F_Str8ListAppendMany(Lane.Arena, &SourceFileList,
-			F_OS_ListOfEntriesInDirectory(
+			F_OS_ListOfFilesInDirectory(
 				Lane.Arena,
 				F_Str8("source"),
-				.ExcludeDirectories = F_True,
 				.PrependPath = F_True,
+				.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c"),
 			)
 		);
 		F_Str8ListAppendMany(Lane.Arena, &SourceFileList,
-			F_OS_ListOfEntriesInDirectory(
+			F_OS_ListOfFilesInDirectory(
 				Lane.Arena,
 				F_Str8("source/darwin"),
-				.ExcludeDirectories = F_True,
 				.PrependPath = F_True,
+				.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c", ".m"),
 			)
 		);
 		F_Str8ListAppendMany(Lane.Arena, &SourceFileList,
-			F_OS_ListOfEntriesInDirectory(
+			F_OS_ListOfFilesInDirectory(
 				Lane.Arena,
 				F_Str8("external"),
-				.ExcludeDirectories = F_True,
 				.PrependPath = F_True,
 				.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c"),
 			)
@@ -81,27 +80,21 @@ F_LaneEntry
 		BuildCache = F_BuildCacheFromOutputPath(Lane.Arena, CompileOptions.OutputPath);
 	}
 
-	f_b32 CompiledSuccessfully = F_True;
-	f_str8_array ObjectFiles = {0};
-	ObjectFiles.Count = SourceFiles.Count;
-	if(F_IsFirstLane())
-	{
-		ObjectFiles.Items = F_ArenaPushArrayType(Lane.Arena, SourceFiles.Count, f_str8);
-	}
-	F_BroadcastFirstLane(ObjectFiles);
+	F_BroadcastFirstLane(BuildCache);
 
+	
+
+
+	f_b32 CompiledSuccessfully = F_True;
 
 	f_u64 CompileStartTime = F_OS_TimeStamp();
 	f_u64 NumberOfTUsRecompiled = 0;
 	for F_EachInLaneSpan(Index, SourceFiles.Count)
 	{
-		f_u64 Hash = F_HashSourceAndIncludes(Lane.Arena, SourceFiles.Items[Index], IncludePaths);
-		Hash ^= F_HashCompileOptions(CompileOptions);
-		f_str8 ObjectFile = F_Str8PushF(Lane.Arena, "%llu.o", Hash);
-		ObjectFiles.Items[Index] = F_Str8PushF(Lane.Arena, "%.*s/%.*s", F_Expand(CompileOptions.OutputPath), F_Expand(ObjectFile));
-		if(!F_OS_FileInfoFromFilename(Lane.Arena, ObjectFiles.Items[Index]).Exists)
+		f_u64 Hash = F_TUHash(SourceFiles.Items[Index], IncludePaths, CompileOptions);
+		if(F_HashIsInBuildCache(BuildCache, Hash))
 		{
-			CompileOptions.OutputName = ObjectFile;
+			CompileOptions.OutputName = F_Str8PushF(Lane.Arena, "%llu.o", Hash);
 			f_compilation Compilation = F_CompileTU(Lane.Arena, SourceFiles.Items[Index], CompileOptions, F_TOOLCHAIN_CLANG);
 			F_WaitForProcess(&Compilation.Process);
 			CompiledSuccessfully &= F_ProcessExitedCleanly(&Compilation.Process);
@@ -113,6 +106,10 @@ F_LaneEntry
 
 	CompiledSuccessfully = F_WaveAllTrue(CompiledSuccessfully);
 	f_u64 CompileTotalTime = F_OS_TimeStamp() - CompileStartTime;
+
+
+	// HACK: need to figure out what to do here
+	f_str8_array ObjectFiles = {0};
 
 	f_b32 FinishedSuccessfully = CompiledSuccessfully;
 	if(F_IsFirstLane())

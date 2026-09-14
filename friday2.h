@@ -470,6 +470,8 @@ f_u64 F_HashStr8(f_str8 String);
 
 f_u64 F_HashCompileOptions(f_compile_options CompileOptions);
 
+f_u64 F_TUHash(f_str8 PathToSource, f_str8_array IncludePaths, f_compile_options CompileOptions);
+
 f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths);
 f_compilation F_CompileTU (f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain);
 f_link F_LinkTUs (f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain);
@@ -534,6 +536,12 @@ F_OS_Internal_ListOfEntriesInDirectory(Arena, DirectoryPath, (f_internal_directo
 
 #define F_OS_ArrayOfEntriesInDirectory(Arena, DirectoryPath, ...) \
 F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectory(Arena, DirectoryPath, __VA_ARGS__))
+
+#define F_OS_ListOfFilesInDirectory(Arena, DirectoryPath, ...) \
+F_OS_Internal_ListOfEntriesInDirectory(Arena, DirectoryPath, (f_internal_directory_options){ .ExcludeDirectories = F_True, __VA_ARGS__ })
+
+#define F_OS_ArrayOfFilesInDirectory(Arena, DirectoryPath, ...) \
+F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectory(Arena, DirectoryPath, .ExcludeDirectories = F_True, __VA_ARGS__))
 
 f_str8_list F_OS_Internal_ListOfEntriesInDirectory (f_memory_arena *Arena, f_str8 Directory, f_internal_directory_options Options);
 
@@ -2156,6 +2164,17 @@ f_u64 F_HashCompileOptions(f_compile_options CompileOptions)
 		Hash = F_HashBytes(Hash, Flag.Bytes, Flag.Size);
 	}
 
+	return Hash;
+}
+
+f_u64 F_TUHash(f_str8 PathToSource, f_str8_array IncludePaths, f_compile_options CompileOptions)
+{
+	f_u64 Hash = 0;
+	F_Temporary(Lane.Arena)
+	{
+		Hash = F_HashSourceAndIncludes(Lane.Arena, PathToSource, IncludePaths);
+	}
+	Hash ^= F_HashCompileOptions(CompileOptions);
 	return Hash;
 }
 
