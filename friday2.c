@@ -13,7 +13,8 @@ F_LaneEntry
 	f_compile_options CompileOptions = {0};
 	f_link_options    LinkOptions    = {0};
 	f_build_cache     BuildCache     = {0};
-	if(F_IsFirstLane())
+	f_str8_array      ObjectFiles    = {0};
+	F_FirstLane()
 	{
 		F_OS_MakeDirectoryIfNotAlreadyMade(Lane.Arena, F_Str8("build"));
 	}
@@ -38,7 +39,7 @@ F_LaneEntry
 	LinkOptions.OutputName = F_Str8("the-thing2");
 
 	f_str8_array SourceFiles = {0};
-	if(F_IsFirstLane())
+	F_FirstLane()
 	{
 		f_str8_list SourceFileList = {0};
 		F_Str8ListAppendMany(Lane.Arena, &SourceFileList,
@@ -78,12 +79,13 @@ F_LaneEntry
 	F_FirstLane()
 	{
 		BuildCache = F_BuildCacheFromOutputPath(Lane.Arena, CompileOptions.OutputPath);
+		ObjectFiles.Items = F_ArenaPushArrayType(Lane.Arena, SourceFiles.Count, f_str8);
+		ObjectFiles.Count = SourceFiles.Count;
 	}
 
 	F_BroadcastFirstLane(BuildCache);
 
 	
-
 
 	f_b32 CompiledSuccessfully = F_True;
 
@@ -94,7 +96,8 @@ F_LaneEntry
 		f_u64 Hash = F_TUHash(SourceFiles.Items[Index], IncludePaths, CompileOptions);
 		if(F_HashIsInBuildCache(BuildCache, Hash))
 		{
-			CompileOptions.OutputName = F_Str8PushF(Lane.Arena, "%llu.o", Hash);
+			ObjectFiles.Items[Index] = F_Str8PushF(Lane.Arena, "%llu.o", Hash);
+			CompileOptions.OutputName = ObjectFiles.Items[Index];
 			f_compilation Compilation = F_CompileTU(Lane.Arena, SourceFiles.Items[Index], CompileOptions, F_TOOLCHAIN_CLANG);
 			F_WaitForProcess(&Compilation.Process);
 			CompiledSuccessfully &= F_ProcessExitedCleanly(&Compilation.Process);
@@ -109,10 +112,9 @@ F_LaneEntry
 
 
 	// HACK: need to figure out what to do here
-	f_str8_array ObjectFiles = {0};
 
 	f_b32 FinishedSuccessfully = CompiledSuccessfully;
-	if(F_IsFirstLane())
+	F_FirstLane()
 	{
 		f_u64 LinkStartTime = F_OS_TimeStamp();
 		if(CompiledSuccessfully)
