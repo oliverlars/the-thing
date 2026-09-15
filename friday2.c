@@ -79,8 +79,6 @@ F_LaneEntry
 	F_FirstLane()
 	{
 		BuildCache = F_BuildCacheFromOutputPath(Lane.Arena, CompileOptions.OutputPath);
-		ObjectFiles.Items = F_ArenaPushArrayType(Lane.Arena, SourceFiles.Count, f_str8);
-		ObjectFiles.Count = SourceFiles.Count;
 	}
 
 	F_BroadcastFirstLane(BuildCache);
@@ -90,28 +88,11 @@ F_LaneEntry
 	f_b32 CompiledSuccessfully = F_True;
 
 	f_u64 CompileStartTime = F_OS_TimeStamp();
-	f_u64 NumberOfTUsRecompiled = 0;
-	for F_EachInLaneSpan(Index, SourceFiles.Count)
-	{
-		f_u64 Hash = F_TUHash(SourceFiles.Items[Index], IncludePaths, CompileOptions);
-		if(F_HashIsInBuildCache(BuildCache, Hash))
-		{
-			ObjectFiles.Items[Index] = F_Str8PushF(Lane.Arena, "%llu.o", Hash);
-			CompileOptions.OutputName = ObjectFiles.Items[Index];
-			f_compilation Compilation = F_CompileTU(Lane.Arena, SourceFiles.Items[Index], CompileOptions, F_TOOLCHAIN_CLANG);
-			F_WaitForProcess(&Compilation.Process);
-			CompiledSuccessfully &= F_ProcessExitedCleanly(&Compilation.Process);
-			NumberOfTUsRecompiled++;
-		}
-	}
 
-	NumberOfTUsRecompiled = F_WaveSum(NumberOfTUsRecompiled);
+	f_compilation Compilation = F_CompileMissingTUs(Lane.Arena, BuildCache, SourceFiles, CompileOptions, F_TOOLCHAIN_CLANG);
 
 	CompiledSuccessfully = F_WaveAllTrue(CompiledSuccessfully);
 	f_u64 CompileTotalTime = F_OS_TimeStamp() - CompileStartTime;
-
-
-	// HACK: need to figure out what to do here
 
 	f_b32 FinishedSuccessfully = CompiledSuccessfully;
 	F_FirstLane()
@@ -125,7 +106,7 @@ F_LaneEntry
 		}
 		f_str8_array StatList = F_Str8ArrayFromStr8s(
 			Lane.Arena,
-			F_Str8PushF(Lane.Arena, "compiled %d TUs in %.2fms",  NumberOfTUsRecompiled, F_MilliSecondsFromTimeStamp(CompileTotalTime)),
+			F_Str8PushF(Lane.Arena, "compiled in %.2fms", F_MilliSecondsFromTimeStamp(CompileTotalTime)),
 			F_Str8PushF(Lane.Arena, "linked in %.2fms",  F_MilliSecondsFromTimeStamp(F_OS_TimeStamp() - LinkStartTime))
 		);
 		if(FinishedSuccessfully)

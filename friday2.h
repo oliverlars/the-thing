@@ -241,7 +241,6 @@ typedef struct f_compile_options
 {
 	f_str8_array IncludePaths;
 	f_str8 OutputPath;
-	f_str8 OutputName;
 	f_str8_array ExtraFlags;
 	f_b32 Optimise;
 	f_b32 Debug;
@@ -276,6 +275,24 @@ typedef struct f_build_options
 }
 f_build_options;
 
+typedef enum f_build_status
+{
+	F_BUILD_COMPILING,
+	F_BUILD_COMPILE_FAILED,
+	F_BUILD_LINKING,
+	F_BUILD_SUCCEEDED,
+	F_BUILD_FAILED,
+}
+f_build_status;
+
+
+typedef struct f_build_cache
+{
+	f_u64 *Items;
+	f_s64  Count;
+}
+f_build_cache;
+
 typedef struct f_build_report
 {
 	f_b32  Succeeded;
@@ -299,11 +316,12 @@ f_link_options;
 
 typedef struct f_compilation
 {
-	f_process Process;
+	f_process *Processes;
 
-	f_str8 SourcePath;
-	f_str8 ObjectPath;
-	f_u64 Hash;
+	f_str8    *SourcePaths;
+	f_str8    *ObjectPaths;
+	f_u64     *Hashes;
+	f_s32      Count;
 }
 f_compilation;
 
@@ -473,7 +491,12 @@ f_u64 F_HashCompileOptions(f_compile_options CompileOptions);
 f_u64 F_TUHash(f_str8 PathToSource, f_str8_array IncludePaths, f_compile_options CompileOptions);
 
 f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths);
-f_compilation F_CompileTU (f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions, f_toolchain Toolchain);
+f_compilation F_CompileMissingTUs (f_memory_arena *Arena, f_build_cache BuildCache, f_str8_array SourceFiles, f_compile_options CompileOptions, f_toolchain Toolchain);
+f_b32         F_WaitForCompilation (f_compilation *Compilation);
+
+
+f_str8_array F_ObjectFilesFromCompilation(f_memory_arena *Arena, f_compilation Compilation);
+
 f_link F_LinkTUs (f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain);
 
 
@@ -570,25 +593,6 @@ f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 #define F_LaneEntry void F_Internal_LaneEntry()
 
 void F_Internal_LaneEntry();
-
-
-typedef enum f_build_status
-{
-	F_BUILD_COMPILING,
-	F_BUILD_COMPILE_FAILED,
-	F_BUILD_LINKING,
-	F_BUILD_SUCCEEDED,
-	F_BUILD_FAILED,
-}
-f_build_status;
-
-
-typedef struct f_build_cache
-{
-	f_u64 *Items;
-	f_s64  Count;
-}
-f_build_cache;
 
 f_build_cache F_BuildCacheFromOutputPath (f_memory_arena *Arena, f_str8 OutputPath);
 
@@ -2167,12 +2171,12 @@ f_u64 F_HashCompileOptions(f_compile_options CompileOptions)
 	return Hash;
 }
 
-f_u64 F_TUHash(f_str8 PathToSource, f_str8_array IncludePaths, f_compile_options CompileOptions)
+f_u64 F_TUHash(f_str8 PathToSource, f_compile_options CompileOptions)
 {
 	f_u64 Hash = 0;
 	F_Temporary(Lane.Arena)
 	{
-		Hash = F_HashSourceAndIncludes(Lane.Arena, PathToSource, IncludePaths);
+		Hash = F_HashSourceAndIncludes(Lane.Arena, PathToSource, CompileOptions.IncludePaths);
 	}
 	Hash ^= F_HashCompileOptions(CompileOptions);
 	return Hash;
@@ -2184,50 +2188,71 @@ f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8
 	return __F_Internal_HashSourceAndIncludes(Arena, PathToSource, IncludePaths, &IncludesSeenAlready);
 }
 
-f_compilation F_CompileTU(f_memory_arena *Arena, f_str8 PathToSourceFile, f_compile_options CompileOptions, f_toolchain Toolchain)
+f_str8_array F_ObjectFilesFromCompilation(f_memory_arena *Arena, f_compilation Compilation)
+{
+	f_str8_array ObjectFiles = {0};
+	ObjectFiles.Items = F_ArenaPushArrayType(Arena, Compilation.Count, f_str8);
+	ObjectFiles.Count = Compilation.Count;
+
+	for F_EachInLaneSpan(I, ObjectFiles.Count)
+	{
+		ObjectFiles.Items[I] = F_Str8PushF(Arena, "%llu.o", Compilation.Hashes[I]);
+	}
+
+	return ObjectFiles;
+}
+
+f_compilation F_CompileMissingTUs(f_memory_arena *Arena, f_build_cache BuildCache, f_str8_array PathsToSourceFiles, f_compile_options CompileOptions, f_toolchain Toolchain)
 {
 	f_compilation Compilation = {0};
-	if(CompileOptions.OutputPath.Size > 0)
+
+	Compilation.Count = PathsToSourceFiles.Count;
+
+	for F_EachInLaneSpan(I, PathsToSourceFiles.Count)
 	{
-		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s/%.*s", F_Expand(CompileOptions.OutputPath), F_Expand(CompileOptions.OutputName));	}
-	else
-	{
-		Compilation.ObjectPath = F_Str8PushF(Arena, "%.*s", F_Expand(CompileOptions.OutputName));
+		Compilation.SourcePaths[I] = PathsToSourceFiles.Items[I];
+		Compilation.Hashes[I] = F_TUHash(PathsToSourceFiles.Items[I], CompileOptions);
+		if(F_HashIsInBuildCache(BuildCache, Compilation.Hashes[I])) continue;
+		if(CompileOptions.OutputPath.Size > 0)
+		{
+			Compilation.ObjectPaths[I] = F_Str8PushF(Arena, "%.*s/%llu.o", Compilation.Hashes[I]);
+		}
+		else
+		{
+			Compilation.ObjectPaths[I] = F_Str8PushF(Arena, "%llu.o", Compilation.Hashes[I]);
+		}
+
+		f_str8_list Args = {0};
+		F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
+		F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
+		F_Str8ListAppend(Arena, &Args, PathsToSourceFiles.Items[I]);
+
+		if(CompileOptions.Debug)
+		{
+			F_Str8ListAppendF(Arena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
+		}
+
+		for(int I = 0; I < CompileOptions.ExtraFlags.Count; I++)
+		{
+			F_Str8ListAppend(Arena, &Args, CompileOptions.ExtraFlags.Items[I]);
+		}
+
+		F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPaths[I]));
+
+		for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
+		{
+			F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
+		}
+
+		F_StartProcess(Arena, Compilation.Processes + I, Args);
 	}
-
-	f_file SourceFile = F_OS_FileFromFilename(Arena, PathToSourceFile);
-	f_str8 Source = F_OS_ReadEntireFile(Arena, &SourceFile);
-	F_OS_ReleaseFile(&SourceFile);
-
-
-	Compilation.SourcePath = PathToSourceFile;
-	Compilation.Hash = F_HashStr8(Source);
-
-	f_str8_list Args = {0};
-	F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
-	F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
-	F_Str8ListAppend(Arena, &Args, PathToSourceFile);
-
-	if(CompileOptions.Debug)
-	{
-		F_Str8ListAppendF(Arena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
-	}
-
-	for(int I = 0; I < CompileOptions.ExtraFlags.Count; I++)
-	{
-		F_Str8ListAppend(Arena, &Args, CompileOptions.ExtraFlags.Items[I]);
-	}
-
-	F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation.ObjectPath));
-
-	for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
-	{
-		F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
-	}
-
-	F_StartProcess(Arena, &Compilation.Process, Args);
 
 	return Compilation;
+}
+
+f_b32 F_WaitForCompilation(f_compilation *Compilation)
+{
+
 }
 
 f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain)
