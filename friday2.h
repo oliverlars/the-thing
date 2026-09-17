@@ -5,6 +5,7 @@
 
 #if defined(_WIN32)
 #define OS_WINDOWS
+// cl /std:c11 /experimental:c11atomics /Z7 /Od /utf-8 /Tcfriday2.c /Fe:friday2.exe /link /DEBUG Synchronization.lib
 #endif
 #if defined(__APPLE__)
 #define OS_DARWIN
@@ -450,19 +451,12 @@ void            F_WaveBarrier ();
      Index < __F_Concat(F_ForEnd__, __LINE__); \
      Index += __F_Concat(F_ForStep__, __LINE__))
 
-void  F_StartProcess   (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
-f_b32 F_PollProcess    (f_process *Process);
-void  F_WaitForProcess (f_process *Process);
+void  F_StartProcess             (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
+f_b32 F_PollProcess              (f_process *Process);
+void  F_WaitForProcess           (f_process *Process);
+void  F_WaitForMultipleProcesses (f_process *Processes, f_s32 ProcessCount);
 
 f_b32 F_ProcessExitedCleanly(f_process *Process);
-
-#define F_WaitForMultipleProcesses(...)\
-do\
-{\
-	f_process *__F_Processes[] = { __VA_ARGS__ };\
-	F_Internal_ProcessWaitMany( __F_Processes, F_ArrayCount(__F_Processes));\
-}\
-while(0)
 
 void F_Internal_WaitForMultipleProcesses (f_process **Processes, f_u64 ProcessCount);
 
@@ -615,7 +609,11 @@ f_memory_arena F_ErrorArena;
 
 int main(int ArgCount, char **Arguments)
 {
+#ifdef FRIDAY_SINGLE_THREAD
+	F_DispatchAcrossNLanes(1, Arguments, ArgCount);
+#else
 	F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs(), Arguments, ArgCount);
+#endif
 }
 
 #endif
@@ -1844,8 +1842,8 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 
 void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 {
+	if(!Process) return;
 	Process->StdOutSinceLastPoll.Bytes = F_ArenaPushArrayType(Arena, F_PROCESS_STDOUT_CAPACITY, f_s8);
-
 #if defined(OS_WINDOWS)
 	
 	SECURITY_ATTRIBUTES Attributes = {0};
@@ -2045,6 +2043,14 @@ void F_WaitForProcess(f_process *Process)
 	if(Process->StdOutSinceLastPoll.Size > 0) F_Print(Process->StdOutSinceLastPoll);
 }
 
+void  F_WaitForMultipleProcesses (f_process *Processes, f_s32 ProcessCount)
+{
+	for F_EachInLaneSpan(I, ProcessCount)
+	{
+		F_WaitForProcess(Processes + I);
+	}
+}
+
 void F_Internal_WaitForMultipleProcesses(f_process **Processes, f_u64 ProcessCount)
 {
 	for(int I = 0; I < ProcessCount; I++)
@@ -2208,6 +2214,10 @@ f_compilation F_CompileMissingTUs(f_memory_arena *Arena, f_build_cache BuildCach
 
 	Compilation.Count = PathsToSourceFiles.Count;
 
+	Compilation.SourcePaths = F_ArenaPushArrayType(Arena, Compilation.Count, f_str8);
+	Compilation.Hashes = F_ArenaPushArrayType(Arena, Compilation.Count, f_u64);
+	Compilation.ObjectPaths = F_ArenaPushArrayType(Arena, Compilation.Count, f_str8);
+
 	for F_EachInLaneSpan(I, PathsToSourceFiles.Count)
 	{
 		Compilation.SourcePaths[I] = PathsToSourceFiles.Items[I];
@@ -2215,7 +2225,7 @@ f_compilation F_CompileMissingTUs(f_memory_arena *Arena, f_build_cache BuildCach
 		if(F_HashIsInBuildCache(BuildCache, Compilation.Hashes[I])) continue;
 		if(CompileOptions.OutputPath.Size > 0)
 		{
-			Compilation.ObjectPaths[I] = F_Str8PushF(Arena, "%.*s/%llu.o", Compilation.Hashes[I]);
+			Compilation.ObjectPaths[I] = F_Str8PushF(Arena, "%.*s/%llu.o", F_Expand(CompileOptions.OutputPath), Compilation.Hashes[I]);
 		}
 		else
 		{
@@ -2248,11 +2258,6 @@ f_compilation F_CompileMissingTUs(f_memory_arena *Arena, f_build_cache BuildCach
 	}
 
 	return Compilation;
-}
-
-f_b32 F_WaitForCompilation(f_compilation *Compilation)
-{
-
 }
 
 f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain)

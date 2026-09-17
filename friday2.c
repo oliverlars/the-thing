@@ -1,5 +1,6 @@
 #define FRIDAY_IMPLEMENTATION
 #define FRIDAY_MAIN
+#define FRIDAY_SINGLE_THREAD
 #include "friday2.h"
 
 #include <stdio.h>
@@ -13,7 +14,6 @@ F_LaneEntry
 	f_compile_options CompileOptions = {0};
 	f_link_options    LinkOptions    = {0};
 	f_build_cache     BuildCache     = {0};
-	f_str8_array      ObjectFiles    = {0};
 	F_FirstLane()
 	{
 		F_OS_MakeDirectoryIfNotAlreadyMade(Lane.Arena, F_Str8("build"));
@@ -91,6 +91,8 @@ F_LaneEntry
 
 	f_compilation Compilation = F_CompileMissingTUs(Lane.Arena, BuildCache, SourceFiles, CompileOptions, F_TOOLCHAIN_CLANG);
 
+	F_WaitForMultipleProcesses(Compilation.Processes, Compilation.Count);
+
 	CompiledSuccessfully = F_WaveAllTrue(CompiledSuccessfully);
 	f_u64 CompileTotalTime = F_OS_TimeStamp() - CompileStartTime;
 
@@ -100,7 +102,7 @@ F_LaneEntry
 		f_u64 LinkStartTime = F_OS_TimeStamp();
 		if(CompiledSuccessfully)
 		{
-			f_link Link = F_LinkTUs(Lane.Arena, ObjectFiles, LinkOptions, F_TOOLCHAIN_CLANG);
+			f_link Link = F_LinkTUs(Lane.Arena, (f_str8_array){Compilation.ObjectPaths, Compilation.Count}, LinkOptions, F_TOOLCHAIN_CLANG);
 			F_WaitForProcess(&Link.Process);
 			FinishedSuccessfully = F_ProcessExitedCleanly(&Link.Process);
 		}
