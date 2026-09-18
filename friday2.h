@@ -315,6 +315,21 @@ typedef struct f_link_options
 }
 f_link_options;
 
+typedef enum f_mode
+{
+	F_BLOCKING,
+	F_POLLING,
+}
+f_mode;
+
+typedef enum f_compilation_status
+{
+	F_COMPILING,
+	F_COMPILE_SUCCEEDED,
+	F_COMPILE_FAILED,
+}
+f_compilation_status;
+
 typedef struct f_compilation
 {
 	f_process *Processes;
@@ -323,6 +338,8 @@ typedef struct f_compilation
 	f_str8    *ObjectPaths;
 	f_u64     *Hashes;
 	f_s32      Count;
+
+	f_compilation_status Status;
 }
 f_compilation;
 
@@ -485,7 +502,7 @@ f_u64 F_HashCompileOptions(f_compile_options CompileOptions);
 f_u64 F_TUHash(f_str8 PathToSource, f_str8_array IncludePaths, f_compile_options CompileOptions);
 
 f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths);
-f_compilation F_CompileMissingTUs (f_memory_arena *Arena, f_build_cache BuildCache, f_str8_array SourceFiles, f_compile_options CompileOptions, f_toolchain Toolchain);
+f_compilation F_CompileMissingTUs (f_memory_arena *Arena, f_build_cache BuildCache, f_compile_options CompileOptions, f_str8_array SourceFiles, f_toolchain Toolchain, f_mode Mode);
 f_b32         F_WaitForCompilation (f_compilation *Compilation);
 
 
@@ -2208,7 +2225,7 @@ f_str8_array F_ObjectFilesFromCompilation(f_memory_arena *Arena, f_compilation C
 	return ObjectFiles;
 }
 
-f_compilation F_CompileMissingTUs(f_memory_arena *Arena, f_build_cache BuildCache, f_str8_array PathsToSourceFiles, f_compile_options CompileOptions, f_toolchain Toolchain)
+f_compilation F_CompileMissingTUs(f_memory_arena *Arena, f_build_cache BuildCache, f_compile_options CompileOptions, f_str8_array PathsToSourceFiles, f_toolchain Toolchain, f_mode Mode)
 {
 	f_compilation Compilation = {0};
 
@@ -2255,6 +2272,48 @@ f_compilation F_CompileMissingTUs(f_memory_arena *Arena, f_build_cache BuildCach
 		}
 
 		F_StartProcess(Arena, Compilation.Processes + I, Args);
+	}
+
+	if(Mode == F_BLOCKING)
+	{
+		F_WaitForMultipleProcesses(Compilation.Processes, Compilation.Count);
+		f_b32 Succeeded = F_True;
+		for F_EachInLaneSpan(I, Compilation.Count)
+		{
+			Succeeded &= F_ProcessExitedCleanly(Compilation.Processes + I);
+		}
+		if(F_WaveAllTrue(Succeeded))
+		{
+			Compilation.Status = F_COMPILE_SUCCEEDED;
+		}
+		else
+		{
+			Compilation.Status = F_COMPILE_FAILED;
+		}
+	}
+	else
+	{
+		f_b32 ProcessStatuses = F_True;
+		for F_EachInLaneSpan(I, Compilation.Count)
+		{
+			ProcessStatuses &= F_PollProcess(Compilation.Processes + I);
+		}
+		if(F_WaveAllTrue(ProcessStatuses))
+		{
+			f_b32 Succeeded = F_False;
+			for F_EachInLaneSpan(I, Compilation.Count)
+			{
+				Succeeded &= F_ProcessExitedCleanly(Compilation.Processes + I);
+			}
+			if(F_WaveAllTrue(Succeeded))
+			{
+				Compilation.Status = F_COMPILE_SUCCEEDED;
+			}
+			else
+			{
+				Compilation.Status = F_COMPILE_FAILED;
+			}
+		}
 	}
 
 	return Compilation;
