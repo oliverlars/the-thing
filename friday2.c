@@ -86,7 +86,7 @@ F_LaneEntry
 
 	f_u64 CompileStartTime = F_OS_TimeStamp();
 
-	f_compilation Compilation = F_CompileMissingTUs(Lane.Arena, BuildCache, CompileOptions, SourceFiles, F_TOOLCHAIN_CLANG, F_BLOCKING);
+	f_compilation Compilation = F_CompileNewAndChangedTUs(Lane.Arena, BuildCache, CompileOptions, SourceFiles, F_TOOLCHAIN_CLANG, F_BLOCKING);
 
 	f_u64 CompileTotalTime = F_OS_TimeStamp() - CompileStartTime;
 

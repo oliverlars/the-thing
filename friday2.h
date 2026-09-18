@@ -502,7 +502,7 @@ f_u64 F_HashCompileOptions(f_compile_options CompileOptions);
 f_u64 F_TUHash(f_str8 PathToSource, f_str8_array IncludePaths, f_compile_options CompileOptions);
 
 f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths);
-f_compilation F_CompileMissingTUs (f_memory_arena *Arena, f_build_cache BuildCache, f_compile_options CompileOptions, f_str8_array SourceFiles, f_toolchain Toolchain, f_mode Mode);
+f_compilation F_CompileNewAndChangedTUs (f_memory_arena *Arena, f_build_cache BuildCache, f_compile_options CompileOptions, f_str8_array SourceFiles, f_toolchain Toolchain, f_mode Mode);
 f_b32         F_WaitForCompilation (f_compilation *Compilation);
 
 
@@ -2225,7 +2225,7 @@ f_str8_array F_ObjectFilesFromCompilation(f_memory_arena *Arena, f_compilation C
 	return ObjectFiles;
 }
 
-f_compilation F_CompileMissingTUs(f_memory_arena *Arena, f_build_cache BuildCache, f_compile_options CompileOptions, f_str8_array PathsToSourceFiles, f_toolchain Toolchain, f_mode Mode)
+f_compilation F_CompileNewAndChangedTUs(f_memory_arena *Arena, f_build_cache BuildCache, f_compile_options CompileOptions, f_str8_array PathsToSourceFiles, f_toolchain Toolchain, f_mode Mode)
 {
 	f_compilation Compilation = {0};
 
