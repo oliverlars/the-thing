@@ -2260,12 +2260,12 @@ void F_WaitForCompilation(f_compilation *Compilation)
 
 f_b32 F_PollCompilation(f_compilation *Compilation)
 {
-	f_b32 ProcessStatuses = F_True;
+	f_b32 ProcessesInLaneFinished = F_True;
 	for F_EachInLaneSpan(I, Compilation->Count)
 	{
-		ProcessStatuses &= F_PollProcess(Compilation->Processes + I);
+		ProcessesInLaneFinished &= F_PollProcess(Compilation->Processes + I);
 	}
-	if(F_WaveAllTrue(ProcessStatuses))
+	if(F_WaveAllTrue(ProcessesInLaneFinished))
 	{
 		f_b32 Succeeded = F_False;
 		for F_EachInLaneSpan(I, Compilation->Count)
@@ -2281,6 +2281,7 @@ f_b32 F_PollCompilation(f_compilation *Compilation)
 			Compilation->Status = F_COMPILE_FAILED;
 		}
 	}
+	return F_WaveAllTrue(ProcessesInLaneFinished);
 }
 
 f_compilation F_CompileNewAndChangedTUs
@@ -2340,6 +2341,38 @@ f_compilation F_CompileNewAndChangedTUs
 	}
 
 	return Compilation;
+}
+
+void F_WaitForLinking(f_link *Link)
+{
+	F_WaitForProcess(&Link->Process);
+	f_b32 Succeeded = F_ProcessExitedCleanly(&Link->Process);
+	if(Succeeded)
+	{
+		Link->Status = F_LINK_SUCCEEDED;
+	}
+	else
+	{
+		Link->Status = F_LINK_FAILED;
+	}
+}
+
+f_b32 F_PollLinking(f_link *Link)
+{
+	f_b32 FinishedLinking = F_PollProcess(&Link->Process);
+	if(FinishedLinking)
+	{
+		f_b32 Succeeded = F_ProcessExitedCleanly(&Link->Process);	
+		if(Succeeded)
+		{
+			Link->Status = F_LINK_SUCCEEDED;
+		}
+		else
+		{
+			Link->Status = F_LINK_FAILED;
+		}
+	}
+	return FinishedLinking;
 }
 
 f_link F_LinkTUs(f_memory_arena *Arena, f_str8_array ObjectFiles, f_link_options LinkOptions, f_toolchain Toolchain)

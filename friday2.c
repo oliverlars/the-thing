@@ -86,28 +86,26 @@ F_LaneEntry
 
 	f_u64 CompileStartTime = F_OS_TimeStamp();
 
+		f_link Link = {0};
 	f_compilation Compilation = F_CompileNewAndChangedTUs(Lane.Arena, BuildCache, CompileOptions, SourceFiles, F_TOOLCHAIN_CLANG);
 	F_WaitForCompilation(&Compilation);
 
 	f_u64 CompileTotalTime = F_OS_TimeStamp() - CompileStartTime;
-
-	f_b32 BuildSucceeded = F_False;
 	F_FirstLane()
 	{
 		f_u64 LinkStartTime = F_OS_TimeStamp();
 		if(Compilation.Status == F_COMPILE_SUCCEEDED)
 		{
-			f_link Link = F_LinkTUs(Lane.Arena, (f_str8_array){Compilation.ObjectPaths, Compilation.Count}, LinkOptions, F_TOOLCHAIN_CLANG);
-			// TODO: Switch to F_WaitForLinking
-			F_WaitForProcess(&Link.Process);
-			BuildSucceeded = F_ProcessExitedCleanly(&Link.Process);
+			Link = F_LinkTUs(Lane.Arena, (f_str8_array){Compilation.ObjectPaths, Compilation.Count}, LinkOptions, F_TOOLCHAIN_CLANG);
+
+			F_WaitForLinking(&Link);
 		}
 		f_str8_array StatList = F_Str8ArrayFromStr8s(
 			Lane.Arena,
 			F_Str8PushF(Lane.Arena, "compiled in %.2fms", F_MilliSecondsFromTimeStamp(CompileTotalTime)),
 			F_Str8PushF(Lane.Arena, "linked in %.2fms",  F_MilliSecondsFromTimeStamp(F_OS_TimeStamp() - LinkStartTime))
 		);
-		if(BuildSucceeded)
+		if(Link.Status == F_LINK_SUCCEEDED)
 		{
 			F_PassedBanner(StatList);
 		}
