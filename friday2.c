@@ -86,7 +86,8 @@ F_LaneEntry
 
 	f_u64 CompileStartTime = F_OS_TimeStamp();
 
-	f_compilation Compilation = F_CompileNewAndChangedTUs(Lane.Arena, BuildCache, CompileOptions, SourceFiles, F_TOOLCHAIN_CLANG, F_BLOCKING);
+	f_compilation Compilation = F_CompileNewAndChangedTUs(Lane.Arena, BuildCache, CompileOptions, SourceFiles, F_TOOLCHAIN_CLANG);
+	F_WaitForCompilation(&Compilation);
 
 	f_u64 CompileTotalTime = F_OS_TimeStamp() - CompileStartTime;
 
@@ -97,6 +98,7 @@ F_LaneEntry
 		if(Compilation.Status == F_COMPILE_SUCCEEDED)
 		{
 			f_link Link = F_LinkTUs(Lane.Arena, (f_str8_array){Compilation.ObjectPaths, Compilation.Count}, LinkOptions, F_TOOLCHAIN_CLANG);
+			// TODO: Switch to F_WaitForLinking
 			F_WaitForProcess(&Link.Process);
 			BuildSucceeded = F_ProcessExitedCleanly(&Link.Process);
 		}
