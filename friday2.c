@@ -7,8 +7,6 @@
 
 #include <stdlib.h>
 
-
-#if 1
 F_LaneEntry
 {
 	f_compile_options CompileOptions = {0};
@@ -115,32 +113,4 @@ F_LaneEntry
 		}
 	}
 }
-#else
 
-F_LaneEntry(Wave)
-{
-	if(F_WaveIsFirstLane(Wave))
-	{
-		f_str8_list Entries = F_OS_ListOfEntriesInDirectory(Lane.Arena, F_Str8("source"), .PrependPath = F_True, .FilterByExtension = F_Str8ArrayFromMany(Lane.Arena, F_Str8(".c")));
-		for(f_str8_list_node *Node = Entries.First; Node; Node = Node->Next)
-		{
-			printf("%.*s\n", F_Expand(Node->String));
-		}
-		f_process Process = {0};
-		f_str8_list Args = {0};
-		F_Str8ListAppend(Lane.Arena, &Args, F_Str8("test.exe"));
-		F_StartProcess(Lane.Arena, &Process, Args);
-		int SomeValue = 0;
-		for(;F_PollProcess(&Process);)
-		{
-			printf("%.*s", F_Expand(Process.StdOutSinceLastPoll));
-			SomeValue = 10;
-		}
-		if(F_ProcessExitedCleanly(&Process))
-		{
-			printf("EXITED CLEANLY");
-		}
-	}
-}
-
-#endif

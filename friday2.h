@@ -2300,6 +2300,7 @@ f_compilation F_CompileNewAndChangedTUs
 	Compilation.SourcePaths = F_ArenaPushArrayType(Arena, Compilation.Count, f_str8);
 	Compilation.Hashes = F_ArenaPushArrayType(Arena, Compilation.Count, f_u64);
 	Compilation.ObjectPaths = F_ArenaPushArrayType(Arena, Compilation.Count, f_str8);
+	Compilation.Processes = F_ArenaPushArrayType(Arena, Compilation.Count, f_process);
 
 	for F_EachInLaneSpan(I, SourceFiles.Count)
 	{
