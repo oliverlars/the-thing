@@ -94,7 +94,7 @@ F_LaneEntry
 		f_u64 LinkStartTime = F_OS_TimeStamp();
 		if(Compilation.Status == F_COMPILE_SUCCEEDED)
 		{
-			Link = F_LinkTUs(Lane.Arena, (f_str8_array){Compilation.ObjectPaths, Compilation.Count}, LinkOptions, F_TOOLCHAIN_CLANG);
+			Link = F_LinkTUs(Lane.Arena, LinkOptions, (f_str8_array){Compilation.ObjectPaths, Compilation.Count}, F_TOOLCHAIN_CLANG);
 
 			F_WaitForLinking(&Link);
 		}
