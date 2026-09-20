@@ -574,6 +574,7 @@ void *F_OS_DLLSymbolFromName (f_dll DLL, f_str8 ProcedureName);
 
 typedef struct f_internal_directory_options
 {
+	char *Directories[16];
 	f_b32 ExcludeDirectories;
 	f_b32 PrependPath;
 	f_str8_array FilterByExtension;
@@ -581,18 +582,32 @@ typedef struct f_internal_directory_options
 f_internal_directory_options;
 
 #define F_OS_ListOfEntriesInDirectory(Arena, DirectoryPath, ...) \
-F_OS_Internal_ListOfEntriesInDirectory(Arena, DirectoryPath, (f_internal_directory_options){ __VA_ARGS__ })
+F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ .Directories = {DirectoryPath},__VA_ARGS__ })
 
 #define F_OS_ArrayOfEntriesInDirectory(Arena, DirectoryPath, ...) \
-F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectory(Arena, DirectoryPath, __VA_ARGS__))
+F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena,  __VA_ARGS__))
 
 #define F_OS_ListOfFilesInDirectory(Arena, DirectoryPath, ...) \
-F_OS_Internal_ListOfEntriesInDirectory(Arena, DirectoryPath, (f_internal_directory_options){ .ExcludeDirectories = F_True, __VA_ARGS__ })
+F_OS_Internal_ListOfEntriesInDirectories(Arena,  (f_internal_directory_options){ .Directories = {DirectoryPath}, .ExcludeDirectories = F_True, __VA_ARGS__ })
 
 #define F_OS_ArrayOfFilesInDirectory(Arena, DirectoryPath, ...) \
-F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectory(Arena, DirectoryPath, .ExcludeDirectories = F_True, __VA_ARGS__))
+F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, .Directories = {DirectoryPath}, .ExcludeDirectories = F_True, __VA_ARGS__))
 
-f_str8_list F_OS_Internal_ListOfEntriesInDirectory (f_memory_arena *Arena, f_str8 Directory, f_internal_directory_options Options);
+
+#define F_OS_ListOfEntriesInDirectories(Arena, ...) \
+F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ __VA_ARGS__ })
+
+#define F_OS_ArrayOfEntriesInDirectories(Arena, ...) \
+F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, __VA_ARGS__))
+
+#define F_OS_ListOfFilesInDirectories(Arena, ...) \
+F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ .ExcludeDirectories = F_True, __VA_ARGS__ })
+
+#define F_OS_ArrayOfFilesInDirectories(Arena, ...) \
+F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, .ExcludeDirectories = F_True, __VA_ARGS__))
+
+
+f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_internal_directory_options Options);
 
 #if defined(OS_WINDOWS)
 typedef unsigned long (__stdcall *f_thread_function)(void *);
@@ -1787,7 +1802,7 @@ f_b32 F_AnyFilesChangedInWatch(f_watch *Watch, f_u64 ChangeGranularityInMillisec
 	return F_WaveAnyTrue(AnyChanged);
 }
 
-f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8 DirectoryPath, f_internal_directory_options Options)
+f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_internal_directory_options Options)
 {
 #define IsCStrDotOrDotDot(Name) (Name[0] == '.' && (Name[1] == 0 || (Name[1] == '.' && Name[2] == 0)))
 	f_str8_list Entries = { 0 };
@@ -1796,74 +1811,79 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectory(f_memory_arena *Arena, f_str8
 	WIN32_FIND_DATA FindData;
 
 	HANDLE FoundHandle;
-
-	FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%.*s\\*", F_Expand(DirectoryPath))), &FindData);
-	if(FoundHandle == INVALID_HANDLE_VALUE) return Entries;
-	do
+	for(f_s32 I = 0; Options.Directories[I] && I < 16; I++)
 	{
-		f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
-		f_b32 IsActualEntry = !IsCStrDotOrDotDot(FindData.cFileName);
-		if(ShouldExcludeDirectories) continue;
-		if(!IsActualEntry) continue;
-		f_str8 EntryName = F_Str8PushF(Arena, "%s", FindData.cFileName);
-		f_b32 MatchFound = F_True;
-		if(Options.FilterByExtension.Count > 0)
+		FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%s\\*", Options.Directories[I])), &FindData);
+		if(FoundHandle == INVALID_HANDLE_VALUE) return Entries;
+		do
 		{
-			MatchFound = F_False;
-			for(f_s32 I = 0; I < Options.FilterByExtension.Count; I++)
+			f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+			f_b32 IsActualEntry = !IsCStrDotOrDotDot(FindData.cFileName);
+			if(ShouldExcludeDirectories) continue;
+			if(!IsActualEntry) continue;
+			f_str8 EntryName = F_Str8PushF(Arena, "%s", FindData.cFileName);
+			f_b32 MatchFound = F_True;
+			if(Options.FilterByExtension.Count > 0)
 			{
-				if(F_Str8EndsWith(EntryName, Options.FilterByExtension.Items[I]))
+				MatchFound = F_False;
+				for(f_s32 I = 0; I < Options.FilterByExtension.Count; I++)
 				{
-					MatchFound = F_True;
+					if(F_Str8EndsWith(EntryName, Options.FilterByExtension.Items[I]))
+					{
+						MatchFound = F_True;
+					}
 				}
-			}
 
+			}
+			if(!MatchFound) continue;
+			if(Options.PrependPath)
+			{
+				F_Str8ListAppendF(Arena, &Entries, "%.*s\\%.*s", F_Expand(DirectoryPath), F_Expand(EntryName));
+			}
+			else
+			{
+				F_Str8ListAppendF(Arena, &Entries, "%.*s", F_Expand(EntryName));
+			}
 		}
-		if(!MatchFound) continue;
-		if(Options.PrependPath)
-		{
-			F_Str8ListAppendF(Arena, &Entries, "%.*s\\%.*s", F_Expand(DirectoryPath), F_Expand(EntryName));
-		}
-		else
-		{
-			F_Str8ListAppendF(Arena, &Entries, "%.*s", F_Expand(EntryName));
-		}
+		while (FindNextFile(FoundHandle, &FindData) && FoundHandle != INVALID_HANDLE_VALUE);
 	}
-	while (FindNextFile(FoundHandle, &FindData) && FoundHandle != INVALID_HANDLE_VALUE);
 #elif defined(OS_DARWIN)
-	DIR *Directory = opendir(F_CStrFromStr8(Arena, DirectoryPath));
-	struct dirent *Entry;
-	while((Entry = readdir(Directory)))
+	for(f_s32 I = 0; Options.Directories[I] && I < 16; I++)
 	{
-		f_b32 IsActualEntry = !IsCStrDotOrDotDot(Entry->d_name);
-		f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && Entry->d_type == DT_DIR);
-		if(!IsActualEntry) continue;
-		if(ShouldExcludeDirectories) continue;
-
-		f_str8 EntryName = F_Str8PushF(Arena, "%s", Entry->d_name);
-
-		f_b32 MatchFound = F_True;
-		if(Options.FilterByExtension.Count > 0)
+		DIR *Directory = opendir(Options.Directories[I]);
+		struct dirent *Entry;
+		while((Entry = readdir(Directory)))
 		{
-			MatchFound = F_False;
-			for(int I = 0; I < Options.FilterByExtension.Count; I++)
+			f_b32 IsActualEntry = !IsCStrDotOrDotDot(Entry->d_name);
+			f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && Entry->d_type == DT_DIR);
+			if(!IsActualEntry) continue;
+			if(ShouldExcludeDirectories) continue;
+
+			f_str8 EntryName = F_Str8PushF(Arena, "%s", Entry->d_name);
+
+			f_b32 MatchFound = F_True;
+			if(Options.FilterByExtension.Count > 0)
 			{
-				if(F_Str8EndsWith(EntryName, Options.FilterByExtension.Items[I]))
+				MatchFound = F_False;
+				for(int I = 0; I < Options.FilterByExtension.Count; I++)
 				{
-					MatchFound = F_True;
-					break;
+					if(F_Str8EndsWith(EntryName, Options.FilterByExtension.Items[I]))
+					{
+						MatchFound = F_True;
+						break;
+					}
 				}
 			}
-		}
-		if(!MatchFound) continue;
-		
-		if(Options.PrependPath)
-		{
-			F_Str8ListAppendF(Arena, &Entries, "%.*s/%s", F_Expand(DirectoryPath), Entry->d_name);
-		}
-		else
-		{
-			F_Str8ListAppendF(Arena, &Entries, "%s", Entry->d_name);
+			if(!MatchFound) continue;
+			
+			if(Options.PrependPath)
+			{
+				F_Str8ListAppendF(Arena, &Entries, "%s/%s", Options.Directories[I], Entry->d_name);
+			}
+			else
+			{
+				F_Str8ListAppendF(Arena, &Entries, "%s", Entry->d_name);
+			}
 		}
 	}
 #else

@@ -41,27 +41,11 @@ F_LaneEntry
 	{
 		f_str8_list SourceFileList = {0};
 		F_Str8ListAppendMany(Lane.Arena, &SourceFileList,
-			F_OS_ListOfFilesInDirectory(
+			F_OS_ListOfFilesInDirectories(
 				Lane.Arena,
-				F_Str8("source"),
-				.PrependPath = F_True,
-				.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c"),
-			)
-		);
-		F_Str8ListAppendMany(Lane.Arena, &SourceFileList,
-			F_OS_ListOfFilesInDirectory(
-				Lane.Arena,
-				F_Str8("source/darwin"),
+				.Directories = {"source", "source/darwin", "external"},
 				.PrependPath = F_True,
 				.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c", ".m"),
-			)
-		);
-		F_Str8ListAppendMany(Lane.Arena, &SourceFileList,
-			F_OS_ListOfFilesInDirectory(
-				Lane.Arena,
-				F_Str8("external"),
-				.PrependPath = F_True,
-				.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c"),
 			)
 		);
 
