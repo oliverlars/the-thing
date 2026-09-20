@@ -635,8 +635,6 @@ f_memory_arena *F_TransientArena();
 
 #ifdef FRIDAY_IMPLEMENTATION
 
-f_memory_arena F_ErrorArena;
-
 #ifdef FRIDAY_MAIN
 
 int main(int ArgCount, char **Arguments)
@@ -659,6 +657,8 @@ int main(int ArgCount, char **Arguments)
 thread_local f_lane Lane;
 f_str8_array F_CommandLineArgs;
 
+thread_local f_memory_arena F_ErrorArena;
+
 #include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
 #include <stdio.h> // printf()
 #include <assert.h> // assert()
@@ -679,6 +679,7 @@ f_str8_array F_CommandLineArgs;
 #include <spawn.h> // posix_spawn()
 #include <sys/wait.h> // waitpid()
 #include <dirent.h>
+#include <dlfcn.h> // dlopen
 #endif
 
 extern char **environ;
@@ -1350,7 +1351,7 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 	if(Status) 
 	{
 		File->Errors = F_True;
-		F_AppendErrorF(File->ErrorStream, "Failed to get file information");
+		F_AppendErrorF(&File->ErrorStream, "Failed to get file information");
 		return (f_file_info){0};
 	}
 	FileInfo.SizeInBytes = FileStat.st_size;
@@ -1409,10 +1410,10 @@ f_dll  F_OS_DLLFromPath(f_str8 Path)
 	f_dll DLL = {0};
 #if defined(OS_WINDOWS)
 	f_u64 Mark = Lane.Arena->At;
-	DLL.Handle = LoadLibraryA(F_CStrFromStr8(Lane.Arena, Path));
+	F_Temporary(Lane.Arena) DLL.Handle = (f_u64)LoadLibraryA(F_CStrFromStr8(Lane.Arena, Path));
 	Lane.Arena->At = Mark;
 #elif defined(OS_DARWIN)
-	DLL.Handle = dlopen(F_CStrFromStr8(Lane.Arena, CopyPath), RTLD_NOW | RTLD_LOCAL);
+	F_Temporary(Lane.Arena) DLL.Handle = (f_u64)dlopen(F_CStrFromStr8(Lane.Arena, Path), RTLD_NOW | RTLD_LOCAL);
 #else
 #endif
 	return DLL;
@@ -1425,7 +1426,7 @@ void *F_OS_DLLSymbolFromName(f_dll DLL, f_str8 ProcedureName)
 #if defined(OS_WINDOWS)
 	Procedure = GetProcAddress(DLL.Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
 #elif defined(OS_DARWIN)
-	Procedure = dlsym(DLL.Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
+	Procedure = dlsym((void *)DLL.Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
 #else
 #error "Unsupported OS"
 #endif
@@ -1527,10 +1528,6 @@ f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 			(f_u64)FileStat.st_mtimespec.tv_sec * 1000ull
 			+ (uint64_t)FileStat.st_mtimespec.tv_nsec / 1000000ull;
 		FileInfo.LastModifiedInMillisecondsSinceEpoch = MillisecondsSinceEpoch;
-	}
-	else
-	{
-		F_AppendErrorF(File->ErrorStream, "Failed to get file information for %.*s", F_Expand(Filename));
 	}
 #else
 #error "Unsupported OS"

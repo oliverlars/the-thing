@@ -55,6 +55,8 @@ static m44f PerspectiveMetal(f32 Aspect, f32 FOVDegrees, f32 Near, f32 Far)
 void Init(app_state *App, m_arena *PermanentArena)
 {
 
+	App->Window = OS_MakeWindow(Str8("the thing"), 1280, 720);
+
 	r_init_options Opts = {
 		.Device = App->Window->Device,
 		.Layer = App->Window->Layer,
