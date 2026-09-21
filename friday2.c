@@ -1,6 +1,5 @@
 #define FRIDAY_IMPLEMENTATION
 #define FRIDAY_MAIN
-#define FRIDAY_SINGLE_THREAD
 #include "friday2.h"
 
 #include <stdio.h>

@@ -1088,7 +1088,8 @@ F_Internal_ThreadEntry(ThreadParams)
 #elif defined(OS_DARWIN)
 F_Internal_ThreadEntry(ThreadParams)
 {
-	ThreadParams->LaneEntry(ThreadParams->Lane);
+	Lane = ThreadParams->Lane;
+	ThreadParams->LaneEntry();
 	return F_Null;
 }
 #else

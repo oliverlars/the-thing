@@ -20,23 +20,29 @@ F_LaneEntry
 	f_link_options    AppLinkOptions  = {0};
 	AppCompileOptions.OutputPath = F_Str8("build/app.dynlib");
 
-	f_str8_array SourceFiles = {0};
+	f_str8_list SourceFiles = {0};
 
 
 	F_FirstLane()
 	{
 		F_Str8ListAppendMany(
 			Lane.Arena, &SourceFiles,
-			F_OS_ListOfFilesInDirectory(Lane.Arena, F_Str8("source"),
+			F_OS_ListOfFilesInDirectory(Lane.Arena, "source",
 			.PrependPath = F_True,
-			.FilterByExtension = F_Str8ArrayFromCStrs(".c"))
+			.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c"))
 		);
 
 		F_Str8ListAppendMany(
 			Lane.Arena, &SourceFiles,
-			F_OS_ListOfFilesInDirectory(Lane.Arena, F_Str8("source/darwin"),
+			F_OS_ListOfFilesInDirectory(Lane.Arena, "source/darwin",
 			.PrependPath = F_True,
-			.FilterByExtension = F_Str8ArrayFromCStrs(".c", ".m"))
+			.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c", ".m"))
 		);
 	}
+
+	AppLinkOptions.OutputKind = F_OUTPUT_DYNAMIC;
+
+	f_build_watch BuildWatch = F_BuildWatchFromSourceFiles(Lane.Arena, F_Str8ArrayFromList(Lane.Arena, SourceFiles), AppCompileOptions.IncludePaths);
+
+	printf("build watch %llu\n", BuildWatch.TUCount);
 }
