@@ -1,4 +1,5 @@
 #define FRIDAY_IMPLEMENTATION
+#define FRIDAY_SINGLE_THREAD
 #define FRIDAY_MAIN
 #include "friday2.h"
 
@@ -30,7 +31,7 @@ F_LaneEntry
 	);
 
 	CompileOptions.IncludePaths = IncludePaths;
-	CompileOptions.OutputPath = F_Str8("build");
+	CompileOptions.OutputPath = F_Str8("build/");
 
 	LinkOptions.OutputPath = F_Str8("build/");
 	LinkOptions.OutputName = F_Str8("the-thing2");
@@ -67,7 +68,7 @@ F_LaneEntry
 
 	f_u64 CompileStartTime = F_OS_TimeStamp();
 
-		f_link Link = {0};
+	f_link Link = {0};
 	f_compilation Compilation = F_CompileNewAndChangedTUs(Lane.Arena, BuildCache, CompileOptions, SourceFiles, F_TOOLCHAIN_CLANG);
 	F_WaitForCompilation(&Compilation);
 

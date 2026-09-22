@@ -40,9 +40,14 @@ F_LaneEntry
 		);
 	}
 
+	F_BroadcastFirstLane(SourceFiles);
+
 	AppLinkOptions.OutputKind = F_OUTPUT_DYNAMIC;
+
+	F_BroadcastFirstLane(AppLinkOptions);
 
 	f_build_watch BuildWatch = F_BuildWatchFromSourceFiles(Lane.Arena, F_Str8ArrayFromList(Lane.Arena, SourceFiles), AppCompileOptions.IncludePaths);
 
 	printf("build watch %llu\n", BuildWatch.TUCount);
+
 }

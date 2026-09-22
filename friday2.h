@@ -1684,7 +1684,7 @@ f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array So
 		BuildWatch.TUs[I].FileCount = 1 + IncludesSeenAlready.Count;
 		BuildWatch.TUs[I].PathsForSourceAndIncludes = F_ArenaPushArrayType(Lane.Arena, BuildWatch.TUs[I].FileCount, f_str8);
 		BuildWatch.TUs[I].TimeStamps = F_ArenaPushArrayType(Lane.Arena, BuildWatch.TUs[I].FileCount, f_u64);
-		for(f_s32 FileIndex = 0; I < BuildWatch.TUs[I].FileCount; FileIndex++) 
+		for(f_s32 FileIndex = 0; FileIndex < BuildWatch.TUs[I].FileCount; FileIndex++) 
 		{
 			f_file_info FileInfo;
 			if(FileIndex == 0)
@@ -1812,9 +1812,9 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 	WIN32_FIND_DATA FindData;
 
 	HANDLE FoundHandle;
-	for(f_s32 I = 0; Options.Directories[I] && I < 16; I++)
+	for(f_s32 Directory = 0; Options.Directories[Directory] && Directory < 16; Directory++)
 	{
-		FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%s\\*", Options.Directories[I])), &FindData);
+		FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%s\\*", Options.Directories[Directory])), &FindData);
 		if(FoundHandle == INVALID_HANDLE_VALUE) return Entries;
 		do
 		{
@@ -2441,6 +2441,7 @@ f_link F_LinkTUs(f_memory_arena *Arena, f_link_options LinkOptions, f_str8_array
 
 	F_StartProcess(Arena, &Link.Process, Args);
 
+	F_Print(F_Str8("LINKING!!! "));
 	F_Print(F_Str8JoinList(Arena, Args, F_Str8(" ")));
 
 	return Link;
