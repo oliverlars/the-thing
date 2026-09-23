@@ -492,6 +492,7 @@ f_b32        F_AnyFilesChangedInWatch (f_watch *Watch, f_u64 ChangeGranularityIn
 
 
 f_b32 *F_MaskOfFilesChangedInTU (f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds);
+f_b32 *F_MaskOfTUsChanged (f_memory_arena *Arena, f_build_watch BuildWatch, f_u64 ChangeGranularityInMilliseconds);
 
 
 #define F_HashStart (0xCBF29CE484222325ULL)
@@ -637,9 +638,9 @@ void F_Internal_LaneEntry();
 
 f_build_cache F_BuildCacheFromOutputPath (f_memory_arena *Arena, f_str8 OutputPath);
 
-f_b32         F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash);
+f_b32         F_HashIsInBuildCache (f_build_cache Cache, f_u64 Hash);
 
-f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
+f_build_watch F_BuildWatchFromSourceFiles (f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
 
 void F_Report(f_memory_arena *Arena, f_build_report Report);
 
@@ -1695,7 +1696,12 @@ f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array So
 			{
 				FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, IncludesSeenAlready.Items[FileIndex - 1]);
 			}
-			BuildWatch.TUs[I].TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch; 
+			BuildWatch.TUs[I].TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
+			BuildWatch.TUs[I].PathsForSourceAndIncludes[0] = F_Str8PushF(Lane.Arena, "%.*s", F_Expand(SourceFilePaths.Items[I]));
+			for(f_s32 IncludeIndex = 0; IncludeIndex < IncludesSeenAlready.Count; IncludeIndex++)
+			{
+				BuildWatch.TUs[I].PathsForSourceAndIncludes[IncludeIndex + 1] = F_Str8PushF(Lane.Arena, "%.*s", F_Expand(IncludesSeenAlready.Items[IncludeIndex]));
+			}
 		}
 	}
 
@@ -1726,6 +1732,37 @@ f_b32 *F_MaskOfFilesChangedInTU(f_memory_arena *Arena, f_translation_unit *TU, f
 
 	F_ArenaResetTo(Lane.Arena, Mark);
 	return FilesChangedMask;
+}
+
+f_b32 *F_MaskOfTUsChanged(f_memory_arena *Arena, f_build_watch BuildWatch, f_u64 ChangeGranularityInMilliseconds)
+{
+	f_b32 *TUsChanged = F_Null;
+	if(F_IsFirstLane())
+	{
+		TUsChanged = F_ArenaPushArrayType(Arena, BuildWatch.TUCount, f_b32);
+	}
+	F_BroadcastFirstLane(TUsChanged);
+
+	f_s64 Mark = Lane.Arena->At;
+
+	for F_EachInLaneSpan(TUIndex, BuildWatch.TUCount)
+	{
+		f_b32 AnyFileInTUChanged = F_False;
+		f_translation_unit *TU = BuildWatch.TUs + TUIndex;
+		for(f_s32 FileIndex = 0; FileIndex < TU->FileCount; FileIndex++)
+		{
+			f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, TU->PathsForSourceAndIncludes[FileIndex]);
+			if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[FileIndex] > ChangeGranularityInMilliseconds)
+			{
+				TU->TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
+				AnyFileInTUChanged |= F_True;
+			}
+		}
+		TUsChanged[TUIndex] = AnyFileInTUChanged;
+	}
+
+	F_ArenaResetTo(Lane.Arena, Mark);
+	return TUsChanged;
 }
 
 f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
