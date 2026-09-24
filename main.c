@@ -38,8 +38,10 @@ F_LaneEntry
 			.PrependPath = F_True,
 			.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c", ".m"))
 		);
+
+		F_Str8ListAppend(Lane.Arena, &SourceFiles, F_Str8("app.c"));
 	}
-	
+
 	F_BroadcastFirstLane(SourceFiles);
 
 	AppLinkOptions.OutputKind = F_OUTPUT_DYNAMIC;
@@ -47,22 +49,13 @@ F_LaneEntry
 	F_BroadcastFirstLane(AppLinkOptions);
 
 
-	f_build_watch BuildWatch = F_BuildWatchFromSourceFiles(Lane.Arena, F_Str8ArrayFromList(Lane.Arena, SourceFiles), AppCompileOptions.IncludePaths);
-
-
+	f_compilation Compilation = {0};
 	while(F_True) F_Temporary(Lane.Arena)
 	{
-		f_b32 ChangeDetected = F_False;
-		f_b32 *Mask = F_MaskOfTUsChanged(Lane.Arena, BuildWatch, 100);
-		for F_EachInLaneSpan(I, BuildWatch.TUCount)
+		F_CompileNewAndChangedTUs(Lane.Arena, &Compilation, AppCompileOptions, F_Str8ArrayFromList(Lane.Arena, SourceFiles), F_TOOLCHAIN_CLANG);
+		if(Compilation.Status == F_NOTHING_TO_COMPILE)
 		{
-			if(Mask[I])
-			{
-				printf("File change detected\n");
-			}
+			printf("Yeah\n");
 		}
-	} 
-
-	printf("build watch %llu\n", BuildWatch.TUCount);
-
+	}
 }
