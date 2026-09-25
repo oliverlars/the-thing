@@ -48,14 +48,23 @@ F_LaneEntry
 
 	F_BroadcastFirstLane(AppLinkOptions);
 
+	f_range Range = F_SplitRange(13);
 
-	f_compilation Compilation = {0};
-	while(F_True) F_Temporary(Lane.Arena)
+	printf("Lane: %llu range: { %llu, %llu }\n", Lane.ID, Range.Start, Range.End);
+
+	F_FirstLane()
 	{
-		F_CompileNewAndChangedTUs(Lane.Arena, &Compilation, AppCompileOptions, F_Str8ArrayFromList(Lane.Arena, SourceFiles), F_TOOLCHAIN_CLANG);
-		if(Compilation.Status == F_NOTHING_TO_COMPILE)
+		f_compilation Compilation = {0};
+		while(F_True)
 		{
-			printf("Yeah\n");
+
+			F_CompileNewAndChangedTUs(
+				Lane.Arena,
+				&Compilation,
+				AppCompileOptions,
+				F_Str8ArrayFromList(Lane.Arena, SourceFiles),
+				F_TOOLCHAIN_CLANG
+			);
 		}
 	}
 }
