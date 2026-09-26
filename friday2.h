@@ -178,10 +178,10 @@ f_watch;
 
 typedef struct f_translation_unit
 {
-	f_str8 *PathsForSourceAndIncludes;
-	f_u64   Hash;
-	f_u64  *TimeStamps;
 	f_u64   FileCount;
+	f_str8 *PathsForSourceAndIncludes;
+	f_u64  *TimeStamps;
+	f_u64   Hash;
 }
 f_translation_unit;
 
@@ -429,10 +429,7 @@ f_b32           F_IsFirstLane        ();
 f_s64 F_Internal_FirstLaneBegin(void);
 void  F_Internal_FirstLaneEnd(f_s64 LaneCount);
 
-#define F_FirstLane() \
-    for(f_s64 __F_FirstLaneCount__ = F_Internal_FirstLaneBegin(); \
-        __F_FirstLaneCount__ != 0; \
-        F_Internal_FirstLaneEnd(__F_FirstLaneCount__), __F_FirstLaneCount__ = 0)
+#define F_FirstLane() if(Lane.ID == 0)
 
 f_u64           F_WaveInclusivePrefixSum (f_u64 Value);
 f_u64           F_WaveExclusivePrefixSum (f_u64 Value);
@@ -2364,6 +2361,67 @@ f_b32 F_PollCompilation(f_compilation *Compilation)
 		}
 	}
 	return F_WaveAnyTrue(ProcessesInLaneRunning);
+}
+
+f_b32 F_TUChanged(f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds)
+{
+	f_b32 TUChanged = F_False;
+	F_Temporary(Arena)
+	{
+			for(f_s32 FileIndex = 0; FileIndex < TU->FileCount; FileIndex++)
+			{
+				f_file_info FileInfo = F_OS_FileInfoFromFilename(Arena, TU->PathsForSourceAndIncludes[FileIndex]);
+				if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[FileIndex] > ChangeGranularityInMilliseconds)
+				{
+					TU->TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
+					TUChanged = F_True;
+					break;
+				}
+			}
+	}
+	return TUChanged;
+}
+
+void F_UpdateTU(f_memory_arena *Arena, f_translation_unit *TU, f_compile_options CompileOptions, f_toolchain Toolchain)
+{
+	if(F_TUChanged(Arena, TU, F_DEFAULT_TIMEOUT_MS))
+	{
+		f_u64 Hash = F_TUHash(TU->PathsForSourceAndIncludes[0], CompileOptions);
+		if(Hash == TU->Hash) return;
+		f_str8 ObjectPath = {0};
+		if(CompileOptions.OutputPath.Size > 0)
+		{
+			ObjectPath = F_Str8PushF(Arena, "%.*s/%llu.o", F_Expand(CompileOptions.OutputPath), Hash);
+		}
+		else
+		{
+			ObjectPath = F_Str8PushF(Arena, "%llu.o", Hash);
+		}
+
+		f_str8_list Args = {0};
+		F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
+		F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
+		F_Str8ListAppend(Arena, &Args, TU->PathsForSourceAndIncludes[0]);
+
+		if(CompileOptions.Debug)
+		{
+			F_Str8ListAppendF(Arena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
+		}
+
+		for(int I = 0; I < CompileOptions.ExtraFlags.Count; I++)
+		{
+			F_Str8ListAppend(Arena, &Args, CompileOptions.ExtraFlags.Items[I]);
+		}
+
+		F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(ObjectPath));
+
+		for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
+		{
+			F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
+		}
+
+		//F_StartProcess(Arena, Compilation->Processes + I, Args);
+	}
 }
 
 void F_CompileNewAndChangedTUs
