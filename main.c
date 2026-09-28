@@ -20,51 +20,56 @@ F_LaneEntry
 	f_link_options    AppLinkOptions  = {0};
 	AppCompileOptions.OutputPath = F_Str8("build/app.dynlib");
 
-	f_str8_list SourceFiles = {0};
+	AppCompileOptions.ExtraFlags = F_Str8ArrayFromCStrs(Lane.PermanentArena, "-fobjc-arc");
+
+	f_str8_array IncludePaths = F_Str8ArrayFromCStrs(Lane.PermanentArena,
+	"include/",
+	"external/",
+	"build/",
+	);
+
+	AppCompileOptions.IncludePaths = IncludePaths;
+
+	f_str8_list SourceFilesList = {0};
 
 
 	F_FirstLane()
 	{
 		F_Str8ListAppendMany(
-			Lane.Arena, &SourceFiles,
-			F_OS_ListOfFilesInDirectory(Lane.Arena, "source/",
+			Lane.PermanentArena, &SourceFilesList,
+			F_OS_ListOfFilesInDirectory(Lane.PermanentArena, "source/",
 			.PrependPath = F_True,
-			.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c"))
+			.FilterByExtension = F_Str8ArrayFromCStrs(Lane.PermanentArena, ".c"))
 		);
 
 		F_Str8ListAppendMany(
-			Lane.Arena, &SourceFiles,
-			F_OS_ListOfFilesInDirectory(Lane.Arena, "source/darwin/",
+			Lane.PermanentArena, &SourceFilesList,
+			F_OS_ListOfFilesInDirectory(Lane.PermanentArena, "source/darwin/",
 			.PrependPath = F_True,
-			.FilterByExtension = F_Str8ArrayFromCStrs(Lane.Arena, ".c", ".m"))
+			.FilterByExtension = F_Str8ArrayFromCStrs(Lane.PermanentArena, ".c", ".m"))
 		);
 
-		F_Str8ListAppend(Lane.Arena, &SourceFiles, F_Str8("app.c"));
+		F_Str8ListAppend(Lane.PermanentArena, &SourceFilesList, F_Str8("app.c"));
 	}
 
-	F_BroadcastFirstLane(SourceFiles);
+	F_BroadcastFirstLane(SourceFilesList);
 
 	AppLinkOptions.OutputKind = F_OUTPUT_DYNAMIC;
 
 	F_BroadcastFirstLane(AppLinkOptions);
 
-	f_range Range = F_SplitRange(13);
-
-	printf("Lane: %llu range: { %llu, %llu }\n", Lane.ID, Range.Start, Range.End);
-
-	F_FirstLane()
+	f_str8_array SourceFiles = F_Str8ArrayFromList(Lane.PermanentArena, SourceFilesList);
+	f_range Range = F_SplitRange(SourceFiles.Count);
+	SourceFiles.Items += Range.Start;
+	SourceFiles.Count = Range.End - Range.Start;
+	f_build_watch BuildWatch = F_BuildWatchFromSourceFiles(Lane.PermanentArena, SourceFiles, AppCompileOptions.IncludePaths);
+	while(F_True)
 	{
-		f_compilation Compilation = {0};
-		while(F_True)
+		for(f_s32 I = 0; I < SourceFiles.Count; I++)
 		{
-
-			F_CompileNewAndChangedTUs(
-				Lane.Arena,
-				&Compilation,
-				AppCompileOptions,
-				F_Str8ArrayFromList(Lane.Arena, SourceFiles),
-				F_TOOLCHAIN_CLANG
-			);
+			F_UpdateTU(Lane.TemporaryArena, BuildWatch.TUs + I, AppCompileOptions, F_TOOLCHAIN_CLANG);
+			if(BuildWatch.TUs[I].Process.State == F_PROCESS_RUNNING) F_PrintF("Cool!");
 		}
+		F_ArenaReset(Lane.TemporaryArena);
 	}
 }

@@ -130,7 +130,8 @@ typedef struct f_lane
 	_Atomic(f_u64) *Ballot;
 	// Each lane has one of these.
 	// Maybe a better idea for this
-	f_memory_arena *Arena;
+	f_memory_arena *PermanentArena;
+	f_memory_arena *TemporaryArena;
 }
 f_lane;
 
@@ -430,7 +431,10 @@ f_b32           F_IsFirstLane        ();
 f_s64 F_Internal_FirstLaneBegin(void);
 void  F_Internal_FirstLaneEnd(f_s64 LaneCount);
 
-#define F_FirstLane() if(Lane.ID == 0)
+#define F_FirstLane() \
+	for(f_s64 __F_FirstLaneCount__ = F_Internal_FirstLaneBegin(); \
+		__F_FirstLaneCount__ != 0; \
+		F_Internal_FirstLaneEnd(__F_FirstLaneCount__), __F_FirstLaneCount__ = 0)
 
 f_u64           F_WaveInclusivePrefixSum (f_u64 Value);
 f_u64           F_WaveExclusivePrefixSum (f_u64 Value);
@@ -639,7 +643,7 @@ void  F_OS_FutexWakeAll (void *Address);
 
 void F_Print(f_str8 String);
 #define F_PrintF(...) \
-F_Temporary(Lane.Arena) F_Print(F_Str8PushF(Lane.Arena, __VA_ARGS__))
+F_Print(F_Str8PushF(Lane.TemporaryArena, __VA_ARGS__))
 
 f_file F_OS_StandardOut(void);
 
@@ -654,6 +658,8 @@ f_build_cache F_BuildCacheFromOutputPath (f_memory_arena *Arena, f_str8 OutputPa
 f_b32         F_HashIsInBuildCache (f_build_cache Cache, f_u64 Hash);
 
 f_build_watch F_BuildWatchFromSourceFiles (f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
+
+f_translation_unit F_TranslationUnitFromSourceFile(f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions);
 
 void F_Report(f_memory_arena *Arena, f_build_report Report);
 
@@ -1141,14 +1147,15 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount, char **Args, f_s32 ArgCount)
 		Params[I].Lane.Vote = &Vote;
 		Params[I].Lane.Ballot = &Ballot;
 		Params[I].LaneEntry = F_Internal_LaneEntry;
+		Params[I].Lane.TemporaryArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(1));
 		if(I >= 1)
 		{
-			Params[I].Lane.Arena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
+			Params[I].Lane.PermanentArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
 			F_OS_ThreadStart(Threads + I, (f_thread_function)F_Internal_ThreadEntry, Params + I);
 		}
 		else
 		{
-			Params[0].Lane.Arena = FirstLaneArena;
+			Params[0].Lane.PermanentArena = FirstLaneArena;
 		}
 	}
 
@@ -1426,9 +1433,9 @@ f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
 {
 	f_b32 Result = F_True;
 #if defined(OS_WINDOWS)
-	F_Temporary(Arena) Result = DeleteFileA(F_CStrFromStr8(Arena, PathToFile)) != 0;
+	Result = DeleteFileA(F_CStrFromStr8(Lane.TemporaryArena, PathToFile)) != 0;
 #elif defined(OS_DARWIN)
-	F_Temporary(Arena) Result = remove(F_CStrFromStr8(Arena, PathToFile));
+	Result = remove(F_CStrFromStr8(Lane.TemporaryArena, PathToFile));
 #else
 #error "Unsupported OS"
 #endif
@@ -1439,11 +1446,9 @@ f_dll  F_OS_DLLFromPath(f_str8 Path)
 {
 	f_dll DLL = {0};
 #if defined(OS_WINDOWS)
-	f_u64 Mark = Lane.Arena->At;
-	F_Temporary(Lane.Arena) DLL.Handle = (f_u64)LoadLibraryA(F_CStrFromStr8(Lane.Arena, Path));
-	Lane.Arena->At = Mark;
+	DLL.Handle = (f_u64)LoadLibraryA(F_CStrFromStr8(Lane.TemporaryArena, Path));
 #elif defined(OS_DARWIN)
-	F_Temporary(Lane.Arena) DLL.Handle = (f_u64)dlopen(F_CStrFromStr8(Lane.Arena, Path), RTLD_NOW | RTLD_LOCAL);
+	DLL.Handle = (f_u64)dlopen(F_CStrFromStr8(Lane.TemporaryArena, Path), RTLD_NOW | RTLD_LOCAL);
 #else
 #endif
 	return DLL;
@@ -1451,25 +1456,23 @@ f_dll  F_OS_DLLFromPath(f_str8 Path)
 
 void *F_OS_DLLSymbolFromName(f_dll DLL, f_str8 ProcedureName)
 {
-	f_u64 Mark = Lane.Arena->At;
 	void *Procedure;
 #if defined(OS_WINDOWS)
-	Procedure = GetProcAddress(DLL.Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
+	Procedure = GetProcAddress(DLL.Handle, F_CStrFromStr8(Lane.TemporaryArena, ProcedureName));
 #elif defined(OS_DARWIN)
-	Procedure = dlsym((void *)DLL.Handle, F_CStrFromStr8(Lane.Arena, ProcedureName));
+	Procedure = dlsym((void *)DLL.Handle, F_CStrFromStr8(Lane.TemporaryArena, ProcedureName));
 #else
 #error "Unsupported OS"
 #endif
-	Lane.Arena->At = Mark;
 	return Procedure;
 }
 
 void F_OS_RenameFileTo(f_memory_arena *Arena, f_str8 From, f_str8 To)
 {
 #if defined(OS_WINDOWS)
-	F_Temporary(Arena) MoveFileExA(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
+	MoveFileExA(F_CStrFromStr8(Lane.TemporaryArena, From), F_CStrFromStr8(Lane.TemporaryArena, To), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
 #elif defined(OS_DARWIN)
-	F_Temporary(Arena) rename(F_CStrFromStr8(Arena, From), F_CStrFromStr8(Arena, To));
+	rename(F_CStrFromStr8(Lane.TemporaryArena, From), F_CStrFromStr8(Lane.TemporaryArena, To));
 #else
 #error "Unsupported OS"
 #endif
@@ -1533,10 +1536,7 @@ void F_OS_MakeDirectoryIfNotAlreadyMade(f_memory_arena *Arena, f_str8 Path)
 #if defined(OS_WINDOWS)
 	CreateDirectoryA(F_CStrFromStr8(Arena, Path), F_Null);
 #elif defined(OS_DARWIN)
-	F_Temporary(Arena)
-	{
-		mkdir(F_CStrFromStr8(Arena, Path), 0777);
-	}
+	mkdir(F_CStrFromStr8(Lane.TemporaryArena, Path), 0777);
 #else
 #error "Unsupported OS"
 #endif
@@ -1624,8 +1624,8 @@ f_watch F_WatchFilesFromArray(f_str8_array FilePaths)
 	f_watch Result = {0};
 	if(F_IsFirstLane())
 	{
-		Result.Files = F_ArenaPushArrayType(Lane.Arena, FilePaths.Count, f_str8);
-		Result.TimeStamps = F_ArenaPushArrayType(Lane.Arena, FilePaths.Count, f_u64);
+		Result.Files = F_ArenaPushArrayType(Lane.TemporaryArena, FilePaths.Count, f_str8);
+		Result.TimeStamps = F_ArenaPushArrayType(Lane.TemporaryArena, FilePaths.Count, f_u64);
 		Result.FileCount = FilePaths.Count;
 	}
 	
@@ -1633,7 +1633,7 @@ f_watch F_WatchFilesFromArray(f_str8_array FilePaths)
 
 	for F_EachInLaneSpan(I, FilePaths.Count)
 	{
-		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, FilePaths.Items[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, FilePaths.Items[I]);
 		Result.TimeStamps[I] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
 		Result.Files[I] = FilePaths.Items[I];
 		Result.FileCount = FilePaths.Count;
@@ -1679,41 +1679,66 @@ f_b32 F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
 
 f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready);
 
+f_translation_unit F_TranslationUnitFromSourceFile(f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions)
+{
+	f_translation_unit TU = {0};
+	f_str8_list IncludesSeenAlreadyList = {0};
+	TU.Hash = __F_Internal_HashSourceAndIncludes(Arena, SourceFile, CompileOptions.IncludePaths, &IncludesSeenAlreadyList);
+	f_str8_array IncludesSeenAlready = F_Str8ArrayFromList(Arena, IncludesSeenAlreadyList);
+	TU.FileCount = 1 + IncludesSeenAlready.Count;
+	TU.PathsForSourceAndIncludes = F_ArenaPushArrayType(Arena, TU.FileCount, f_str8);
+	TU.TimeStamps = F_ArenaPushArrayType(Arena, TU.FileCount, f_u64);
+	for(f_s32 FileIndex = 0; FileIndex < TU.FileCount; FileIndex++) 
+	{
+		f_file_info FileInfo;
+		if(FileIndex == 0)
+		{
+			FileInfo = F_OS_FileInfoFromFilename(Arena, SourceFile);
+		}
+		else
+		{
+			FileInfo = F_OS_FileInfoFromFilename(Arena, IncludesSeenAlready.Items[FileIndex - 1]);
+		}
+		TU.TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
+		TU.PathsForSourceAndIncludes[0] = F_Str8PushF(Arena, "%.*s", F_Expand(SourceFile));
+		for(f_s32 IncludeIndex = 0; IncludeIndex < IncludesSeenAlready.Count; IncludeIndex++)
+		{
+			TU.PathsForSourceAndIncludes[IncludeIndex + 1] = F_Str8PushF(Arena, "%.*s", F_Expand(IncludesSeenAlready.Items[IncludeIndex]));
+		}
+	}
+	return TU;
+}
+
 f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths)
 {
 	f_build_watch BuildWatch = {0};
-	if(F_IsFirstLane())
-	{
 		BuildWatch.TUs = F_ArenaPushArrayType(Arena, SourceFilePaths.Count, f_translation_unit);
 		BuildWatch.TUCount = SourceFilePaths.Count;
-	}
-	F_BroadcastFirstLane(BuildWatch);
 
-
-	for F_EachInLaneSpan(I, SourceFilePaths.Count)
+	for (f_s32 I = 0;I < SourceFilePaths.Count; I++)
 	{
 		f_str8_list IncludesSeenAlreadyList = {0};
-		BuildWatch.TUs[I].Hash = __F_Internal_HashSourceAndIncludes(Lane.Arena, SourceFilePaths.Items[I], IncludePaths, &IncludesSeenAlreadyList);
-		f_str8_array IncludesSeenAlready = F_Str8ArrayFromList(Lane.Arena, IncludesSeenAlreadyList);
+		BuildWatch.TUs[I].Hash = __F_Internal_HashSourceAndIncludes(Arena, SourceFilePaths.Items[I], IncludePaths, &IncludesSeenAlreadyList);
+		f_str8_array IncludesSeenAlready = F_Str8ArrayFromList(Arena, IncludesSeenAlreadyList);
 		BuildWatch.TUs[I].FileCount = 1 + IncludesSeenAlready.Count;
-		BuildWatch.TUs[I].PathsForSourceAndIncludes = F_ArenaPushArrayType(Lane.Arena, BuildWatch.TUs[I].FileCount, f_str8);
-		BuildWatch.TUs[I].TimeStamps = F_ArenaPushArrayType(Lane.Arena, BuildWatch.TUs[I].FileCount, f_u64);
+		BuildWatch.TUs[I].PathsForSourceAndIncludes = F_ArenaPushArrayType(Arena, BuildWatch.TUs[I].FileCount, f_str8);
+		BuildWatch.TUs[I].TimeStamps = F_ArenaPushArrayType(Arena, BuildWatch.TUs[I].FileCount, f_u64);
 		for(f_s32 FileIndex = 0; FileIndex < BuildWatch.TUs[I].FileCount; FileIndex++) 
 		{
 			f_file_info FileInfo;
 			if(FileIndex == 0)
 			{
-				FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, SourceFilePaths.Items[I]);
+				FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, SourceFilePaths.Items[I]);
 			}
 			else
 			{
-				FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, IncludesSeenAlready.Items[FileIndex - 1]);
+				FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, IncludesSeenAlready.Items[FileIndex - 1]);
 			}
 			BuildWatch.TUs[I].TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
-			BuildWatch.TUs[I].PathsForSourceAndIncludes[0] = F_Str8PushF(Lane.Arena, "%.*s", F_Expand(SourceFilePaths.Items[I]));
+			BuildWatch.TUs[I].PathsForSourceAndIncludes[0] = F_Str8PushF(Arena, "%.*s", F_Expand(SourceFilePaths.Items[I]));
 			for(f_s32 IncludeIndex = 0; IncludeIndex < IncludesSeenAlready.Count; IncludeIndex++)
 			{
-				BuildWatch.TUs[I].PathsForSourceAndIncludes[IncludeIndex + 1] = F_Str8PushF(Lane.Arena, "%.*s", F_Expand(IncludesSeenAlready.Items[IncludeIndex]));
+				BuildWatch.TUs[I].PathsForSourceAndIncludes[IncludeIndex + 1] = F_Str8PushF(Arena, "%.*s", F_Expand(IncludesSeenAlready.Items[IncludeIndex]));
 			}
 		}
 	}
@@ -1730,11 +1755,9 @@ f_b32 *F_MaskOfFilesChangedInTU(f_memory_arena *Arena, f_translation_unit *TU, f
 	}
 	F_BroadcastFirstLane(FilesChangedMask);
 
-	f_s64 Mark = Lane.Arena->At;
-
 	for F_EachInLaneSpan(I, TU->FileCount)
 	{
-		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, TU->PathsForSourceAndIncludes[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, TU->PathsForSourceAndIncludes[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[I] > 0) printf("Change time in ms: %llu\n", FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
@@ -1743,7 +1766,6 @@ f_b32 *F_MaskOfFilesChangedInTU(f_memory_arena *Arena, f_translation_unit *TU, f
 		}
 	}
 
-	F_ArenaResetTo(Lane.Arena, Mark);
 	return FilesChangedMask;
 }
 
@@ -1756,15 +1778,13 @@ f_b32 *F_MaskOfTUsChanged(f_memory_arena *Arena, f_build_watch BuildWatch, f_u64
 	}
 	F_BroadcastFirstLane(TUsChanged);
 
-	f_s64 Mark = Lane.Arena->At;
-
 	for F_EachInLaneSpan(TUIndex, BuildWatch.TUCount)
 	{
 		f_b32 AnyFileInTUChanged = F_False;
 		f_translation_unit *TU = BuildWatch.TUs + TUIndex;
 		for(f_s32 FileIndex = 0; FileIndex < TU->FileCount; FileIndex++)
 		{
-			f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, TU->PathsForSourceAndIncludes[FileIndex]);
+			f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, TU->PathsForSourceAndIncludes[FileIndex]);
 			if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[FileIndex] > ChangeGranularityInMilliseconds)
 			{
 				TU->TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
@@ -1774,7 +1794,6 @@ f_b32 *F_MaskOfTUsChanged(f_memory_arena *Arena, f_build_watch BuildWatch, f_u64
 		TUsChanged[TUIndex] = AnyFileInTUChanged;
 	}
 
-	F_ArenaResetTo(Lane.Arena, Mark);
 	return TUsChanged;
 }
 
@@ -1787,13 +1806,12 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 
 	}
 	F_BroadcastFirstLane(Result);
 
-	f_s64 Mark = Lane.Arena->At;
-	f_b32 *FileChanged = F_ArenaPushArrayType(Lane.Arena, Watch->FileCount, f_b32);
+	f_b32 *FileChanged = F_ArenaPushArrayType(Lane.TemporaryArena, Watch->FileCount, f_b32);
 
 	f_u64 FilesChangedThisLane = 0;
 	for F_EachInLaneSpan(I, Watch->FileCount)
 	{
-		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, Watch->Files[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, Watch->Files[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > 0) printf("Change time in ms: %llu\n", FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
@@ -1816,7 +1834,6 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 
 	f_u64  TotalFilesChanged = F_WaveSum(WriteIndex);
 	Result.Count = (f_s64)TotalFilesChanged;
 
-	F_ArenaResetTo(Lane.Arena, Mark);
 	return Result;
 }
 
@@ -1840,16 +1857,14 @@ f_u64 F_HashStr8(f_str8 String)
 f_b32 F_AnyFilesChangedInWatch(f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_b32 AnyChanged = F_False;
-	f_s64 Mark = Lane.Arena->At;
 	for F_EachInLaneSpan(I, Watch->FileCount)
 	{
-		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.Arena, Watch->Files[I]);
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, Watch->Files[I]);
 		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - Watch->TimeStamps[I] > ChangeGranularityInMilliseconds)
 		{
 			AnyChanged = F_True;
 		}
 	}
-	F_ArenaResetTo(Lane.Arena, Mark);
 	return F_WaveAnyTrue(AnyChanged);
 }
 
@@ -2290,11 +2305,7 @@ f_u64 F_HashCompileOptions(f_compile_options CompileOptions)
 
 f_u64 F_TUHash(f_str8 PathToSource, f_compile_options CompileOptions)
 {
-	f_u64 Hash = 0;
-	F_Temporary(Lane.Arena)
-	{
-		Hash = F_HashSourceAndIncludes(Lane.Arena, PathToSource, CompileOptions.IncludePaths);
-	}
+	f_u64 Hash = F_HashSourceAndIncludes(Lane.TemporaryArena, PathToSource, CompileOptions.IncludePaths);
 	Hash ^= F_HashCompileOptions(CompileOptions);
 	return Hash;
 }
@@ -2364,64 +2375,65 @@ f_b32 F_PollCompilation(f_compilation *Compilation)
 	return F_WaveAnyTrue(ProcessesInLaneRunning);
 }
 
-f_b32 F_TUChanged(f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds)
-{;
-}
-
 void F_UpdateTU(f_memory_arena *Arena, f_translation_unit *TU, f_compile_options CompileOptions, f_toolchain Toolchain)
 {
-	if(TU->Process.State == F_PROCESS_RUNNING) return;
-	f_b32 TUChangedOnDisk = F_False;
-	F_Temporary(Arena)
+	if(TU->Process.State == F_PROCESS_RUNNING)
 	{
-		for(f_s32 FileIndex = 0; !TUChangedOnDisk && FileIndex < TU->FileCount; FileIndex++)
+
+		F_PollProcess(&TU->Process);
+
+		return;
+	}
+	f_b32 TUChangedOnDisk = F_False;
+	for(f_s32 FileIndex = 0; !TUChangedOnDisk && FileIndex < TU->FileCount; FileIndex++)
+	{
+		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, TU->PathsForSourceAndIncludes[FileIndex]);
+		if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[FileIndex] > F_DEFAULT_TIMEOUT_MS)
 		{
-			f_file_info FileInfo = F_OS_FileInfoFromFilename(Arena, TU->PathsForSourceAndIncludes[FileIndex]);
-			if(FileInfo.LastModifiedInMillisecondsSinceEpoch - TU->TimeStamps[FileIndex] > F_DEFAULT_TIMEOUT_MS)
-			{
-				TU->TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
-				TUChangedOnDisk = F_True;
-			}
+			TU->TimeStamps[FileIndex] = FileInfo.LastModifiedInMillisecondsSinceEpoch;
+			TUChangedOnDisk = F_True;
 		}
 	}
 
-	f_u64 Hash = F_TUHash(TU->PathsForSourceAndIncludes[0], CompileOptions);
-	if(Hash == TU->Hash) return;
+	if(!TUChangedOnDisk) return;
+
+	f_u64 OldHash = TU->Hash;
+	TU[0] = F_TranslationUnitFromSourceFile(Arena, TU->PathsForSourceAndIncludes[0], CompileOptions);
+	if(OldHash == TU->Hash) return;
 		
 	f_str8_list Args = {0};
-	F_Temporary(Arena)
+	f_str8 ObjectPath = {0};
+	if(CompileOptions.OutputPath.Size > 0)
 	{
-		f_str8 ObjectPath = {0};
-		if(CompileOptions.OutputPath.Size > 0)
-		{
-			ObjectPath = F_Str8PushF(Arena, "%.*s/%llu.o", F_Expand(CompileOptions.OutputPath), Hash);
-		}
-		else
-		{
-			ObjectPath = F_Str8PushF(Arena, "%llu.o", Hash);
-		}
-
-		F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
-		F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
-		F_Str8ListAppend(Arena, &Args, TU->PathsForSourceAndIncludes[0]);
-
-		if(CompileOptions.Debug)
-		{
-			F_Str8ListAppendF(Arena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
-		}
-
-		for(int I = 0; I < CompileOptions.ExtraFlags.Count; I++)
-		{
-			F_Str8ListAppend(Arena, &Args, CompileOptions.ExtraFlags.Items[I]);
-		}
-
-		F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(ObjectPath));
-
-		for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
-		{
-			F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
-		}
+		ObjectPath = F_Str8PushF(Lane.TemporaryArena, "%.*s/%llu.o", F_Expand(CompileOptions.OutputPath), TU->Hash);
 	}
+	else
+	{
+		ObjectPath = F_Str8PushF(Lane.TemporaryArena, "%llu.o", TU->Hash);
+	}
+
+	F_Str8ListAppend(Lane.TemporaryArena, &Args, Toolchain.CompilerPath);
+	F_Str8ListAppend(Lane.TemporaryArena, &Args, Toolchain.CompileOnlyFlag);
+	F_Str8ListAppend(Lane.TemporaryArena, &Args, TU->PathsForSourceAndIncludes[0]);
+
+	if(CompileOptions.Debug)
+	{
+		F_Str8ListAppendF(Lane.TemporaryArena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
+	}
+
+	for(int I = 0; I < CompileOptions.ExtraFlags.Count; I++)
+	{
+		F_Str8ListAppend(Lane.TemporaryArena, &Args, CompileOptions.ExtraFlags.Items[I]);
+	}
+
+	F_Str8ListAppendF(Lane.TemporaryArena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(ObjectPath));
+
+	for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
+	{
+		F_Str8ListAppendF(Lane.TemporaryArena, &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
+	}
+	F_Print(F_Str8JoinList(Lane.TemporaryArena, Args, F_Str8(" ")));
+	F_Print(F_Str8("\n"));
 
 	F_StartProcess(Arena, &TU->Process, Args);
 }
@@ -2464,7 +2476,7 @@ void F_CompileNewAndChangedTUs
 	HackBuildWatchFixMe.TUs = Compilation->TUs;
 	HackBuildWatchFixMe.TUCount = Compilation->Count;
 
-	f_b32 *TUsChanged = F_MaskOfTUsChanged(Lane.Arena, HackBuildWatchFixMe, 100);
+	f_b32 *TUsChanged = F_MaskOfTUsChanged(Lane.TemporaryArena, HackBuildWatchFixMe, 100);
 
 	if(Compilation->Status != F_NOT_STARTED_COMPILING) Compilation->Status = F_NOTHING_TO_COMPILE;
 
@@ -2489,27 +2501,26 @@ void F_CompileNewAndChangedTUs
 		if(F_HashIsInBuildCache(HackBuildCacheFixMe, Compilation->Hashes[I])) continue;
 
 		f_str8_list Args = {0};
-		F_Temporary(Arena)
 		{
-			F_Str8ListAppend(Arena, &Args, Toolchain.CompilerPath);
-			F_Str8ListAppend(Arena, &Args, Toolchain.CompileOnlyFlag);
-			F_Str8ListAppend(Arena, &Args, SourceFiles.Items[I]);
+			F_Str8ListAppend(Lane.TemporaryArena, &Args, Toolchain.CompilerPath);
+			F_Str8ListAppend(Lane.TemporaryArena, &Args, Toolchain.CompileOnlyFlag);
+			F_Str8ListAppend(Lane.TemporaryArena, &Args, SourceFiles.Items[I]);
 
 			if(CompileOptions.Debug)
 			{
-				F_Str8ListAppendF(Arena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
+				F_Str8ListAppendF(Lane.TemporaryArena, &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
 			}
 
 			for(int I = 0; I < CompileOptions.ExtraFlags.Count; I++)
 			{
-				F_Str8ListAppend(Arena, &Args, CompileOptions.ExtraFlags.Items[I]);
+				F_Str8ListAppend(Lane.TemporaryArena, &Args, CompileOptions.ExtraFlags.Items[I]);
 			}
 
-			F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation->ObjectPaths[I]));
+			F_Str8ListAppendF(Lane.TemporaryArena, &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation->ObjectPaths[I]));
 
 			for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
 			{
-				F_Str8ListAppendF(Arena, &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
+				F_Str8ListAppendF(Lane.TemporaryArena, &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
 			}
 		}
 		Compilation->Status = F_COMPILING;
