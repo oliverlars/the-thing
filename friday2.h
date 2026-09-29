@@ -191,6 +191,8 @@ typedef struct f_build_watch
 {
 	f_translation_unit *TUs;
 	f_u64               TUCount;
+
+	_Atomic(f_s32)      TUsCompiling;
 }
 f_build_watch;
 
@@ -258,26 +260,6 @@ typedef enum f_output_kind
 }
 f_output_kind;
 
-typedef struct f_build_options
-{
-	f_output_kind  Kind;
-
-		f_str8        PathToOutput;
-
-	f_str8_array   SourceFiles;
-	f_str8_array   IncludeDirectories;
-
-	f_b32          Debug;
-	f_b32          Optimise;
-	f_str8_array   Defines;
-	f_str8_array   Libraries;
-	f_str8_array   Frameworks;
-
-	f_str8_array   CompilerSpecificFlags;
-	f_toolchain    Toolchain;
-}
-f_build_options;
-
 typedef enum f_build_status
 {
 	F_BUILD_COMPILING,
@@ -327,6 +309,42 @@ typedef enum f_compilation_status
 }
 f_compilation_status;
 
+typedef struct f_build
+{
+	f_memory_arena     *Arena;
+	f_translation_unit *TUs;
+	f_u64               TUCount;
+
+	_Atomic(f_u64) TUsToProcess;
+	_Atomic(f_u64) NextTU;
+}
+f_build;
+
+
+typedef struct f_build_options
+{
+	f_output_kind  Kind;
+
+	f_str8         OutputPathWithFilename;
+
+	f_str8_array   SourceFiles;
+	f_str8_array   IncludeDirectories;
+
+	f_str8_array   CompileFlags;
+	f_str8_array   LinkFlags;
+
+	f_b32          Debug;
+	f_b32          Optimise;
+	f_str8_array   Defines;
+	f_str8_array   Libraries;
+	f_str8_array   Frameworks;
+
+	f_str8_array   CompilerSpecificFlags;
+	f_toolchain    Toolchain;
+}
+f_build_options;
+
+
 typedef struct f_compilation
 {
 	f_s32               Count;
@@ -336,6 +354,10 @@ typedef struct f_compilation
 	f_translation_unit *TUs;
 	f_u64              *Hashes;
 	f_u64               CompileOptionsHash;
+
+	// HACK: we're gonna hijack this 
+	// until we're sure of the API
+	_Atomic(f_s64)     TUsCompiling;
 
 
 	f_compilation_status Status;
@@ -653,11 +675,21 @@ f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 
 void F_Internal_LaneEntry();
 
+
+f_build F_BuildFromBuildOptions (f_build_options BuildOptions);
+
 f_build_cache F_BuildCacheFromOutputPath (f_memory_arena *Arena, f_str8 OutputPath);
 
 f_b32         F_HashIsInBuildCache (f_build_cache Cache, f_u64 Hash);
 
 f_build_watch F_BuildWatchFromSourceFiles (f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
+
+
+f_b32 F_UpdateBuild (f_build *Build);
+
+void F_UpdateTU(f_memory_arena *Arena, f_compilation *Compilation, f_translation_unit *TU, f_compile_options CompileOptions, f_toolchain Toolchain);
+
+f_b32 F_CompilationFinished(f_compilation *Compilation);
 
 f_translation_unit F_TranslationUnitFromSourceFile(f_memory_arena *Arena, f_str8 SourceFile, f_compile_options CompileOptions);
 
@@ -2375,13 +2407,31 @@ f_b32 F_PollCompilation(f_compilation *Compilation)
 	return F_WaveAnyTrue(ProcessesInLaneRunning);
 }
 
-void F_UpdateTU(f_memory_arena *Arena, f_translation_unit *TU, f_compile_options CompileOptions, f_toolchain Toolchain)
+f_build F_BuildFromBuildOptions(f_build_options BuildOptions)
+{
+	f_build Build = {0};
+	// Probably enough?
+	Build.Arena = F_ArenaReserveButCommitFirstPage(MegaBytes(64));
+	Build.TUCount = BuildOptions.SourceFiles.Count;
+	Build.TUs = F_ArenaPushArrayType(Build.Arena, Build.TUCount, f_translation_unit);
+
+	return Build;
+}
+
+f_b32 F_UpdateBuild(f_build *Build)
+{
+
+	
+
+	f_u64 TUIndexToProcess = 0;
+	//for(;TUIndexToProcess = atomic_fetch_add_expicit(Build->))
+}
+
+void F_UpdateTU(f_memory_arena *Arena, f_compilation *Compilation, f_translation_unit *TU, f_compile_options CompileOptions, f_toolchain Toolchain)
 {
 	if(TU->Process.State == F_PROCESS_RUNNING)
 	{
-
 		F_PollProcess(&TU->Process);
-
 		return;
 	}
 	f_b32 TUChangedOnDisk = F_False;
@@ -2398,7 +2448,11 @@ void F_UpdateTU(f_memory_arena *Arena, f_translation_unit *TU, f_compile_options
 	if(!TUChangedOnDisk) return;
 
 	f_u64 OldHash = TU->Hash;
-	TU[0] = F_TranslationUnitFromSourceFile(Arena, TU->PathsForSourceAndIncludes[0], CompileOptions);
+	f_translation_unit NextTU = F_TranslationUnitFromSourceFile(Arena, TU->PathsForSourceAndIncludes[0], CompileOptions);
+	TU->FileCount = NextTU.FileCount;
+	TU->PathsForSourceAndIncludes = NextTU.PathsForSourceAndIncludes;
+	TU->TimeStamps = NextTU.TimeStamps;
+	TU->Hash = NextTU.Hash;
 	if(OldHash == TU->Hash) return;
 		
 	f_str8_list Args = {0};

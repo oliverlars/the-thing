@@ -63,13 +63,17 @@ F_LaneEntry
 	SourceFiles.Items += Range.Start;
 	SourceFiles.Count = Range.End - Range.Start;
 	f_build_watch BuildWatch = F_BuildWatchFromSourceFiles(Lane.PermanentArena, SourceFiles, AppCompileOptions.IncludePaths);
+	
+	f_compilation *Compilation;
+	F_FirstLane()
+	{
+		Compilation = F_ArenaPushType(Lane.PermanentArena, f_compilation);
+	}
+	F_BroadcastFirstLane(Compilation);
+
 	while(F_True)
 	{
-		for(f_s32 I = 0; I < SourceFiles.Count; I++)
-		{
-			F_UpdateTU(Lane.TemporaryArena, BuildWatch.TUs + I, AppCompileOptions, F_TOOLCHAIN_CLANG);
-			if(BuildWatch.TUs[I].Process.State == F_PROCESS_RUNNING) F_PrintF("Cool!");
-		}
+		
 		F_ArenaReset(Lane.TemporaryArena);
 	}
 }
