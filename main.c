@@ -15,23 +15,19 @@
 
 F_LaneEntry
 {
-	
-	f_compile_options AppCompileOptions = {0};
-	f_link_options    AppLinkOptions  = {0};
-	AppCompileOptions.OutputPath = F_Str8("build/app.dynlib");
 
-	AppCompileOptions.ExtraFlags = F_Str8ArrayFromCStrs(Lane.PermanentArena, "-fobjc-arc");
+	f_str8_list SourceFilesList = {0};
+	f_build_options BuildOptions = {0};
 
-	f_str8_array IncludePaths = F_Str8ArrayFromCStrs(Lane.PermanentArena,
+	BuildOptions.LinkFlags = F_Str8ArrayFromCStrs(Lane.PermanentArena, "-fobjc-arc");
+
+	BuildOptions.OutputPathWithFilename = F_Str8("build/app.dynlib");
+
+	BuildOptions.IncludeDirectories = F_Str8ArrayFromCStrs(Lane.PermanentArena,
 	"include/",
 	"external/",
 	"build/",
 	);
-
-	AppCompileOptions.IncludePaths = IncludePaths;
-
-	f_str8_list SourceFilesList = {0};
-
 
 	F_FirstLane()
 	{
@@ -54,26 +50,16 @@ F_LaneEntry
 
 	F_BroadcastFirstLane(SourceFilesList);
 
-	AppLinkOptions.OutputKind = F_OUTPUT_DYNAMIC;
+	BuildOptions.Kind = F_OUTPUT_DYNAMIC;
 
-	F_BroadcastFirstLane(AppLinkOptions);
+	BuildOptions.SourceFiles = F_Str8ArrayFromList(Lane.PermanentArena, SourceFilesList);
 
-	f_str8_array SourceFiles = F_Str8ArrayFromList(Lane.PermanentArena, SourceFilesList);
-	f_range Range = F_SplitRange(SourceFiles.Count);
-	SourceFiles.Items += Range.Start;
-	SourceFiles.Count = Range.End - Range.Start;
-	f_build_watch BuildWatch = F_BuildWatchFromSourceFiles(Lane.PermanentArena, SourceFiles, AppCompileOptions.IncludePaths);
-	
-	f_compilation *Compilation;
-	F_FirstLane()
-	{
-		Compilation = F_ArenaPushType(Lane.PermanentArena, f_compilation);
-	}
-	F_BroadcastFirstLane(Compilation);
-
+	f_build Build = {0};
+	F_FirstLane() Build = F_BuildFromBuildOptions(BuildOptions);
+	F_BroadcastFirstLane(Build);
 	while(F_True)
 	{
-		
+
 		F_ArenaReset(Lane.TemporaryArena);
 	}
 }
