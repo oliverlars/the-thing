@@ -327,7 +327,9 @@ typedef struct f_build_options
 
 	f_str8         OutputPathWithFilename;
 
-	f_str8_array   SourceFiles;
+	f_str8_array   SourceFileExtensions;
+
+	f_str8_array   SourceDirectories;
 	f_str8_array   IncludeDirectories;
 
 	f_str8_array   CompileFlags;
@@ -2412,7 +2414,17 @@ f_build F_BuildFromBuildOptions(f_build_options BuildOptions)
 	f_build Build = {0};
 	// Probably enough?
 	Build.Arena = F_ArenaReserveButCommitFirstPage(MegaBytes(64));
-	Build.TUCount = BuildOptions.SourceFiles.Count;
+	// HACK: Finish this off properly!
+	for(f_s32 I = 0; I < BuildOptions.SourceDirectories.Count; I++)
+	{
+		s8 *Directory = F_CStrFromStr8(Lane.TemporaryArena, BuildOptions.SourceDirectories.Items[I]);
+		f_str8_array FilesInDirectory = F_OS_ArrayOfFilesInDirectory(Lane.PermanentArena, Directory,
+			.PrependPath = F_True,
+			.FilterByExtension = BuildOptions.SourceFileExtensions
+		);
+		Build.TUCount += FilesInDirectory.Count;
+	}
+
 	Build.TUs = F_ArenaPushArrayType(Build.Arena, Build.TUCount, f_translation_unit);
 
 	return Build;
