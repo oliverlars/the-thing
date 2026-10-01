@@ -119,8 +119,16 @@ typedef struct f_barrier
 }
 f_barrier;
 
+typedef enum f_lane_kind
+{
+	F_LANE_IO,
+	F_LANE_UPDATE,
+}
+f_lane_kind;
+
 typedef struct f_lane
 {
+	f_lane_kind Kind;
 	f_s64      ID;
 	f_s64      LaneCount;
 	f_barrier *Barrier;
@@ -315,6 +323,11 @@ typedef struct f_build
 	f_translation_unit *TUs;
 	f_u64               TUCount;
 
+	f_str8_array        SourceDirectories;
+	f_u64               PrevHashOfAllFiles;
+
+	f_u64               TimeOfLastCheck;
+
 	_Atomic(f_u64) TUsToProcess;
 	_Atomic(f_u64) NextTU;
 }
@@ -326,8 +339,6 @@ typedef struct f_build_options
 	f_output_kind  Kind;
 
 	f_str8         OutputPathWithFilename;
-
-	f_str8_array   SourceFileExtensions;
 
 	f_str8_array   SourceDirectories;
 	f_str8_array   IncludeDirectories;
@@ -700,6 +711,9 @@ void F_Report(f_memory_arena *Arena, f_build_report Report);
 f_memory_arena *F_PersistentArena();
 f_memory_arena *F_TransientArena();
 
+f_b32 F_IsIOLane();
+f_b32 F_IsUpdateLane();
+
 #endif
 
 #ifdef FRIDAY_IMPLEMENTATION
@@ -723,7 +737,9 @@ int main(int ArgCount, char **Arguments)
 #define thread_local __thread
 #endif
 
+// TODO: Prefix with 'F_'
 thread_local f_lane Lane;
+f_u64               TotalLaneCount;
 f_str8_array F_CommandLineArgs;
 
 thread_local f_memory_arena F_ErrorArena;
@@ -1150,15 +1166,25 @@ F_Internal_ThreadEntry(ThreadParams)
 #error "Unsupported OS"
 #endif
 
-void F_DispatchAcrossNLanes(f_s64 LaneCount, char **Args, f_s32 ArgCount)
+f_b32 F_IsIOLane()
+{
+	return Lane.Kind == F_LANE_IO;
+}
+
+f_b32 F_IsUpdateLane()
+{
+	return Lane.Kind == F_LANE_UPDATE;
+}
+
+void F_DispatchAcrossNLanes(f_s64 TotalLanes, char **Args, f_s32 ArgCount)
 {
 	f_memory_arena *FirstLaneArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
 
-	void **BroadcastPointers   = F_ArenaPushArrayType(FirstLaneArena, LaneCount, void*);
-	f_thread              *Threads = F_ArenaPushArrayType(FirstLaneArena, LaneCount, f_thread);
-	f_thread_entry_params *Params  = F_ArenaPushArrayType(FirstLaneArena, LaneCount, f_thread_entry_params);
+	void **BroadcastPointers   = F_ArenaPushArrayType(FirstLaneArena, TotalLanes, void*);
+	f_thread              *Threads = F_ArenaPushArrayType(FirstLaneArena, TotalLanes, f_thread);
+	f_thread_entry_params *Params  = F_ArenaPushArrayType(FirstLaneArena, TotalLanes, f_thread_entry_params);
 	f_barrier Barrier = {0};
-	Barrier.LaneCount = LaneCount;
+	Barrier.LaneCount = TotalLanes;
 
 	F_CommandLineArgs.Items = F_ArenaPushArrayType(FirstLaneArena, ArgCount, f_str8);
 	F_CommandLineArgs.Count = ArgCount;
@@ -1172,9 +1198,24 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount, char **Args, f_s32 ArgCount)
 
 	_Atomic(f_u64) Vote = 0;
 	_Atomic(f_u64) Ballot = 0;
-	for(f_s32 I = 0; I < LaneCount; I++)
+	for(f_s32 I = 0; I < TotalLanes; I++)
 	{
-		Params[I].Lane.ID = I;
+		f_lane_kind Kind;
+		f_u64       ID;
+		f_u64       LaneCount;
+		if(I == 0)
+		{
+			Kind = F_LANE_IO;
+			LaneCount = 1;
+		}
+		else
+		{
+			Kind = F_LANE_UPDATE;
+			ID = I - 1;
+			LaneCount = TotalLanes - 1;
+		}
+
+		Params[I].Lane.ID = ID;
 		Params[I].Lane.LaneCount = LaneCount;
 		Params[I].Lane.Barrier = &Barrier;
 		Params[I].Lane.BroadcastPointers = BroadcastPointers;
@@ -1196,7 +1237,7 @@ void F_DispatchAcrossNLanes(f_s64 LaneCount, char **Args, f_s32 ArgCount)
 	Lane = Params[0].Lane;
 	Params[0].LaneEntry();
 
-	F_OS_WaitForThreads(Threads + 1, LaneCount - 1);
+	F_OS_WaitForThreads(Threads + 1, TotalLanes - 1);
 }
 
 f_s64 F_Str8ListCount(f_str8_list List)
@@ -2414,26 +2455,25 @@ f_build F_BuildFromBuildOptions(f_build_options BuildOptions)
 	f_build Build = {0};
 	// Probably enough?
 	Build.Arena = F_ArenaReserveButCommitFirstPage(MegaBytes(64));
-	// HACK: Finish this off properly!
-	for(f_s32 I = 0; I < BuildOptions.SourceDirectories.Count; I++)
-	{
-		s8 *Directory = F_CStrFromStr8(Lane.TemporaryArena, BuildOptions.SourceDirectories.Items[I]);
-		f_str8_array FilesInDirectory = F_OS_ArrayOfFilesInDirectory(Lane.PermanentArena, Directory,
-			.PrependPath = F_True,
-			.FilterByExtension = BuildOptions.SourceFileExtensions
-		);
-		Build.TUCount += FilesInDirectory.Count;
-	}
 
-	Build.TUs = F_ArenaPushArrayType(Build.Arena, Build.TUCount, f_translation_unit);
-
+	Build.SourceDirectories.Items = F_ArenaPushArrayType(Lane.PermanentArena, BuildOptions.SourceDirectories.Count, f_str8);
+	Build.SourceDirectories.Count = BuildOptions.SourceDirectories.Count;
 	return Build;
 }
 
 f_b32 F_UpdateBuild(f_build *Build)
 {
-
-	
+	f_u64 Count = 0;
+	for(f_s32 I = 0; I < Build->SourceDirectories.Count; I++)
+	{
+		f_str8_array RelevantFilesInDirectory = F_OS_ArrayOfFilesInDirectory(
+			Lane.TemporaryArena,
+			F_CStrFromStr8(Lane.TemporaryArena, Build->SourceDirectories.Items[I]),
+			.PrependPath = F_True,
+			.FilterByExtension = F_Str8ArrayFromCStrs(Lane.PermanentArena, ".c", ".m", ".h")
+		);
+		Count += RelevantFilesInDirectory.Count;
+	}
 
 	f_u64 TUIndexToProcess = 0;
 	//for(;TUIndexToProcess = atomic_fetch_add_expicit(Build->))

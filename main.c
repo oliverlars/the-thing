@@ -11,8 +11,6 @@
 #define FRIDAY_MAIN
 #include "friday2.h"
 
-
-
 F_LaneEntry
 {
 	f_build_options BuildOptions = {0};
@@ -31,7 +29,6 @@ F_LaneEntry
 	app.c and app.h need moving to folders to make this new assumption work better
 	*/
 	BuildOptions.SourceDirectories = F_Str8ArrayFromCStrs(Lane.PermanentArena, "source/", "source/darwin/", "external/");
-	BuildOptions.SourceFileExtensions = F_Str8ArrayFromCStrs(Lane.PermanentArena, ".c", ".m");
 	BuildOptions.Kind = F_OUTPUT_DYNAMIC;
 
 	f_build Build = {0};
