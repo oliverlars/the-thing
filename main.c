@@ -34,8 +34,18 @@ F_LaneEntry
 	f_build Build = {0};
 	F_FirstLane() Build = F_BuildFromBuildOptions(BuildOptions);
 	F_BroadcastFirstLane(Build);
+
 	while(F_True)
 	{
+		if(F_IsUpdateLane())
+		{
+			printf("the rinkiest dinky\n");
+		}
+		if(F_IsIOLane())
+		{
+			printf("zoinks\n");
+		}
+		return;
 		F_ArenaReset(Lane.TemporaryArena);
 	}
 }
