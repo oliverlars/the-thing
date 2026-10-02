@@ -1161,12 +1161,12 @@ F_Internal_ThreadEntry(ThreadParams)
 
 f_b32 F_IsIOLane()
 {
-	return Lane.ID == Lane.LaneCount - 1;
+	return Lane.GroupType == F_GROUP_IO;
 }
 
 f_b32 F_IsUpdateLane()
 {
-	return !F_IsIOLane();
+	return Lane.GroupType == F_GROUP_UPDATE;
 }
 
 void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
@@ -1207,11 +1207,11 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 		Params[0].Lane.PermanentArena = FirstLaneArena;
 	}
 
-	for(f_s32 I = 0; I < NLanes - 1; I++)
+	for(f_s32 I = 1; I < NLanes; I++)
 	{
 		Params[I].Lane.ID = 0;
 		Params[I].Lane.GroupType = F_GROUP_UPDATE;
-		Params[I].Lane.GroupIndex = I;
+		Params[I].Lane.GroupIndex = I - 1;
 		Params[I].Lane.GroupCount = NLanes - 1;
 		Params[I].Lane.LaneCount = NLanes;
 		Params[I].Lane.Barrier = &Barrier;
