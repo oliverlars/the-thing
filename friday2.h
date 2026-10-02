@@ -331,8 +331,8 @@ typedef struct f_build
 
 	f_u64               TimeOfLastCheck;
 
-	_Atomic(f_u64) TUsToProcess;
-	_Atomic(f_u64) NextTU;
+	_Atomic(f_s64) TUsToProcess;
+	_Atomic(f_s64) NextTU;
 }
 f_build;
 
@@ -682,7 +682,7 @@ f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 void F_Internal_LaneEntry();
 
 
-f_build F_BuildFromBuildOptions (f_build_options BuildOptions);
+f_build *F_BuildFromBuildOptions (f_memory_arena *Arena, f_build_options BuildOptions);
 
 f_build_cache F_BuildCacheFromOutputPath (f_memory_arena *Arena, f_str8 OutputPath);
 
@@ -1209,7 +1209,7 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 
 	for(f_s32 I = 1; I < NLanes; I++)
 	{
-		Params[I].Lane.ID = 0;
+		Params[I].Lane.ID = I;
 		Params[I].Lane.GroupType = F_GROUP_UPDATE;
 		Params[I].Lane.GroupIndex = I - 1;
 		Params[I].Lane.GroupCount = NLanes - 1;
@@ -2427,14 +2427,14 @@ f_b32 F_PollCompilation(f_compilation *Compilation)
 	return F_WaveAnyTrue(ProcessesInLaneRunning);
 }
 
-f_build F_BuildFromBuildOptions(f_build_options BuildOptions)
+f_build *F_BuildFromBuildOptions(f_memory_arena *Arena, f_build_options BuildOptions)
 {
-	f_build Build = {0};
+	f_build *Build = F_ArenaPushType(Arena, f_build);
 	// Probably enough?
-	Build.Arena = F_ArenaReserveButCommitFirstPage(MegaBytes(64));
+	Build->Arena = F_ArenaReserveButCommitFirstPage(MegaBytes(64));
 
-	Build.SourceDirectories.Items = F_ArenaPushArrayType(Lane.PermanentArena, BuildOptions.SourceDirectories.Count, f_str8);
-	Build.SourceDirectories.Count = BuildOptions.SourceDirectories.Count;
+	Build->SourceDirectories.Items = F_ArenaPushArrayType(Lane.PermanentArena, BuildOptions.SourceDirectories.Count, f_str8);
+	Build->SourceDirectories.Count = BuildOptions.SourceDirectories.Count;
 	return Build;
 }
 

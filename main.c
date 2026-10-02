@@ -31,21 +31,36 @@ F_LaneEntry
 	BuildOptions.SourceDirectories = F_Str8ArrayFromCStrs(Lane.PermanentArena, "source/", "source/darwin/", "external/");
 	BuildOptions.Kind = F_OUTPUT_DYNAMIC;
 
-	f_build Build = {0};
-	F_FirstLane() Build = F_BuildFromBuildOptions(BuildOptions);
+	f_build *Build = 0;
+	F_FirstLane()
+	{
+		Build = F_BuildFromBuildOptions(Lane.PermanentArena, BuildOptions);
+		atomic_store_explicit(&Build->TUsToProcess, 3, memory_order_release);
+	}
 	F_BroadcastFirstLane(Build);
-
-	while(F_True)
+	f_s32 FutureWork = 3;
+	for(;;)
 	{
 		if(F_IsUpdateLane())
 		{
-			printf("the rinkiest dinky\n");
+			for(f_s32 I = 0; I < 256; I++)
+			{
+				for(;;)
+				{
+					f_s64 NextTU = atomic_fetch_sub_explicit(&Build->TUsToProcess, 1, memory_order_release);
+
+					if(NextTU <= 0) break;
+					printf("Lane %d processing TU %d\n", Lane.ID, NextTU - 1);
+				}
+			}
 		}
 		if(F_IsIOLane())
 		{
-			printf("zoinks\n");
+			atomic_store(&Build->TUsToProcess, 0);
+			atomic_fetch_add_explicit(&Build->TUsToProcess, FutureWork, memory_order_release);
+			FutureWork = 0;
 		}
-		return;
+		F_WaveBarrier();
 		F_ArenaReset(Lane.TemporaryArena);
 	}
 }
