@@ -41,26 +41,28 @@ F_LaneEntry
 	f_s32 FutureWork = 3;
 	for(;;)
 	{
+		f_build_cache BuildCache = {0};
+		F_FirstLane() BuildCache = F_BuildCacheFromOutputPath(Lane.TemporaryArena, F_Str8("build/"));
+		F_BroadcastFirstLane(BuildCache);
 		if(F_IsUpdateLane())
 		{
 			for(f_s32 I = 0; I < 256; I++)
 			{
-				for(;;)
-				{
-					f_s64 NextTU = atomic_fetch_sub_explicit(&Build->TUsToProcess, 1, memory_order_release);
-
-					if(NextTU <= 0) break;
-					printf("Lane %d processing TU %d\n", Lane.ID, NextTU - 1);
-				}
+				
 			}
 		}
-		if(F_IsIOLane())
+		if(F_IsBuildLane())
 		{
-			atomic_store(&Build->TUsToProcess, 0);
-			atomic_fetch_add_explicit(&Build->TUsToProcess, FutureWork, memory_order_release);
-			FutureWork = 0;
+			printf("BuildLane: %d\n", BuildCache.Count);
+			f_range Range = F_SplitRange(BuildCache.Count);
+			printf("Range: [%d, %d]\n", Range.Start, Range.End);
+		// 	atomic_store(&Build->TUsToProcess, 0);
+		// 	atomic_fetch_add_explicit(&Build->TUsToProcess, FutureWork, memory_order_release);
+		// 	FutureWork = 0;
+		// }
+		// F_WaveBarrier();
+		// F_ArenaReset(Lane.TemporaryArena);
 		}
 		F_WaveBarrier();
-		F_ArenaReset(Lane.TemporaryArena);
 	}
 }

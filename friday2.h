@@ -121,7 +121,7 @@ f_barrier;
 
 typedef enum f_group_type
 {
-	F_GROUP_IO,
+	F_GROUP_BUILD,
 	F_GROUP_UPDATE,
 }
 f_group_type;
@@ -704,7 +704,7 @@ void F_Report(f_memory_arena *Arena, f_build_report Report);
 f_memory_arena *F_PersistentArena();
 f_memory_arena *F_TransientArena();
 
-f_b32 F_IsIOLane();
+f_b32 F_IsBuildLane();
 f_b32 F_IsUpdateLane();
 
 #endif
@@ -1159,9 +1159,9 @@ F_Internal_ThreadEntry(ThreadParams)
 #error "Unsupported OS"
 #endif
 
-f_b32 F_IsIOLane()
+f_b32 F_IsBuildLane()
 {
-	return Lane.GroupType == F_GROUP_IO;
+	return Lane.GroupType == F_GROUP_BUILD;
 }
 
 f_b32 F_IsUpdateLane()
@@ -1196,7 +1196,7 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 		Params[0].Lane.ID = 0;
 		Params[0].Lane.GroupIndex = 0;
 		Params[0].Lane.GroupCount = 1;
-		Params[0].Lane.GroupType = F_GROUP_IO;
+		Params[0].Lane.GroupType = F_GROUP_UPDATE;
 		Params[0].Lane.LaneCount = NLanes;
 		Params[0].Lane.Barrier = &Barrier;
 		Params[0].Lane.BroadcastPointers = BroadcastPointers;
@@ -1210,7 +1210,7 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 	for(f_s32 I = 1; I < NLanes; I++)
 	{
 		Params[I].Lane.ID = I;
-		Params[I].Lane.GroupType = F_GROUP_UPDATE;
+		Params[I].Lane.GroupType = F_GROUP_BUILD;
 		Params[I].Lane.GroupIndex = I - 1;
 		Params[I].Lane.GroupCount = NLanes - 1;
 		Params[I].Lane.LaneCount = NLanes;
