@@ -146,6 +146,15 @@ typedef struct f_lane
 }
 f_lane;
 
+typedef struct f_group
+{
+	f_barrier *Barrier;
+	f_s32 Rank;
+	f_s32 Size;
+	// TODO: Maybe a better way? this limits me to 64 lanes
+	f_u64 Members;
+}
+f_group;
 
 #define F_PROCESS_STDOUT_CAPACITY (F_KiloBytes(64))
 
@@ -1108,9 +1117,40 @@ f_u64 F_WaveSum(f_u64 Value)
 	return Sum;
 }
 
+void F_GroupBarrier(f_group *Group)
+{
+	f_s64 Generation = atomic_load_explicit(&Group->Barrier->Generation, memory_order_relaxed);
+	f_s64 LanesArrived = atomic_fetch_add_explicit(&Group->Barrier->LanesWaiting, 1, memory_order_release);
+
+	if(LanesArrived == Group->Barrier->LaneCount - 1)
+	{
+		atomic_thread_fence(memory_order_acquire);
+		atomic_store_explicit(&Group->Barrier->LanesWaiting, 0, memory_order_relaxed);
+		atomic_store_explicit(&Group->Barrier->Generation, Generation + 1, memory_order_release);
+		F_OS_FutexWakeAll(&Group->Barrier->Generation);
+	}
+	else
+	{
+		f_s64 Spins = 0;
+		for(;;)
+		{
+			if(atomic_load_explicit(&Group->Barrier->Generation, memory_order_acquire) != Generation) break;
+
+			if(Spins < 4096)
+			{
+				F_Yield();
+			}
+			else
+			{
+				F_OS_FutexWait(&Group->Barrier->Generation, Generation);
+			}
+			Spins++;
+		}
+	}
+}
+
 void F_WaveBarrier()
 {
-	if(Lane.LaneCount == 1) return;
 	f_s64 Generation = atomic_load_explicit(&Lane.Barrier->Generation, memory_order_relaxed);
 	f_s64 LanesArrived = atomic_fetch_add_explicit(&Lane.Barrier->LanesWaiting, 1, memory_order_release);
 
