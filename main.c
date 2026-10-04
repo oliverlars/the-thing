@@ -11,6 +11,19 @@
 #define FRIDAY_MAIN
 #include "friday2.h"
 
+f_group GROUP_HACK = { 0 };
+
+
+// HACK: Fix this 
+f_b32 F_IsBuildLane()
+{
+	return F_True;
+}
+f_b32 F_IsUpdateLane()
+{
+	return F_True;
+}
+
 F_LaneEntry
 {
 	f_build_options BuildOptions = {0};
@@ -42,7 +55,7 @@ F_LaneEntry
 	for(;;)
 	{
 		f_build_cache BuildCache = {0};
-		F_FirstLane() BuildCache = F_BuildCacheFromOutputPath(Lane.TemporaryArena, F_Str8("build/"));
+		F_FirstLane() BuildCache = F_BuildCacheFromOutputPath(GROUP_HACK, Lane.TemporaryArena, F_Str8("build/"));
 		F_BroadcastFirstLane(BuildCache);
 		if(F_IsUpdateLane())
 		{
@@ -54,7 +67,7 @@ F_LaneEntry
 		if(F_IsBuildLane())
 		{
 			printf("BuildLane: %d\n", BuildCache.Count);
-			f_range Range = F_SplitRange(BuildCache.Count);
+			f_range Range = F_SplitRange(GROUP_HACK, BuildCache.Count);
 			printf("Range: [%d, %d]\n", Range.Start, Range.End);
 		// 	atomic_store(&Build->TUsToProcess, 0);
 		// 	atomic_fetch_add_explicit(&Build->TUsToProcess, FutureWork, memory_order_release);

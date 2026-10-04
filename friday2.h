@@ -119,21 +119,11 @@ typedef struct f_barrier
 }
 f_barrier;
 
-typedef enum f_group_type
-{
-	F_GROUP_BUILD,
-	F_GROUP_UPDATE,
-}
-f_group_type;
-
 typedef struct f_lane
 {
 	f_s64      ID;
 	f_s64      LaneCount;
 
-	f_group_type GroupType;
-	f_s64      GroupIndex;
-	f_s64      GroupCount;
 	f_barrier *Barrier;
 	void      **BroadcastPointers;
 	_Atomic(f_u64) *Vote;
@@ -148,11 +138,12 @@ f_lane;
 
 typedef struct f_group
 {
+	f_s32 ID;
+	f_s32 Count;
 	f_barrier *Barrier;
-	f_s32 Rank;
-	f_s32 Size;
-	// TODO: Maybe a better way? this limits me to 64 lanes
-	f_u64 Members;
+	void **BroadcastPointers;
+	_Atomic(f_u64) *Vote;
+	_Atomic(f_u64) *Ballot;
 }
 f_group;
 
@@ -473,6 +464,8 @@ f_s64        F_Str8ListLength     (f_str8_list List);
 
 void F_DispatchAcrossNLanes (f_s64 LaneCount, char **Args, int ArgCount);
 
+f_group F_GroupFromPartition (f_group ParentGroup, f_b32 Condition);
+
 f_b32           F_IsFirstLane        ();
 
 f_s64 F_Internal_FirstLaneBegin(void);
@@ -507,7 +500,7 @@ typedef struct f_range
 }
 f_range;
 
-f_range F_SplitRange(f_u64 Value);
+f_range F_SplitRange(f_group Group, f_u64 Value);
 
 
 #define F_BroadcastLane(Variable, SourceLane) \
@@ -528,7 +521,7 @@ void            F_WaveBarrier ();
 void  F_StartProcess             (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
 f_b32 F_PollProcess              (f_process *Process);
 void  F_WaitForProcess           (f_process *Process);
-void  F_WaitForMultipleProcesses (f_process *Processes, f_s32 ProcessCount);
+void  F_WaitForMultipleProcesses (f_group Group, f_process *Processes, f_s32 ProcessCount);
 
 f_b32 F_ProcessExitedCleanly(f_process *Process);
 
@@ -539,12 +532,12 @@ void F_Internal_WaitForMultipleProcesses (f_process **Processes, f_u64 ProcessCo
 
 f_watch      F_WatchFilesFromArray    (f_str8_array FilePaths);
 
-f_str8_array F_FilesChangedInWatch    (f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
-f_b32        F_AnyFilesChangedInWatch (f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
+f_str8_array F_FilesChangedInWatch    (f_group Group, f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
+f_b32        F_AnyFilesChangedInWatch (f_group Group, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds);
 
 
-f_b32 *F_MaskOfFilesChangedInTU (f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds);
-f_b32 *F_MaskOfTUsChanged (f_memory_arena *Arena, f_build_watch BuildWatch, f_u64 ChangeGranularityInMilliseconds);
+f_b32 *F_MaskOfFilesChangedInTU (f_group Group, f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds);
+f_b32 *F_MaskOfTUsChanged (f_group Group, f_memory_arena *Arena, f_build_watch BuildWatch, f_u64 ChangeGranularityInMilliseconds);
 
 
 #define F_HashStart (0xCBF29CE484222325ULL)
@@ -563,6 +556,7 @@ f_u64 F_HashSourceAndIncludes (f_memory_arena *Arena, f_str8 PathToSource, f_str
 
 void F_CompileNewAndChangedTUs
 (
+	f_group            Group,
 	f_memory_arena    *Arena,
 	f_compilation     *Compilation,
 	f_compile_options CompileOptions,
@@ -570,11 +564,11 @@ void F_CompileNewAndChangedTUs
 	f_toolchain       Toolchain
 );
 
-void  F_WaitForCompilation (f_compilation *Compilation);
-f_b32 F_PollCompilation    (f_compilation *Compilation);
+void  F_WaitForCompilation (f_group Group, f_compilation *Compilation);
+f_b32 F_PollCompilation    (f_group Group, f_compilation *Compilation);
 
 
-f_str8_array F_ObjectFilesFromCompilation(f_memory_arena *Arena, f_compilation Compilation);
+f_str8_array F_ObjectFilesFromCompilation(f_group Group, f_memory_arena *Arena, f_compilation Compilation);
 
 f_link F_LinkTUs (f_memory_arena *Arena, f_link_options LinkOptions, f_str8_array ObjectFiles, f_toolchain Toolchain);
 
@@ -693,9 +687,9 @@ void F_Internal_LaneEntry();
 
 f_build *F_BuildFromBuildOptions (f_memory_arena *Arena, f_build_options BuildOptions);
 
-f_build_cache F_BuildCacheFromOutputPath (f_memory_arena *Arena, f_str8 OutputPath);
+f_build_cache F_BuildCacheFromOutputPath (f_group Group, f_memory_arena *Arena, f_str8 OutputPath);
 
-f_b32         F_HashIsInBuildCache (f_build_cache Cache, f_u64 Hash);
+f_b32         F_HashIsInBuildCache (f_group Gruop, f_build_cache Cache, f_u64 Hash);
 
 f_build_watch F_BuildWatchFromSourceFiles (f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
 
@@ -712,9 +706,6 @@ void F_Report(f_memory_arena *Arena, f_build_report Report);
 
 f_memory_arena *F_PersistentArena();
 f_memory_arena *F_TransientArena();
-
-f_b32 F_IsBuildLane();
-f_b32 F_IsUpdateLane();
 
 #endif
 
@@ -1199,14 +1190,9 @@ F_Internal_ThreadEntry(ThreadParams)
 #error "Unsupported OS"
 #endif
 
-f_b32 F_IsBuildLane()
+f_group F_GroupFromPartition (f_group ParentGroup, f_b32 Condition)
 {
-	return Lane.GroupType == F_GROUP_BUILD;
-}
 
-f_b32 F_IsUpdateLane()
-{
-	return Lane.GroupType == F_GROUP_UPDATE;
 }
 
 void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
@@ -1234,9 +1220,6 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 	// One lane pinned, the rest of the lanes go to update
 	{
 		Params[0].Lane.ID = 0;
-		Params[0].Lane.GroupIndex = 0;
-		Params[0].Lane.GroupCount = 1;
-		Params[0].Lane.GroupType = F_GROUP_UPDATE;
 		Params[0].Lane.LaneCount = NLanes;
 		Params[0].Lane.Barrier = &Barrier;
 		Params[0].Lane.BroadcastPointers = BroadcastPointers;
@@ -1250,9 +1233,6 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 	for(f_s32 I = 1; I < NLanes; I++)
 	{
 		Params[I].Lane.ID = I;
-		Params[I].Lane.GroupType = F_GROUP_BUILD;
-		Params[I].Lane.GroupIndex = I - 1;
-		Params[I].Lane.GroupCount = NLanes - 1;
 		Params[I].Lane.LaneCount = NLanes;
 		Params[I].Lane.Barrier = &Barrier;
 		Params[I].Lane.BroadcastPointers = BroadcastPointers;
@@ -1724,7 +1704,7 @@ void F_OS_ReleaseFile(f_file *File)
 	File->Handle = 0;
 }
 
-f_build_cache F_BuildCacheFromOutputPath(f_memory_arena *Arena, f_str8 OutputPath)
+f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f_str8 OutputPath)
 {
 		f_str8_array ObjectFiles = F_OS_ArrayOfEntriesInDirectory(
 		Arena, OutputPath, .ExcludeDirectories = F_True,
@@ -1734,7 +1714,7 @@ f_build_cache F_BuildCacheFromOutputPath(f_memory_arena *Arena, f_str8 OutputPat
 	if(F_IsFirstLane()) Cache.Items = F_ArenaPushArrayType(Arena, ObjectFiles.Count, f_u64);
 	Cache.Count = ObjectFiles.Count;
 	F_BroadcastFirstLane(Cache);
-	f_range Range = F_SplitRange(ObjectFiles.Count);
+	f_range Range = F_SplitRange(Group, ObjectFiles.Count);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
 	{
 		f_str8 HashAsString = ObjectFiles.Items[I];
@@ -1750,10 +1730,10 @@ f_build_cache F_BuildCacheFromOutputPath(f_memory_arena *Arena, f_str8 OutputPat
 	return Cache;
 }
 
-f_b32 F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
+f_b32 F_HashIsInBuildCache(f_group Group, f_build_cache Cache, f_u64 Hash)
 {
 	f_b32 Found = F_False;
-	f_range Range = F_SplitRange(Cache.Count);
+	f_range Range = F_SplitRange(Group, Cache.Count);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
 	{
 		Found |= Cache.Items[I] == Hash;
@@ -1830,7 +1810,7 @@ f_build_watch F_BuildWatchFromSourceFiles(f_memory_arena *Arena, f_str8_array So
 	return BuildWatch;
 }
 
-f_b32 *F_MaskOfFilesChangedInTU(f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds)
+f_b32 *F_MaskOfFilesChangedInTU(f_group Group, f_memory_arena *Arena, f_translation_unit *TU, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_b32 *FilesChangedMask = F_Null;
 	if(F_IsFirstLane())
@@ -1839,7 +1819,7 @@ f_b32 *F_MaskOfFilesChangedInTU(f_memory_arena *Arena, f_translation_unit *TU, f
 	}
 	F_BroadcastFirstLane(FilesChangedMask);
 
-	f_range Range = F_SplitRange(TU->FileCount);
+	f_range Range = F_SplitRange(Group, TU->FileCount);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
 	{
 		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, TU->PathsForSourceAndIncludes[I]);
@@ -1854,7 +1834,7 @@ f_b32 *F_MaskOfFilesChangedInTU(f_memory_arena *Arena, f_translation_unit *TU, f
 	return FilesChangedMask;
 }
 
-f_b32 *F_MaskOfTUsChanged(f_memory_arena *Arena, f_build_watch BuildWatch, f_u64 ChangeGranularityInMilliseconds)
+f_b32 *F_MaskOfTUsChanged(f_group Group, f_memory_arena *Arena, f_build_watch BuildWatch, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_b32 *TUsChanged = F_Null;
 	if(F_IsFirstLane())
@@ -1863,7 +1843,7 @@ f_b32 *F_MaskOfTUsChanged(f_memory_arena *Arena, f_build_watch BuildWatch, f_u64
 	}
 	F_BroadcastFirstLane(TUsChanged);
 
-	f_range Range = F_SplitRange(BuildWatch.TUCount);
+	f_range Range = F_SplitRange(Group, BuildWatch.TUCount);
 	for (f_s32 TUIndex = Range.Start; TUIndex < Range.End; TUIndex++)
 	{
 		f_b32 AnyFileInTUChanged = F_False;
@@ -1883,7 +1863,7 @@ f_b32 *F_MaskOfTUsChanged(f_memory_arena *Arena, f_build_watch BuildWatch, f_u64
 	return TUsChanged;
 }
 
-f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
+f_str8_array F_FilesChangedInWatch(f_group Group, f_memory_arena *Arena, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_str8_array Result = {0};
 	if(F_IsFirstLane())
@@ -1895,7 +1875,7 @@ f_str8_array F_FilesChangedInWatch(f_memory_arena *Arena, f_watch *Watch, f_u64 
 	f_b32 *FileChanged = F_ArenaPushArrayType(Lane.TemporaryArena, Watch->FileCount, f_b32);
 
 	f_u64 FilesChangedThisLane = 0;
-	f_range WatchRange = F_SplitRange(Watch->FileCount);
+	f_range WatchRange = F_SplitRange(Group, Watch->FileCount);
 	for (f_s32 I = WatchRange.Start; I < WatchRange.End; I++)
 	{
 		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, Watch->Files[I]);
@@ -1941,10 +1921,10 @@ f_u64 F_HashStr8(f_str8 String)
 	return F_HashBytes(F_HashStart, String.Bytes, String.Size);
 }
 
-f_b32 F_AnyFilesChangedInWatch(f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
+f_b32 F_AnyFilesChangedInWatch(f_group Group, f_watch *Watch, f_u64 ChangeGranularityInMilliseconds)
 {
 	f_b32 AnyChanged = F_False;
-	f_range WatchRange = F_SplitRange(Watch->FileCount);
+	f_range WatchRange = F_SplitRange(Group, Watch->FileCount);
 	for (f_s32 I = WatchRange.Start; I < WatchRange.End; I++)
 	{
 		f_file_info FileInfo = F_OS_FileInfoFromFilename(Lane.TemporaryArena, Watch->Files[I]);
@@ -2046,11 +2026,11 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 	return Entries;
 }
 
-f_range F_SplitRange(f_u64 Value)
+f_range F_SplitRange(f_group Group, f_u64 Value)
 {
 	f_range Result;
-	Result.Start = Value * Lane.GroupIndex / Lane.GroupCount;
-	Result.End   = Value * (Lane.GroupIndex+ 1) / Lane.GroupCount;
+	Result.Start = Value * Group.ID / Group.Count;
+	Result.End   = Value * (Group.ID + 1) / Group.Count;
 	return Result;
 }
 
@@ -2257,20 +2237,12 @@ void F_WaitForProcess(f_process *Process)
 	if(Process->StdOutSinceLastPoll.Size > 0) F_Print(Process->StdOutSinceLastPoll);
 }
 
-void  F_WaitForMultipleProcesses (f_process *Processes, f_s32 ProcessCount)
+void  F_WaitForMultipleProcesses(f_group Group, f_process *Processes, f_s32 ProcessCount)
 {
-	f_range Range = F_SplitRange(ProcessCount);
+	f_range Range = F_SplitRange(Group, ProcessCount);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
 	{
 		F_WaitForProcess(Processes + I);
-	}
-}
-
-void F_Internal_WaitForMultipleProcesses(f_process **Processes, f_u64 ProcessCount)
-{
-	for(int I = 0; I < ProcessCount; I++)
-	{
-		F_WaitForProcess(Processes[I]);
 	}
 }
 
@@ -2405,13 +2377,13 @@ f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8
 	return __F_Internal_HashSourceAndIncludes(Arena, PathToSource, IncludePaths, &IncludesSeenAlready);
 }
 
-f_str8_array F_ObjectFilesFromCompilation(f_memory_arena *Arena, f_compilation Compilation)
+f_str8_array F_ObjectFilesFromCompilation(f_group Group, f_memory_arena *Arena, f_compilation Compilation)
 {
 	f_str8_array ObjectFiles = {0};
 	ObjectFiles.Items = F_ArenaPushArrayType(Arena, Compilation.Count, f_str8);
 	ObjectFiles.Count = Compilation.Count;
 
-	f_range Range = F_SplitRange(ObjectFiles.Count);
+	f_range Range = F_SplitRange(Group, ObjectFiles.Count);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
 	{
 		ObjectFiles.Items[I] = F_Str8PushF(Arena, "%llu.o", Compilation.Hashes[I]);
@@ -2420,11 +2392,11 @@ f_str8_array F_ObjectFilesFromCompilation(f_memory_arena *Arena, f_compilation C
 	return ObjectFiles;
 }
 
-void F_WaitForCompilation(f_compilation *Compilation)
+void F_WaitForCompilation(f_group Group, f_compilation *Compilation)
 {
-	F_WaitForMultipleProcesses(Compilation->Processes, Compilation->Count);
+	F_WaitForMultipleProcesses(Group, Compilation->Processes, Compilation->Count);
 	f_b32 Succeeded = F_True;
-	f_range Range = F_SplitRange(Compilation->Count);
+	f_range Range = F_SplitRange(Group, Compilation->Count);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
 	{
 		Succeeded &= F_ProcessExitedCleanly(Compilation->Processes + I);
@@ -2439,10 +2411,10 @@ void F_WaitForCompilation(f_compilation *Compilation)
 	}
 }
 
-f_b32 F_PollCompilation(f_compilation *Compilation)
+f_b32 F_PollCompilation(f_group Group, f_compilation *Compilation)
 {
 	f_b32 ProcessesInLaneRunning = F_False;
-	f_range CompilationRange = F_SplitRange(Compilation->Count);
+	f_range CompilationRange = F_SplitRange(Group, Compilation->Count);
 	for (f_s32 I = CompilationRange.Start; I < CompilationRange.End; I++)
 	{
 		ProcessesInLaneRunning |= F_PollProcess(Compilation->Processes + I);
@@ -2563,6 +2535,7 @@ void F_UpdateTU(f_memory_arena *Arena, f_compilation *Compilation, f_translation
 
 void F_CompileNewAndChangedTUs
 (
+	f_group             Group,
 	f_memory_arena     *Arena,
 	f_compilation      *Compilation,
 	f_compile_options CompileOptions,
@@ -2599,11 +2572,11 @@ void F_CompileNewAndChangedTUs
 	HackBuildWatchFixMe.TUs = Compilation->TUs;
 	HackBuildWatchFixMe.TUCount = Compilation->Count;
 
-	f_b32 *TUsChanged = F_MaskOfTUsChanged(Lane.TemporaryArena, HackBuildWatchFixMe, 100);
+	f_b32 *TUsChanged = F_MaskOfTUsChanged(Group, Lane.TemporaryArena, HackBuildWatchFixMe, 100);
 
 	if(Compilation->Status != F_NOT_STARTED_COMPILING) Compilation->Status = F_NOTHING_TO_COMPILE;
 
-	f_range Range = F_SplitRange(SourceFiles.Count);
+	f_range Range = F_SplitRange(Group, SourceFiles.Count);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
 	{
 		if(Compilation->Status != F_NOT_STARTED_COMPILING && !TUsChanged[I]) continue;
@@ -2622,7 +2595,7 @@ void F_CompileNewAndChangedTUs
 		f_build_cache HackBuildCacheFixMe = {0};
 		HackBuildCacheFixMe.Items = Compilation->Hashes;
 		HackBuildCacheFixMe.Count = Compilation->Count;
-		if(F_HashIsInBuildCache(HackBuildCacheFixMe, Compilation->Hashes[I])) continue;
+		if(F_HashIsInBuildCache(Group, HackBuildCacheFixMe, Compilation->Hashes[I])) continue;
 
 		f_str8_list Args = {0};
 		{
@@ -2651,7 +2624,7 @@ void F_CompileNewAndChangedTUs
 		F_StartProcess(Arena, Compilation->Processes + I, Args);
 	}
 
-	if(Compilation->Status == F_COMPILING) F_PollCompilation(Compilation);
+	if(Compilation->Status == F_COMPILING) F_PollCompilation(Group, Compilation);
 }
 
 void F_WaitForLinking(f_link *Link)
