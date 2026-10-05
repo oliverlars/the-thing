@@ -130,6 +130,7 @@ f_lane;
 
 typedef struct f_group
 {
+	f_b32           ConditionToBeInGroup;
 	f_s32           ID;
 	f_s32           Count;
 	f_barrier      *Barrier;
@@ -458,6 +459,8 @@ f_s64        F_Str8ListLength     (f_str8_list List);
 void F_DispatchAcrossNLanes (f_s64 LaneCount, char **Args, int ArgCount);
 
 f_group F_GroupFromPartition (f_group ParentGroup, f_b32 Condition);
+
+f_b32   F_IsCallerInGroup (f_group Group);
 
 void            F_GroupBarrier (f_group Group);
 
@@ -1136,6 +1139,11 @@ F_Internal_ThreadEntry(ThreadParams)
 #error "Unsupported OS"
 #endif
 
+f_b32   F_IsCallerInGroup(f_group Group)
+{
+	return Group.ConditionToBeInGroup;
+}
+
 f_group F_GroupFromPartition(f_group ParentGroup, f_b32 Condition)
 {
 	f_group Group = {0};
@@ -1149,7 +1157,9 @@ f_group F_GroupFromPartition(f_group ParentGroup, f_b32 Condition)
 		Group.Ballot = F_ArenaPushType(F_PArena(), _Atomic(f_u64));
 	}
 	Group = F_ReadFromGroupID(ParentGroup, 0, Group);
+	// Unique group stuff
 	Group.ID = F_GroupExclusivePrefixSum(ParentGroup, !!Condition);
+	Group.ConditionToBeInGroup = !!Condition;
 
 	return Group;
 }

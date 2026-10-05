@@ -51,11 +51,11 @@ F_LaneEntry
 		//if(F_DefaultGroup().ID == 0) BuildCache = F_BuildCacheFromOutputPath(F_DefaultGroup(), F_TArena(), F_Str8("build/"));
 		//BuildCache = F_ReadFromGroupID(F_DefaultGroup(), 0, BuildCache);
 
-		if(F_DefaultGroup().ID == 0)
+		if(F_IsCallerInGroup(UpdateGroup))
 		{
 			printf("I'm in the update group!\n");
 		}
-		if(F_DefaultGroup().ID > 0)
+		if(F_IsCallerInGroup(BuildGroup))
 		{
 			printf("I'm the build group!\n");
 			F_GroupBarrier(BuildGroup);
