@@ -17,9 +17,10 @@ F_LaneEntry
 
 	BuildOptions.LinkFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc");
 
-	BuildOptions.OutputPathWithFilename = F_Str8("build/app.dynlib");
+	BuildOptions.OutputPath = F_Str8("build");
+	BuildOptions.OutputName = F_Str8("app.dynlib");
 
-	BuildOptions.IncludeDirectories = F_Str8ArrayFromCStrs(F_PArena(),
+BuildOptions.IncludeDirectories = F_Str8ArrayFromCStrs(F_PArena(),
 	"include/",
 	"external/",
 	"build/",
@@ -30,6 +31,8 @@ F_LaneEntry
 	*/
 	BuildOptions.SourceDirectories = F_Str8ArrayFromCStrs(F_PArena(), "source/", "source/darwin/", "external/");
 	BuildOptions.Kind = F_OUTPUT_DYNAMIC;
+
+	BuildOptions.Toolchain = F_TOOLCHAIN_CLANG;
 
 	assert(F_DefaultGroup().Count > 0);
 
@@ -47,28 +50,76 @@ F_LaneEntry
 	assert(UpdateGroup.Count == 1);
 	for(;;)
 	{
-		//f_build_cache BuildCache = {0};
-		//if(F_DefaultGroup().ID == 0) BuildCache = F_BuildCacheFromOutputPath(F_DefaultGroup(), F_TArena(), F_Str8("build/"));
-		//BuildCache = F_ReadFromGroupID(F_DefaultGroup(), 0, BuildCache);
+		if(F_IsInGroup(UpdateGroup))
+		{
+			//for(f_s32 I = 0; I < 10; I++) printf("I'm in the update group!\n");
+		}
+		if(F_IsInGroup(BuildGroup))
+		{
+			
+			f_build_cache BuildCache = F_BuildCacheFromOutputPath(BuildGroup, F_TArena(), F_Str8("build/"));
+			
+			f_str8_array  SourceFiles = {0};
+			if(BuildGroup.ID == 0) 
+			{
+				SourceFiles = F_OS_ArrayOfEntriesInDirectories(
+					F_TArena(), 
+				 .Directories[0] = BuildOptions.SourceDirectories.Items[0],
+					.Directories[1] = BuildOptions.SourceDirectories.Items[1],
+					.Directories[2] = BuildOptions.SourceDirectories.Items[2],
+				 .PrependPath = F_True,
+				 .FilterByExtension = F_Str8ArrayFromCStrs(F_TArena(), ".m", ".c")
+				);
+			}
+			SourceFiles = F_ReadFromGroupID(BuildGroup, 0, SourceFiles);
+			f_range SourceFileRange = F_SplitRange(BuildGroup, SourceFiles.Count);
+			f_process *Processes = F_ArenaPushArrayType(F_TArena(), SourceFileRange.End - SourceFileRange.Start, f_process);
+			for(f_s32 I = SourceFileRange.Start; I < SourceFileRange.End; I++)
+			{
+				f_u64 Hash = F_HashSourceAndIncludes(F_TArena(), SourceFiles.Items[I], BuildOptions.IncludeDirectories);
+				if(!F_HashIsInBuildCache(BuildCache, Hash))
+				{
+					f_str8_list Args = {0};
+					f_str8 ObjectPath = {0};
+					if(BuildOptions.OutputPath.Size > 0)
+					{
+						ObjectPath = F_Str8PushF(F_TArena(), "%.*s/%llu.o", F_Expand(BuildOptions.OutputPath), Hash);
+					}
+					else
+					{
+						ObjectPath = F_Str8PushF(F_TArena(), "%llu.o", Hash);
+					}
 
-		if(F_IsCallerInGroup(UpdateGroup))
-		{
-			printf("I'm in the update group!\n");
-		}
-		if(F_IsCallerInGroup(BuildGroup))
-		{
-			printf("I'm the build group!\n");
+					F_Str8ListAppend(F_TArena(), &Args, BuildOptions.Toolchain.CompilerPath);
+					F_Str8ListAppend(F_TArena(), &Args, BuildOptions.Toolchain.CompileOnlyFlag);
+					F_Str8ListAppend(F_TArena(), &Args, SourceFiles.Items[I]);
+
+					if(BuildOptions.Debug)
+					{
+						F_Str8ListAppendF(F_TArena(), &Args, "%.*s", F_Expand(BuildOptions.Toolchain.DebugFlag));
+					}
+
+					for(int I = 0; I < BuildOptions.CompileFlags.Count; I++)
+					{
+						F_Str8ListAppend(F_TArena(), &Args, BuildOptions.CompileFlags.Items[I]);
+					}
+
+					F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(BuildOptions.Toolchain.OutputFlag), F_Expand(ObjectPath));
+
+					for(int I = 0; I < BuildOptions.IncludeDirectories.Count; I++)
+					{
+						F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(BuildOptions.Toolchain.IncludeFlag), F_Expand(BuildOptions.IncludeDirectories.Items[I]));
+					}
+					F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
+					F_Print(F_Str8("\n"));
+
+					F_StartProcess(F_TArena(), Processes + I - SourceFileRange.Start, Args);
+				}
+				F_WaitForMultipleProcesses(Processes, SourceFileRange.End - SourceFileRange.Start);
+			}
 			F_GroupBarrier(BuildGroup);
-			if(BuildGroup.ID == 0) printf("This will always be called after every build group lanes first message!\n");
-		// 	atomic_store(&Build->TUsToProcess, 0);
-		// 	atomic_fetch_add_explicit(&Build->TUsToProcess, FutureWork, memory_order_release);
-		// 	FutureWork = 0;
-		// }
-		// F_WaveBarrier();
-		// F_ArenaReset(Lane.TemporaryArena);
 		}
+		F_ResetTArena();
 		F_GroupBarrier(F_DefaultGroup());
-		printf("This will be printed once both build and update lanes have printed their messages!\n");
-		break;
 	}
 }

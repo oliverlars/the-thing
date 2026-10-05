@@ -334,7 +334,8 @@ typedef struct f_build_options
 {
 	f_output_kind  Kind;
 
-	f_str8         OutputPathWithFilename;
+	f_str8         OutputPath;
+	f_str8         OutputName;
 
 	f_str8_array   SourceDirectories;
 	f_str8_array   IncludeDirectories;
@@ -460,7 +461,7 @@ void F_DispatchAcrossNLanes (f_s64 LaneCount, char **Args, int ArgCount);
 
 f_group F_GroupFromPartition (f_group ParentGroup, f_b32 Condition);
 
-f_b32   F_IsCallerInGroup (f_group Group);
+f_b32   F_IsInGroup (f_group Group);
 
 void            F_GroupBarrier (f_group Group);
 
@@ -498,7 +499,7 @@ void *F_Internal_ReadFromGroupID(f_group Group, f_s32 ID, void *Variable, f_u64 
 void  F_StartProcess             (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
 f_b32 F_PollProcess              (f_process *Process);
 void  F_WaitForProcess           (f_process *Process);
-void  F_WaitForMultipleProcesses (f_group Group, f_process *Processes, f_s32 ProcessCount);
+void  F_WaitForMultipleProcesses (f_process *Processes, f_s32 ProcessCount);
 
 f_b32 F_ProcessExitedCleanly(f_process *Process);
 
@@ -600,7 +601,7 @@ void *F_OS_DLLSymbolFromName (f_dll DLL, f_str8 ProcedureName);
 
 typedef struct f_internal_directory_options
 {
-	char *Directories[16];
+	f_str8 Directories[16];
 	f_b32 ExcludeDirectories;
 	f_b32 PrependPath;
 	f_str8_array FilterByExtension;
@@ -611,10 +612,10 @@ f_internal_directory_options;
 F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ .Directories = {DirectoryPath},__VA_ARGS__ })
 
 #define F_OS_ArrayOfEntriesInDirectory(Arena, DirectoryPath, ...) \
-F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena,  __VA_ARGS__))
+F_Str8ArrayFromList(Arena, F_OS_Internal_ListOfEntriesInDirectories(Arena,  (f_internal_directory_options){ .Directories = {DirectoryPath},__VA_ARGS__ }))
 
 #define F_OS_ListOfFilesInDirectory(Arena, DirectoryPath, ...) \
-F_OS_Internal_ListOfEntriesInDirectories(Arena,  (f_internal_directory_options){ .Directories = {DirectoryPath}, .ExcludeDirectories = F_True, __VA_ARGS__ })
+F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ .Directories = {DirectoryPath}, .ExcludeDirectories = F_True, __VA_ARGS__ })
 
 #define F_OS_ArrayOfFilesInDirectory(Arena, DirectoryPath, ...) \
 F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, .Directories = {DirectoryPath}, .ExcludeDirectories = F_True, __VA_ARGS__))
@@ -666,7 +667,7 @@ f_build *F_BuildFromBuildOptions (f_memory_arena *Arena, f_build_options BuildOp
 
 f_build_cache F_BuildCacheFromOutputPath (f_group Group, f_memory_arena *Arena, f_str8 OutputPath);
 
-f_b32         F_HashIsInBuildCache (f_group Group, f_build_cache Cache, f_u64 Hash);
+f_b32         F_HashIsInBuildCache (f_build_cache Cache, f_u64 Hash);
 
 f_build_watch F_BuildWatchFromSourceFiles (f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
 
@@ -683,6 +684,7 @@ void F_Report(f_memory_arena *Arena, f_build_report Report);
 
 f_memory_arena *F_PArena();
 f_memory_arena *F_TArena();
+void F_ResetTArena();
 f_group F_DefaultGroup();
 
 f_b32 F_IsBuildLane();
@@ -1139,7 +1141,7 @@ F_Internal_ThreadEntry(ThreadParams)
 #error "Unsupported OS"
 #endif
 
-f_b32   F_IsCallerInGroup(f_group Group)
+f_b32 F_IsInGroup(f_group Group)
 {
 	return Group.ConditionToBeInGroup;
 }
@@ -1683,7 +1685,7 @@ f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f
 {
 		f_str8_array ObjectFiles = F_OS_ArrayOfEntriesInDirectory(
 		Arena, OutputPath, .ExcludeDirectories = F_True,
-		.FilterByExtension = F_Str8ArrayFromCStrs(Arena, ".o"),
+		.FilterByExtension = F_Str8ArrayFromCStrs(Arena, ".o")
 	);
 	f_build_cache Cache = {0};
 	if(Group.ID == 0) Cache.Items = F_ArenaPushArrayType(Arena, ObjectFiles.Count, f_u64);
@@ -1705,15 +1707,13 @@ f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f
 	return Cache;
 }
 
-f_b32 F_HashIsInBuildCache(f_group Group, f_build_cache Cache, f_u64 Hash)
+f_b32 F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
 {
-	f_b32 Found = F_False;
-	f_range Range = F_SplitRange(Group, Cache.Count);
-	for (f_s32 I = Range.Start; I < Range.End; I++)
+	for (f_s32 I = 0; I < Cache.Count; I++)
 	{
-		Found |= Cache.Items[I] == Hash;
+		if(Cache.Items[I] == Hash) return True;
 	}
-	return F_GroupAnyTrue(Group, Found);
+	return F_False;
 }
 
 f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready);
@@ -1922,7 +1922,7 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 	HANDLE FoundHandle;
 	for(f_s32 Directory = 0; Options.Directories[Directory] && Directory < 16; Directory++)
 	{
-		FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%s\\*", Options.Directories[Directory])), &FindData);
+		FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%.*s\\*", F_Expan(Options.Directories[Directory]))), &FindData);
 		if(FoundHandle == INVALID_HANDLE_VALUE) return Entries;
 		do
 		{
@@ -1957,9 +1957,9 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 		while (FindNextFile(FoundHandle, &FindData) && FoundHandle != INVALID_HANDLE_VALUE);
 	}
 #elif defined(OS_DARWIN)
-	for(f_s32 I = 0; Options.Directories[I] && I < 16; I++)
+	for(f_s32 I = 0; Options.Directories[I].Size > 0 && I < 16; I++)
 	{
-		DIR *Directory = opendir(Options.Directories[I]);
+		DIR *Directory = opendir(F_CStrFromStr8(F_TArena(), Options.Directories[I]));
 		struct dirent *Entry;
 		while((Entry = readdir(Directory)))
 		{
@@ -1987,7 +1987,7 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 			
 			if(Options.PrependPath)
 			{
-				F_Str8ListAppendF(Arena, &Entries, "%s/%s", Options.Directories[I], Entry->d_name);
+				F_Str8ListAppendF(Arena, &Entries, "%.*s/%s", F_Expand(Options.Directories[I]), Entry->d_name);
 			}
 			else
 			{
@@ -2226,10 +2226,9 @@ void F_WaitForProcess(f_process *Process)
 	if(Process->StdOutSinceLastPoll.Size > 0) F_Print(Process->StdOutSinceLastPoll);
 }
 
-void  F_WaitForMultipleProcesses(f_group Group, f_process *Processes, f_s32 ProcessCount)
+void  F_WaitForMultipleProcesses(f_process *Processes, f_s32 ProcessCount)
 {
-	f_range Range = F_SplitRange(Group, ProcessCount);
-	for (f_s32 I = Range.Start; I < Range.End; I++)
+	for (f_s32 I = 0; I < ProcessCount; I++)
 	{
 		F_WaitForProcess(Processes + I);
 	}
@@ -2383,7 +2382,7 @@ f_str8_array F_ObjectFilesFromCompilation(f_group Group, f_memory_arena *Arena, 
 
 void F_WaitForCompilation(f_group Group, f_compilation *Compilation)
 {
-	F_WaitForMultipleProcesses(Group, Compilation->Processes, Compilation->Count);
+	F_WaitForMultipleProcesses(Compilation->Processes, Compilation->Count);
 	f_b32 Succeeded = F_True;
 	f_range Range = F_SplitRange(Group, Compilation->Count);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
@@ -2446,7 +2445,7 @@ f_b32 F_UpdateBuild(f_build *Build)
 	{
 		f_str8_array RelevantFilesInDirectory = F_OS_ArrayOfFilesInDirectory(
 			F_TArena(),
-			F_CStrFromStr8(F_TArena(), Build->SourceDirectories.Items[I]),
+			Build->SourceDirectories.Items[I],
 			.PrependPath = F_True,
 			.FilterByExtension = F_Str8ArrayFromCStrs(F_PArena(), ".c", ".m", ".h")
 		);
@@ -2584,7 +2583,7 @@ void F_CompileNewAndChangedTUs
 		f_build_cache HackBuildCacheFixMe = {0};
 		HackBuildCacheFixMe.Items = Compilation->Hashes;
 		HackBuildCacheFixMe.Count = Compilation->Count;
-		if(F_HashIsInBuildCache(Group, HackBuildCacheFixMe, Compilation->Hashes[I])) continue;
+		if(F_HashIsInBuildCache(HackBuildCacheFixMe, Compilation->Hashes[I])) continue;
 
 		f_str8_list Args = {0};
 		{
