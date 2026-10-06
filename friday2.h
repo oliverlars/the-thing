@@ -415,11 +415,11 @@ typedef struct f_thread_entry_params
 f_thread_entry_params;
 
 #define F_ArenaPushType(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type), F_True)
-#define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)), F_True)
+#define F_ArenaPushArrayType(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, (Count) * (sizeof(Type)), F_True)
 #define F_ArenaPush(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush, F_True)
 
 #define F_ArenaPushTypeNoZero(Arena, Type) (Type*)F_Raw_ArenaPush(Arena, sizeof(Type), F_False)
-#define F_ArenaPushArrayTypeNoZero(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, Count * (sizeof(Type)), F_False)
+#define F_ArenaPushArrayTypeNoZero(Arena, Count, Type) (Type*)F_Raw_ArenaPush(Arena, (Count) * (sizeof(Type)), F_False)
 #define F_ArenaPushNoZero(Arena, BytesToPush) F_Raw_ArenaPush(Arena, BytesToPush, F_False)
 
 f_memory_arena *F_ArenaReserveButCommitFirstPage(f_s64 NumberOfBytesToReserve);
@@ -2230,7 +2230,7 @@ void  F_WaitForMultipleProcesses(f_process *Processes, f_s32 ProcessCount)
 {
 	for (f_s32 I = 0; I < ProcessCount; I++)
 	{
-		F_WaitForProcess(Processes + I);
+		if(Processes[I].ID > 0) F_WaitForProcess(Processes + I);
 	}
 }
 
