@@ -13,7 +13,7 @@ typedef struct app_memory
 	m_arena *PermanentArena;
 	m_arena *FrameArenas[2];
 	per_thread_context *ThreadContext;
-	os_window *Window;
+	os_window   Window;
 	embed_data *Berkeley;
 	embed_data *Lucide;
 	b32 GPULogging;

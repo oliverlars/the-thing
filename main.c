@@ -16,12 +16,52 @@ F_LaneEntry
 
 
 	app_memory App = {0};
+	App.PermanentArena = ArenaInitialise(F_GigaBytes(8));
+	App.FrameArenas[0] = ArenaInitialise(F_GigaBytes(8));
+	App.FrameArenas[1] = ArenaInitialise(F_GigaBytes(8));
+	
+	per_thread_context *Ctx = ArenaPushArrayZero(App.PermanentArena, per_thread_context, 1);
 
-	f_dll AppDLL = F_OS_DLLFromPath(F_Str8("build/app.dynlib"));
+	Ctx->ScratchArenas[0] = ArenaInitialise(MegaBytes(64));
+	Ctx->ScratchArenas[1] = ArenaInitialise(MegaBytes(64));
+	Ctx->TemporaryArena = App.FrameArenas[0];
+	Ctx->LogArena = ArenaInitialise(MegaBytes(8));
+	Ctx->Logger = LoggerInitialise(Ctx->LogArena);
+	
+
+	App.ThreadContext = Ctx;
+	SetThreadLocalContextPointer(Ctx);
+
+	App.Platform = (os_platform){
+    .LoadEntireFileIntoMemory = OS_LoadEntireFileIntoMemory,
+    .LastModified            = OS_LastModified,
+
+    .MousePosition = OS_MousePosition,
+    .MouseDown     = OS_MouseDown,
+    .MousePressed  = OS_MousePressed,
+    .MouseReleased = OS_MouseReleased,
+    .KeyDown       = OS_KeyDown,
+    .KeyPressed    = OS_KeyPressed,
+    .KeyReleased   = OS_KeyReleased,
+    .NextEvent     = OS_NextEvent,
+
+    .TimeStampNow              = OS_TimeStampNow,
+    .MilliSecondsFromTimeStamp = OS_MilliSecondsFromTimeStamp,
+
+    .NextDrawable = OS_NextDrawable,
+    .WindowWidth  = OS_WindowWidth,
+    .WindowHeight = OS_WindowHeight,
+
+    .MemoryReserve = MemoryReserve,
+    .MemoryCommit  = MemoryCommit,
+    .GetPageSize   = GetPageSize,
+	};
+
+	f_dll AppDLL = F_OS_DLLFromPath(F_Str8("build/app.dynlib0"));
 	void (*AppUpdate)(void *, v2i) = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
 
 	f_build_options BuildOptions = {0};
-
+	BuildOptions.CompileFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc");
 	BuildOptions.LinkFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc");
 	BuildOptions.Frameworks = F_Str8ArrayFromCStrs(F_PArena(), 
 		"Cocoa", "Metal", "QuartzCore"
@@ -39,10 +79,11 @@ F_LaneEntry
 	/*
 	app.c and app.h need moving to folders to make this new assumption work better
 	*/
-	BuildOptions.SourceDirectories = F_Str8ArrayFromCStrs(F_PArena(), "source/", "source/darwin/", "external/");
+	BuildOptions.SourceDirectories = F_Str8ArrayFromCStrs(F_PArena(), "source", "source/app", "source/darwin", "external");
 	BuildOptions.Kind = F_OUTPUT_DYNAMIC;
 
 	BuildOptions.Toolchain = F_TOOLCHAIN_CLANG;
+	BuildOptions.Debug = F_True;
 
 	assert(F_DefaultGroup().Count > 0);
 
@@ -53,19 +94,35 @@ F_LaneEntry
 		atomic_store_explicit(&Build->TUsToProcess, 3, memory_order_release);
 	}
 	Build = F_ReadFromGroupID(F_DefaultGroup(), 0, Build);
-	f_s32 FutureWork = 3;
 
 	f_group UpdateGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID == 0);
 	f_group BuildGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID > 0);
 	assert(UpdateGroup.Count == 1);
+	_Atomic(f_b32) *ShouldReload = 0;
+	_Atomic(f_u64) *NumberOfReloads = 0;
+	if(F_DefaultGroup().ID == 0)
+	{
+		ShouldReload = F_ArenaPushType(F_PArena(), _Atomic(f_b32));
+		NumberOfReloads = F_ArenaPushType(F_PArena(), _Atomic(f_u64));
+	}
+	ShouldReload = F_ReadFromGroupID(F_DefaultGroup(), 0, ShouldReload);
+	NumberOfReloads = F_ReadFromGroupID(F_DefaultGroup(), 0, NumberOfReloads);
 	for(;;)
 	{
 		if(F_IsInGroup(UpdateGroup))
 		{
-
-			//for(f_s32 I = 0; I < 100; I++) AppUpdate(&App, v2i(0, 0));
+			for(f_s32 I = 0; I < 60; I++)
+			{
+				OS_BeginFrame();
+				if(AppUpdate) AppUpdate(&App, v2i(1280, 720));
+				OS_EndFrame();
+			}
 			//printf("Finished Updating\n");
-
+			if(!AppUpdate || atomic_exchange(ShouldReload, F_False))
+			{
+				AppDLL = F_OS_DLLFromPath(F_Str8PushF(F_TArena(), "build/app.dynlib%llu", atomic_load(NumberOfReloads) - 1));
+				AppUpdate = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
+			}
 		}
 		if(F_IsInGroup(BuildGroup))
 		{
@@ -82,6 +139,7 @@ F_LaneEntry
 				 .Directories[0] = BuildOptions.SourceDirectories.Items[0],
 					.Directories[1] = BuildOptions.SourceDirectories.Items[1],
 					.Directories[2] = BuildOptions.SourceDirectories.Items[2],
+					.Directories[3] = BuildOptions.SourceDirectories.Items[3],
 				 .PrependPath = F_True,
 				 .FilterByExtension = F_Str8ArrayFromCStrs(F_TArena(), ".m", ".c")
 				);
@@ -135,18 +193,17 @@ F_LaneEntry
 
 					F_StartProcess(F_TArena(), Processes + I - SourceFileRange.Start, Args);
 				}
-				F_WaitForMultipleProcesses(Processes, SourceFileRange.End - SourceFileRange.Start);
 			}
+			F_WaitForMultipleProcesses(Processes, SourceFileRange.End - SourceFileRange.Start);
 			ShouldLinkTUs = F_GroupAnyTrue(BuildGroup, ShouldLinkTUs);
 			F_GroupBarrier(BuildGroup);
 
-			if(ShouldLinkTUs && BuildGroup.ID == 0)
+			if((ShouldLinkTUs || !AppUpdate) && BuildGroup.ID == 0)
 			{
-	
 				f_str8 OutputPath = {0};
 				if(BuildOptions.OutputPath.Size > 0)
 				{
-					OutputPath = F_Str8PushF(F_TArena(), "%.*s/%.*s", F_Expand(BuildOptions.OutputPath), F_Expand(BuildOptions.OutputName));
+					OutputPath = F_Str8PushF(F_TArena(), "%.*s/%.*s%llu", F_Expand(BuildOptions.OutputPath), F_Expand(BuildOptions.OutputName), atomic_fetch_add(NumberOfReloads, 1));
 				}
 				else
 				{
@@ -186,6 +243,19 @@ F_LaneEntry
 				f_process LinkProcess = {0};
 				F_StartProcess(F_TArena(), &LinkProcess, Args);
 				F_WaitForProcess(&LinkProcess);
+
+				f_process DSYMProcess = {0};
+				f_str8_list DSymArgs = {0};
+				F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("dsymutil"));
+				F_Str8ListAppend(F_TArena(), &DSymArgs, OutputPath);
+				F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("-o"));
+				F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8PushF(F_TArena(), "%.*s.dSYM", F_Expand(OutputPath)));
+
+				F_StartProcess(F_TArena(), &DSYMProcess, DSymArgs);
+				
+				F_WaitForProcess(&DSYMProcess);
+
+				atomic_store(ShouldReload, F_True);
 
 				F_Print(F_Str8("LINKING!!! "));
 				F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));

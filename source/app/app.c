@@ -25,7 +25,7 @@ typedef struct app_state
 	int FrameArenaIndex;
 	render_context Render;
 	draw_context Draw;
-	os_window *Window;
+	os_window Window;
 	d_font Font;
 	d_font LucideFont;
 	u64 StartTime;
@@ -58,12 +58,12 @@ void Init(app_state *App, m_arena *PermanentArena)
 	App->Window = OS_MakeWindow(Str8("the thing"), 1280, 720);
 
 	r_init_options Opts = {
-		.Device = App->Window->Device,
-		.Layer = App->Window->Layer,
+		.Device = App->Window.Device,
+		.Layer = App->Window.Layer,
 		.ShaderDir = Str8("shaders"),
 		.Logging = False,
 	};
-	R_Init(&App->Render, PermanentArena, v2i(App->Window->Width, App->Window->Height), Opts);
+	R_Init(&App->Render, PermanentArena, v2i(App->Window.Width, App->Window.Height), Opts);
 
 	App->Draw.Arena = PermanentArena;
 	App->Draw.Render = &App->Render;
@@ -76,7 +76,7 @@ void Init(app_state *App, m_arena *PermanentArena)
 	App->UI.Draw = &App->Draw;
 	App->UI.Font = App->Font;
 	App->UI.IconFont = App->LucideFont;
-	App->UI.Window = App->Window;
+	App->UI.Window = &App->Window;
 }
 
 void AppUpdate(void *UserData, v2i ViewportSize)
@@ -95,6 +95,9 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 		App->FrameArenas[1] = Memory->FrameArenas[1];
 		Init(App, Memory->PermanentArena);
 	}
+
+	if(!OS_UpdateWindow(&App->Window))
+    return;
 
 	App->FrameArenaIndex = 1 - App->FrameArenaIndex;
 	m_arena *Frame = App->FrameArenas[App->FrameArenaIndex];
@@ -116,7 +119,7 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 	f32 H = (f32)ViewportSize.Y;
 
 	// Light follows the mouse cursor; .z hovers it above the screen plane.
-	v2f Mouse = Platform.MousePosition(App->Window);
+	v2f Mouse = Platform.MousePosition(&App->Window);
 	v3f LightPos = v3f(Mouse.X, Mouse.Y, 200.0f);
 	R_SetLight(&App->Render, LightPos, v3f(1.0f, 1.0f, 1.0f), 1.0, 400.0f);
 
@@ -306,7 +309,8 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 		static f32 Extrusion = 1.0;
 
 		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
-		D_Str8(&App->Draw, Str8("HELLO, WORLD!"),
+
+		D_Str8(&App->Draw, Str8("abc 123"),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.90f, 0),
 			.HeightInPixels = 64.0f,
@@ -349,5 +353,5 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 		// UI_End(&App->UI);
 	}
 
-	R_Update(&App->Render, Platform.NextDrawable(App->Window), Screen);
+	R_Update(&App->Render, Platform.NextDrawable(&App->Window), Screen);
 }
