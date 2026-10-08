@@ -206,7 +206,7 @@ void AppUpdate(void *UserData)
 	                         M44FromXAngle((f32)App->Render.Frame / 100.0 * 0.6f));
 	m44f View  = M44FLookAt(v3f(0, 0, 3), v3f(0, 0, 0), v3f(0, 1, 0));
 	f32 Aspect = (f32)ViewportSize.Y / (f32)ViewportSize.X;
-	m44f Proj  = PerspectiveMetal(Aspect, 50.0f, 0.1f, 100.0f);
+	m44f Proj  = PerspectiveMetal(Aspect, 40.0f, 0.1f, 100.0f);
 	m44f PVM   = MulM44FM44F(MulM44FM44F(Model, View), Proj);
 
 	f32 ShapeY = H * 0.12f;
@@ -311,7 +311,7 @@ void AppUpdate(void *UserData)
 
 		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
 
-		D_Str8(&App->Draw, Str8("abc 1"),
+		D_Str8(&App->Draw, Str8("yeah"),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.90f, 0),
 			.HeightInPixels = 64.0f,

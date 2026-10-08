@@ -104,6 +104,7 @@ F_LaneEntry
 	{
 		ShouldReload = F_ArenaPushType(F_PArena(), _Atomic(f_b32));
 		NumberOfReloads = F_ArenaPushType(F_PArena(), _Atomic(f_u64));
+		atomic_init(NumberOfReloads, 1);
 	}
 	ShouldReload = F_ReadFromGroupID(F_DefaultGroup(), 0, ShouldReload);
 	NumberOfReloads = F_ReadFromGroupID(F_DefaultGroup(), 0, NumberOfReloads);
@@ -118,7 +119,7 @@ F_LaneEntry
 				OS_EndFrame();
 			}
 			//printf("Finished Updating\n");
-			if(!AppUpdate || atomic_exchange(ShouldReload, F_False))
+			if (!AppUpdate || atomic_exchange(ShouldReload, F_False))
 			{
 				AppDLL = F_OS_DLLFromPath(F_Str8PushF(F_TArena(), "build/app.dynlib%llu", atomic_load(NumberOfReloads) - 1));
 				AppUpdate = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
@@ -260,8 +261,9 @@ F_LaneEntry
 				F_Print(F_Str8("LINKING!!! "));
 				F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
 			}
+
+			F_GroupBarrier(BuildGroup);
 		}
 		F_ResetTArena();
-		F_GroupBarrier(F_DefaultGroup());
 	}
 }
