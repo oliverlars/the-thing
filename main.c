@@ -58,7 +58,7 @@ F_LaneEntry
 	};
 
 	f_dll AppDLL = F_OS_DLLFromPath(F_Str8("build/app.dynlib0"));
-	void (*AppUpdate)(void *, v2i) = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
+	void (*AppUpdate)(void *) = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
 
 	f_build_options BuildOptions = {0};
 	BuildOptions.CompileFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc");
@@ -111,10 +111,10 @@ F_LaneEntry
 	{
 		if(F_IsInGroup(UpdateGroup))
 		{
-			for(f_s32 I = 0; I < 60; I++)
+			for(;!atomic_load(ShouldReload);)
 			{
 				OS_BeginFrame();
-				if(AppUpdate) AppUpdate(&App, v2i(1280, 720));
+				if(AppUpdate) AppUpdate(&App);
 				OS_EndFrame();
 			}
 			//printf("Finished Updating\n");

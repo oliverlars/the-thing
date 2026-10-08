@@ -79,7 +79,7 @@ void Init(app_state *App, m_arena *PermanentArena)
 	App->UI.Window = &App->Window;
 }
 
-void AppUpdate(void *UserData, v2i ViewportSize)
+void AppUpdate(void *UserData)
 {
 	app_memory *Memory = (app_memory*)UserData;
 	app_state *App = Memory->AppState;
@@ -104,7 +104,8 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 	ArenaReset(Frame);
 	SetTemporaryArena(Frame);
 
-	App->Draw.ViewportSize = v2f(ViewportSize.X, ViewportSize.Y);
+	v2i ViewportSize = v2i(App->Window.Width, App->Window.Height);
+
 	App->Render.TransformCount = 0;
 	App->Render.ScissorCount = 0;
 
@@ -310,7 +311,7 @@ void AppUpdate(void *UserData, v2i ViewportSize)
 
 		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
 
-		D_Str8(&App->Draw, Str8("abc 123"),
+		D_Str8(&App->Draw, Str8("abc 1"),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.90f, 0),
 			.HeightInPixels = 64.0f,

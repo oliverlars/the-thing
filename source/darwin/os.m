@@ -332,8 +332,8 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 		[NSApp activateIgnoringOtherApps:YES];
 
 		os_window Result = {0};
-		Result.Width     = Width;
-		Result.Height    = Height;
+		Result.Width  = (int)Layer.drawableSize.width;
+		Result.Height = (int)Layer.drawableSize.height;
 		Result.Title     = Name;
 		Result.Handle    = (__bridge_retained void*)Window;
 		Result.MetalView = (__bridge void*)GlobalView;
@@ -417,7 +417,8 @@ b32 OS_UpdateWindow(os_window *Window)
 
 			if (GlobalAppDelegate.ShouldQuit) return False;
 
-			v2i Size = v2i(OS_WindowWidth(Window), OS_WindowHeight(Window));
+			Window->Width  = OS_WindowWidth(Window);
+			Window->Height = OS_WindowHeight(Window);
 		}
 	}
 	return True;
