@@ -277,7 +277,8 @@ f_build_status;
 
 typedef struct f_build_cache
 {
-	f_u64 *Items;
+	f_u64 *Objects;
+	f_b32 *NeededObjects;
 	f_s64  Count;
 }
 f_build_cache;
@@ -1688,7 +1689,11 @@ f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f
 		.FilterByExtension = F_Str8ArrayFromCStrs(Arena, ".o")
 	);
 	f_build_cache Cache = {0};
-	if(Group.ID == 0) Cache.Items = F_ArenaPushArrayType(Arena, ObjectFiles.Count, f_u64);
+	if(Group.ID == 0)
+	{
+		Cache.Objects = F_ArenaPushArrayType(Arena, ObjectFiles.Count, f_u64);
+		Cache.NeededObjects = F_ArenaPushArrayType(Arena, ObjectFiles.Count, f_b32);
+	}
 	Cache.Count = ObjectFiles.Count;
 	Cache = F_ReadFromGroupID(Group, 0, Cache);
 	f_range Range = F_SplitRange(Group, ObjectFiles.Count);
@@ -1702,7 +1707,7 @@ f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f
 		{
 			Hash = HashAsString.Bytes[I] - '0' + Hash*10;
 		}
-		Cache.Items[I] = Hash;
+		Cache.Objects[I] = Hash;
 	}
 	return Cache;
 }
@@ -1711,8 +1716,13 @@ f_b32 F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
 {
 	for (f_s32 I = 0; I < Cache.Count; I++)
 	{
-		if(Cache.Items[I] == Hash) return True;
+		if(Cache.Objects[I] == Hash)
+		{
+			Cache.NeededObjects[I] = F_True;
+			return True;
+		}
 	}
+
 	return F_False;
 }
 
@@ -2519,100 +2529,6 @@ void F_UpdateTU(f_memory_arena *Arena, f_compilation *Compilation, f_translation
 	F_Print(F_Str8("\n"));
 
 	F_StartProcess(Arena, &TU->Process, Args);
-}
-
-void F_CompileNewAndChangedTUs
-(
-	f_group             Group,
-	f_memory_arena     *Arena,
-	f_compilation      *Compilation,
-	f_compile_options CompileOptions,
-	f_str8_array      SourceFiles,
-	f_toolchain       Toolchain
-)
-{
-
-	if(Group.ID == 0 && Compilation->Status == F_NOT_STARTED_COMPILING)
-	{
-		Compilation->CompileOptionsHash = F_HashCompileOptions(CompileOptions);
-		Compilation->Count = SourceFiles.Count;
-
-		Compilation->SourcePaths = F_ArenaPushArrayType(Arena, Compilation->Count, f_str8);
-		Compilation->Hashes = F_ArenaPushArrayType(Arena, Compilation->Count, f_u64);
-		Compilation->ObjectPaths = F_ArenaPushArrayType(Arena, Compilation->Count, f_str8);
-		Compilation->Processes = F_ArenaPushArrayType(Arena, Compilation->Count, f_process);
-
-		Compilation->TUs = F_ArenaPushArrayType(Arena, Compilation->Count, f_translation_unit);
-		
-	}
-
-	if(Compilation->Status == F_NOT_STARTED_COMPILING)
-	{
-		// Don't need this function, should just do it inline
-		f_build_watch BuildWatch = F_BuildWatchFromSourceFiles(Arena, SourceFiles, CompileOptions.IncludePaths);
-		Compilation->TUs = BuildWatch.TUs;
-	}
-
-	*Compilation = F_ReadFromGroupID(Group, 0, *Compilation);
-
-	// HACK: Remove this concept!
-	f_build_watch HackBuildWatchFixMe = {0};
-	HackBuildWatchFixMe.TUs = Compilation->TUs;
-	HackBuildWatchFixMe.TUCount = Compilation->Count;
-
-	f_b32 *TUsChanged = F_MaskOfTUsChanged(Group, F_TArena(), HackBuildWatchFixMe, 100);
-
-	if(Compilation->Status != F_NOT_STARTED_COMPILING) Compilation->Status = F_NOTHING_TO_COMPILE;
-
-	f_range Range = F_SplitRange(Group, SourceFiles.Count);
-	for (f_s32 I = Range.Start; I < Range.End; I++)
-	{
-		if(Compilation->Status != F_NOT_STARTED_COMPILING && !TUsChanged[I]) continue;
-
-		Compilation->SourcePaths[I] = SourceFiles.Items[I];
-		Compilation->Hashes[I] = F_TUHash(SourceFiles.Items[I], CompileOptions);
-		if(CompileOptions.OutputPath.Size > 0)
-		{
-			Compilation->ObjectPaths[I] = F_Str8PushF(Arena, "%.*s/%llu.o", F_Expand(CompileOptions.OutputPath), Compilation->Hashes[I]);
-		}
-		else
-		{
-			Compilation->ObjectPaths[I] = F_Str8PushF(Arena, "%llu.o", Compilation->Hashes[I]);
-		}
-
-		f_build_cache HackBuildCacheFixMe = {0};
-		HackBuildCacheFixMe.Items = Compilation->Hashes;
-		HackBuildCacheFixMe.Count = Compilation->Count;
-		if(F_HashIsInBuildCache(HackBuildCacheFixMe, Compilation->Hashes[I])) continue;
-
-		f_str8_list Args = {0};
-		{
-			F_Str8ListAppend(F_TArena(), &Args, Toolchain.CompilerPath);
-			F_Str8ListAppend(F_TArena(), &Args, Toolchain.CompileOnlyFlag);
-			F_Str8ListAppend(F_TArena(), &Args, SourceFiles.Items[I]);
-
-			if(CompileOptions.Debug)
-			{
-				F_Str8ListAppendF(F_TArena(), &Args, "%.*s", F_Expand(Toolchain.DebugFlag));
-			}
-
-			for(int I = 0; I < CompileOptions.ExtraFlags.Count; I++)
-			{
-				F_Str8ListAppend(F_TArena(), &Args, CompileOptions.ExtraFlags.Items[I]);
-			}
-
-			F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(Toolchain.OutputFlag), F_Expand(Compilation->ObjectPaths[I]));
-
-			for(int I = 0; I < CompileOptions.IncludePaths.Count; I++)
-			{
-				F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(Toolchain.IncludeFlag), F_Expand(CompileOptions.IncludePaths.Items[I]));
-			}
-		}
-		Compilation->Status = F_COMPILING;
-		F_StartProcess(Arena, Compilation->Processes + I, Args);
-	}
-
-	if(Compilation->Status == F_COMPILING) F_PollCompilation(Group, Compilation);
 }
 
 void F_WaitForLinking(f_link *Link)

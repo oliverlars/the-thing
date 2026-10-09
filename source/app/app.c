@@ -223,6 +223,7 @@ void AppUpdate(void *UserData)
 		.Depth = TestDepth, .DepthOp = LO_CLEAR, .ClearDepth = 1.0,
 		.Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 0)
 	)
+
 	{
 		R_BindBuffer(&App->Render, CubeVertexPositionsBuffer);
 		R_BindBuffer(&App->Render, CubeVertexColoursBuffer);
@@ -234,7 +235,7 @@ void AppUpdate(void *UserData)
 	R_Pass(&App->Render, Str8("Cube Horizontal Blur"), .Colours[0] = Temp, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 0))
 	{
 		R_UniformV2F(&App->Render, Str8("Direction"), v2f(1, 0));
-		R_UniformF32(&App->Render, Str8("Radius"), 20);
+		R_UniformF32(&App->Render, Str8("Radius"), 50);
 		R_BindTexture(&App->Render, Str8("Texture"), TestTexture);
 		R_Draw(&App->Render, Str8("blur.metal"), 6, R_TRIANGLES);
 	}
@@ -311,11 +312,21 @@ void AppUpdate(void *UserData)
 
 		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
 
-		D_Str8(&App->Draw, Str8("yeah"),
+		D_Str8(
+			&App->Draw, Str8("abc"),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.90f, 0),
 			.HeightInPixels = 64.0f,
-			.Colour = v4f(1, 1, 1, 1));
+			.Colour = v4f(1, 1, 1, 1)
+		);
+
+		D_Str8(
+			&App->Draw, Str8(":D abc 23"),
+			.Font = App->Font,
+			.Position = v3f(W * 0.55f, H * 0.85f, 0),
+			.HeightInPixels = 64.0f,
+			.Colour = v4f(1, 1, 1, 1)
+		);
 
 		// UI_Begin(&App->UI);
 		// UI_PANEL(&App->UI, v2f(0, 0), v2f(ViewportSize.X/2.0, ViewportSize.Y/1.50))

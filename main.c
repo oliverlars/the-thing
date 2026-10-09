@@ -1,10 +1,3 @@
-#include "misc.h"
-#include "memory.h"
-#include "strings.h"
-#include "log.h"
-#include "maths.h"
-#include "os.h"
-
 #include "app.h"
 
 #define FRIDAY_IMPLEMENTATION
@@ -87,14 +80,6 @@ F_LaneEntry
 
 	assert(F_DefaultGroup().Count > 0);
 
-	f_build *Build = 0;
-	if(F_DefaultGroup().ID == 0)
-	{
-		Build = F_BuildFromBuildOptions(F_PArena(), BuildOptions);
-		atomic_store_explicit(&Build->TUsToProcess, 3, memory_order_release);
-	}
-	Build = F_ReadFromGroupID(F_DefaultGroup(), 0, Build);
-
 	f_group UpdateGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID == 0);
 	f_group BuildGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID > 0);
 	assert(UpdateGroup.Count == 1);
@@ -118,7 +103,6 @@ F_LaneEntry
 				if(AppUpdate) AppUpdate(&App);
 				OS_EndFrame();
 			}
-			//printf("Finished Updating\n");
 			if (!AppUpdate || atomic_exchange(ShouldReload, F_False))
 			{
 				AppDLL = F_OS_DLLFromPath(F_Str8PushF(F_TArena(), "build/app.dynlib%llu", atomic_load(NumberOfReloads) - 1));
@@ -132,6 +116,7 @@ F_LaneEntry
 			
 			f_str8_array  SourceFiles = {0};
 			f_str8_array  ObjectFiles = {0};
+			f_str8_array  ObjectFilesToDelete = {0};
 			f_b32 ShouldLinkTUs = F_False;
 			if(BuildGroup.ID == 0) 
 			{
@@ -166,6 +151,7 @@ F_LaneEntry
 				ObjectFiles.Items[I] = ObjectPath;
 				if(!F_HashIsInBuildCache(BuildCache, Hash))
 				{
+
 					ShouldLinkTUs = F_True;
 					f_str8_list Args = {0};
 
@@ -201,6 +187,7 @@ F_LaneEntry
 
 			if((ShouldLinkTUs || !AppUpdate) && BuildGroup.ID == 0)
 			{
+				
 				f_str8 OutputPath = {0};
 				if(BuildOptions.OutputPath.Size > 0)
 				{
@@ -260,6 +247,15 @@ F_LaneEntry
 
 				F_Print(F_Str8("LINKING!!! "));
 				F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
+			}
+
+			f_range BuildCacheRange = F_SplitRange(BuildGroup, BuildCache.Count);
+			for(f_s32 I = BuildCacheRange.Start; I < BuildCacheRange.End; I++)
+			{
+				if(!BuildCache.NeededObjects[I])
+				{
+					F_OS_DeleteFile(F_TArena(), F_Str8PushF(F_TArena(), "build/%llu.o", BuildCache.Objects[I]));
+				}
 			}
 
 			F_GroupBarrier(BuildGroup);
