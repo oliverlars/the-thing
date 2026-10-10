@@ -9,7 +9,6 @@
 
 typedef struct app_memory
 {
-	os_platform Platform;
 	m_arena *PermanentArena;
 	m_arena *FrameArenas[2];
 	per_thread_context *ThreadContext;
@@ -23,5 +22,3 @@ typedef struct app_memory
 	u32  StateVersion;
 	b32  Reloaded;
 } app_memory;
-
-os_platform Platform;

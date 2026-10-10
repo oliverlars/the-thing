@@ -138,35 +138,3 @@ f32 OS_MilliSecondsFromTimeStamp(u64 TimeStamp);
 
 str8 OS_LoadEntireFileIntoMemory(m_arena *Arena, str8 Filename);
 u64 OS_LastModified(str8 Path);
-
-// Needed because of the macro v2f(...)
-typedef v2f  os_mouse_position(os_window *Window);
-
-typedef struct os_platform 
-{
-	str8 (*LoadEntireFileIntoMemory)(m_arena *Arena, str8 Filename);
-	u64  (*LastModified)(str8 Path);
-
-	os_mouse_position *MousePosition;
-	b32  (*MouseDown)(int Button);
-	b32  (*MousePressed)(int Button);
-	b32  (*MouseReleased)(int Button);
-	b32  (*KeyDown)(int Key);
-	b32  (*KeyPressed)(int Key);
-	b32  (*KeyReleased)(int Key);
-	b32  (*NextEvent)(os_window *Window, os_event *Out);
-
-	u64  (*TimeStampNow)(void);
-	f32  (*MilliSecondsFromTimeStamp)(u64 TimeStamp);
-
-	void *(*NextDrawable)(os_window *Window);
-	int   (*WindowWidth)(os_window *Window);
-	int   (*WindowHeight)(os_window *Window);
-
-	u8  *(*MemoryReserve)(s64 Bytes);
-	void (*MemoryCommit)(void *Address, s64 Bytes);
-	u64  (*GetPageSize)(void);
-}
-os_platform;
-
-extern os_platform Platform;

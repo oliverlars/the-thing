@@ -71,7 +71,7 @@ void Init(app_state *App, m_arena *PermanentArena)
 	App->Font = D_LoadFontFromTTF(&App->Draw, G_BerkeleyMono.Data);
 	App->LucideFont = D_LoadFontFromTTF(&App->Draw, G_Lucide.Data);
 
-	App->StartTime = Platform.TimeStampNow();
+	App->StartTime = OS_TimeStampNow();
 
 	App->UI.Draw = &App->Draw;
 	App->UI.Font = App->Font;
@@ -83,7 +83,6 @@ void AppUpdate(void *UserData)
 {
 	app_memory *Memory = (app_memory*)UserData;
 	app_state *App = Memory->AppState;
-	Platform = Memory->Platform;
 	SetThreadLocalContextPointer(Memory->ThreadContext);
 
 	if(!App)
@@ -120,7 +119,7 @@ void AppUpdate(void *UserData)
 	f32 H = (f32)ViewportSize.Y;
 
 	// Light follows the mouse cursor; .z hovers it above the screen plane.
-	v2f Mouse = Platform.MousePosition(&App->Window);
+	v2f Mouse = OS_MousePosition(&App->Window);
 	v3f LightPos = v3f(Mouse.X, Mouse.Y, 200.0f);
 	R_SetLight(&App->Render, LightPos, v3f(1.0f, 1.0f, 1.0f), 1.0, 400.0f);
 
@@ -304,7 +303,7 @@ void AppUpdate(void *UserData)
 				.Extrusion = 1.0);
 		}
 
-		f32 ElapsedSec = Platform.MilliSecondsFromTimeStamp(Platform.TimeStampNow() - App->StartTime) * 0.001f;
+		f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
 		v4f CapsuleColours[2] = { v4f(1.0f, 0.4f, 0.0f, 1), v4f(0.8f, 0.35f, 0.0f, 1) };
 		static b32 Clicked = False;
 		static f32 ExtrusionTarget = 1.0;
@@ -365,5 +364,5 @@ void AppUpdate(void *UserData)
 		// UI_End(&App->UI);
 	}
 
-	R_Update(&App->Render, Platform.NextDrawable(&App->Window), Screen);
+	R_Update(&App->Render, OS_NextDrawable(&App->Window), Screen);
 }

@@ -105,7 +105,7 @@ ui_signal UI_Interact(ui_context *UI, ui_widget *Widget)
 {
 	ui_signal Signal = {0};
 
-	v2f MousePosition = Platform.MousePosition(UI->Window);
+	v2f MousePosition = OS_MousePosition(UI->Window);
 
 	MousePosition.Y = UI->Draw->ViewportSize.Y - MousePosition.Y;
 
@@ -113,7 +113,7 @@ ui_signal UI_Interact(ui_context *UI, ui_widget *Widget)
 	{
 		Signal.Hovered = True;
 		Widget->HoverAnimation.Target = 1.0;
-		if(Platform.MouseDown(OS_MOUSE_LEFT))
+		if(OS_MouseDown(OS_MOUSE_LEFT))
 		{
 			UI->Active = Widget->Key;
 			Widget->ActiveAnimation.Target = 1.0;
@@ -127,7 +127,7 @@ ui_signal UI_Interact(ui_context *UI, ui_widget *Widget)
 	if(UI->Active == Widget->Key)
 	{
 		Signal.Pressed = True;
-		if(Platform.MouseReleased(OS_MOUSE_LEFT))
+		if(OS_MouseReleased(OS_MOUSE_LEFT))
 		{
 			Signal.Clicked = True;
 			UI->Active = 0;

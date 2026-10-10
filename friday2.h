@@ -338,17 +338,8 @@ f_compilation_status;
 
 typedef struct f_build
 {
-	f_memory_arena     *Arena;
-	f_translation_unit *TUs;
-	f_u64               TUCount;
-
-	f_str8_array        SourceDirectories;
-	f_u64               PrevHashOfAllFiles;
-
-	f_u64               TimeOfLastCheck;
-
-	_Atomic(f_s64) TUsToProcess;
-	_Atomic(f_s64) NextTU;
+	_Atomic(f_u64) TotalSuccessfulBuilds;
+	_Atomic(f_b32) WasBuiltSuccessfully;
 }
 f_build;
 
@@ -686,16 +677,17 @@ f_s64 F_OS_NumberOFHighPerformanceCPUs (void);
 void F_Internal_LaneEntry();
 
 
-f_build *F_BuildFromBuildOptions (f_memory_arena *Arena, f_build_options BuildOptions);
+f_build *F_BuildFromGroup (f_memory_arena *Arena, f_group Group);
+void     F_UpdateBuild    (f_group Group, f_build *Build, f_build_options *BuildOptions);
+f_b32    F_NeedsReloading (f_build *Build);
+
+
 
 f_build_cache F_BuildCacheFromOutputPath (f_group Group, f_memory_arena *Arena, f_str8 OutputPath);
 
 f_b32         F_HashIsInBuildCache (f_build_cache Cache, f_u64 Hash);
 
 f_build_watch F_BuildWatchFromSourceFiles (f_memory_arena *Arena, f_str8_array SourceFilePaths, f_str8_array IncludePaths);
-
-
-f_b32 F_UpdateBuild (f_build *Build);
 
 void F_UpdateTU(f_memory_arena *Arena, f_compilation *Compilation, f_translation_unit *TU, f_compile_options CompileOptions, f_toolchain Toolchain);
 
@@ -1704,6 +1696,181 @@ void F_OS_ReleaseFile(f_file *File)
 	File->Handle = 0;
 }
 
+f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
+{
+	f_build *Build = 0;
+	if(Group.ID == 0)
+	{
+		Build = F_ArenaPushType(Arena, f_build);
+		atomic_init(&Build->TotalSuccessfulBuilds, 1);
+	}
+	Build = F_ReadFromGroupID(Group, 0, Build);
+
+	return Build;
+}
+
+void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
+{
+	if(!F_IsInGroup(Group)) return;
+	f_build_cache BuildCache = F_BuildCacheFromOutputPath(Group, F_TArena(), F_Str8("build/"));
+	
+	f_str8_array  SourceFiles = {0};
+	f_str8_array  ObjectFiles = {0};
+	f_str8_array  ObjectFilesToDelete = {0};
+	f_b32 ShouldLinkTUs = F_False;
+	if(Group.ID == 0) 
+	{
+		SourceFiles = F_OS_ArrayOfEntriesInDirectories(
+			F_TArena(), 
+			.Directories[0] = BuildOptions->SourceDirectories.Items[0],
+			.Directories[1] = BuildOptions->SourceDirectories.Items[1],
+			.Directories[2] = BuildOptions->SourceDirectories.Items[2],
+			.Directories[3] = BuildOptions->SourceDirectories.Items[3],
+			.PrependPath = F_True,
+			.FilterByExtension = F_Str8ArrayFromCStrs(F_TArena(), ".m", ".c")
+		);
+		ObjectFiles.Items = F_ArenaPushArrayType(F_TArena(), SourceFiles.Count, f_str8);
+		ObjectFiles.Count = SourceFiles.Count;
+	}
+	SourceFiles = F_ReadFromGroupID(Group, 0, SourceFiles);
+	ObjectFiles = F_ReadFromGroupID(Group, 0, ObjectFiles);
+	f_range SourceFileRange = F_SplitRange(Group, SourceFiles.Count);
+	f_process *Processes = F_ArenaPushArrayType(F_TArena(), SourceFileRange.End - SourceFileRange.Start, f_process);
+	for(f_s32 I = SourceFileRange.Start; I < SourceFileRange.End; I++)
+	{
+		f_u64 Hash = F_HashSourceAndIncludes(F_TArena(), SourceFiles.Items[I], BuildOptions->IncludeDirectories);
+		f_str8 ObjectPath = {0};
+		if(BuildOptions->OutputPath.Size > 0)
+		{
+			ObjectPath = F_Str8PushF(F_TArena(), "%.*s/%llu.o", F_Expand(BuildOptions->OutputPath), Hash);
+		}
+		else
+		{
+			ObjectPath = F_Str8PushF(F_TArena(), "%llu.o", Hash);
+		}
+		ObjectFiles.Items[I] = ObjectPath;
+		if(!F_HashIsInBuildCache(BuildCache, Hash))
+		{
+
+			ShouldLinkTUs = F_True;
+			f_str8_list Args = {0};
+
+			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
+			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompileOnlyFlag);
+			F_Str8ListAppend(F_TArena(), &Args, SourceFiles.Items[I]);
+
+			if(BuildOptions->Debug)
+			{
+				F_Str8ListAppendF(F_TArena(), &Args, "%.*s", F_Expand(BuildOptions->Toolchain.DebugFlag));
+			}
+
+			for(int I = 0; I < BuildOptions->CompileFlags.Count; I++)
+			{
+				F_Str8ListAppend(F_TArena(), &Args, BuildOptions->CompileFlags.Items[I]);
+			}
+
+			F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(BuildOptions->Toolchain.OutputFlag), F_Expand(ObjectPath));
+
+			for(int I = 0; I < BuildOptions->IncludeDirectories.Count; I++)
+			{
+				F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(BuildOptions->Toolchain.IncludeFlag), F_Expand(BuildOptions->IncludeDirectories.Items[I]));
+			}
+			F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
+			F_Print(F_Str8("\n"));
+
+			F_StartProcess(F_TArena(), Processes + I - SourceFileRange.Start, Args);
+		}
+	}
+	F_WaitForMultipleProcesses(Processes, SourceFileRange.End - SourceFileRange.Start);
+	ShouldLinkTUs = F_GroupAnyTrue(Group, ShouldLinkTUs);
+	F_GroupBarrier(Group);
+
+	if((ShouldLinkTUs) && Group.ID == 0)
+	{
+		
+		f_str8 OutputPath = {0};
+		if(BuildOptions->OutputPath.Size > 0)
+		{
+			OutputPath = F_Str8PushF(F_TArena(), "%.*s/%.*s%llu", F_Expand(BuildOptions->OutputPath), F_Expand(BuildOptions->OutputName), atomic_fetch_add(&Build->TotalSuccessfulBuilds, 1));
+		}
+		else
+		{
+			OutputPath = F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->OutputName));
+		}
+
+		f_str8_list Args = {0};
+
+		F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
+
+		for(int I = 0; I < BuildOptions->LinkFlags.Count; I++)
+		{
+			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->LinkFlags.Items[I]);
+		}
+
+		for(int I = 0; I < BuildOptions->Frameworks.Count; I++)
+		{
+			F_Str8ListAppend(F_TArena(), &Args, F_Str8("-framework"));
+			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Frameworks.Items[I]);
+		}
+
+		if(BuildOptions->Kind == F_OUTPUT_DYNAMIC)
+		{
+			F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->Toolchain.DynamicFlag)));
+		}
+		else if(BuildOptions->Kind == F_OUTPUT_STATIC)
+		{
+			F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->Toolchain.StaticFlag)));
+		}
+
+		F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s%.*s", F_Expand(BuildOptions->Toolchain.OutputFlag), OutputPath));
+		
+		for(int I = 0; I < ObjectFiles.Count; I++)
+		{
+			F_Str8ListAppend(F_TArena(), &Args, ObjectFiles.Items[I]);
+		}
+		f_process LinkProcess = {0};
+		F_StartProcess(F_TArena(), &LinkProcess, Args);
+		F_WaitForProcess(&LinkProcess);
+
+		f_process DSYMProcess = {0};
+		f_str8_list DSymArgs = {0};
+		F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("dsymutil"));
+		F_Str8ListAppend(F_TArena(), &DSymArgs, OutputPath);
+		F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("-o"));
+		F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8PushF(F_TArena(), "%.*s.dSYM", F_Expand(OutputPath)));
+
+		F_StartProcess(F_TArena(), &DSYMProcess, DSymArgs);
+		
+		F_WaitForProcess(&DSYMProcess);
+
+		atomic_store(&Build->WasBuiltSuccessfully, F_True);
+
+		F_Print(F_Str8("LINKING!!! "));
+		F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
+	}
+
+	f_range BuildCacheRange = F_SplitRange(Group, BuildCache.Count);
+	for(f_s32 I = BuildCacheRange.Start; I < BuildCacheRange.End; I++)
+	{
+		if(!BuildCache.NeededObjects[I])
+		{
+			F_OS_DeleteFile(F_TArena(), F_Str8PushF(F_TArena(), "build/%llu.o", BuildCache.Objects[I]));
+		}
+	}
+
+	F_GroupBarrier(Group);
+}
+
+
+f_b32 F_NeedsReloading(f_build *Build)
+{
+	if(!atomic_load_explicit(&Build->WasBuiltSuccessfully, memory_order_relaxed))
+	{
+		return F_False;
+	}
+	return atomic_exchange_explicit(&Build->WasBuiltSuccessfully, F_False, memory_order_acquire);
+}
+
 f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f_str8 OutputPath)
 {
 		f_str8_array ObjectFiles = F_OS_ArrayOfEntriesInDirectory(
@@ -2457,35 +2624,6 @@ f_b32 F_PollCompilation(f_group Group, f_compilation *Compilation)
 		}
 	}
 	return F_GroupAnyTrue(Group, ProcessesInLaneRunning);
-}
-
-f_build *F_BuildFromBuildOptions(f_memory_arena *Arena, f_build_options BuildOptions)
-{
-	f_build *Build = F_ArenaPushType(Arena, f_build);
-	// Probably enough?
-	Build->Arena = F_ArenaReserveButCommitFirstPage(MegaBytes(64));
-
-	Build->SourceDirectories.Items = F_ArenaPushArrayType(F_PArena(), BuildOptions.SourceDirectories.Count, f_str8);
-	Build->SourceDirectories.Count = BuildOptions.SourceDirectories.Count;
-	return Build;
-}
-
-f_b32 F_UpdateBuild(f_build *Build)
-{
-	f_u64 Count = 0;
-	for(f_s32 I = 0; I < Build->SourceDirectories.Count; I++)
-	{
-		f_str8_array RelevantFilesInDirectory = F_OS_ArrayOfFilesInDirectory(
-			F_TArena(),
-			Build->SourceDirectories.Items[I],
-			.PrependPath = F_True,
-			.FilterByExtension = F_Str8ArrayFromCStrs(F_PArena(), ".c", ".m", ".h")
-		);
-		Count += RelevantFilesInDirectory.Count;
-	}
-
-	f_u64 TUIndexToProcess = 0;
-	//for(;TUIndexToProcess = atomic_fetch_add_expicit(Build->))
 }
 
 void F_UpdateTU(f_memory_arena *Arena, f_compilation *Compilation, f_translation_unit *TU, f_compile_options CompileOptions, f_toolchain Toolchain)
