@@ -1,3 +1,25 @@
+#if 0 /*
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+if len(sys.argv) == 2:
+    source = Path(sys.argv[1]).resolve()
+    output = source.with_suffix('.exe' if os.name == 'nt' else '')
+    command = None
+    if os.name == 'nt':
+        command = ['cl', '/std:c11', '/experimental:c1atomics', '/O2', 'utf-8', '/TC', str(source), '/Fe:', str(output), '/link', 'Synchronization.lib']
+    else:
+        print('RUNGALO! ', str(output))
+        command = ['clang', '-x', 'c', '-std=c11', str(source), '-o', str(output)]
+    subprocess.call(command)
+else:
+    print("Usage: python3 friday2.h <your implementation>.c")
+r'''
+*/
+#endif
+
 #ifndef FRIDAY_H
 #define FRIDAY_H
 
@@ -495,7 +517,7 @@ f_range F_SplitRange(f_group Group, f_u64 Value);
 void *F_Internal_ReadFromGroupID(f_group Group, f_s32 ID, void *Variable, f_u64 SizeOfVariable);
 
 #define F_ReadFromGroupID(Group, ID, Variable) \
-          *((__typeof__(Variable)*)(F_Internal_ReadFromGroupID(Group, ID, &Variable, sizeof(Variable))))
+										*((__typeof__(Variable)*)(F_Internal_ReadFromGroupID(Group, ID, &Variable, sizeof(Variable))))
 
 void  F_StartProcess             (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
 f_b32 F_PollProcess              (f_process *Process);
@@ -1549,11 +1571,11 @@ f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 		f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
 #if defined(OS_WINDOWS)
 	File->Errors = !ReadFile(
-  (HANDLE)File->Handle,
-  Backing,
-  Info.SizeInBytes,
-  F_Null,
-  F_Null
+		(HANDLE)File->Handle,
+		Backing,
+		Info.SizeInBytes,
+		F_Null,
+		F_Null
 );
 #elif defined(OS_DARWIN)
 	f_s32 Status = read(File->Handle, Backing, Info.SizeInBytes);
@@ -1926,7 +1948,7 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 #define IsCStrDotOrDotDot(Name) (Name[0] == '.' && (Name[1] == 0 || (Name[1] == '.' && Name[2] == 0)))
 	f_str8_list Entries = { 0 };
 #if defined(OS_WINDOWS)
- // Error handling or something
+	// Error handling or something
 	WIN32_FIND_DATA FindData;
 
 	HANDLE FoundHandle;
@@ -2137,11 +2159,11 @@ f_b32 F_PollProcess(f_process *Process)
 	f_b32 StillRunning = WaitForSingleObject((HANDLE)Process->ID, 0) == WAIT_TIMEOUT;
 
 	if(PeekNamedPipe(Process->StdOut, F_Null, 0, F_Null, &BytesAvailable, &BytesLeft)
-	   && BytesAvailable > 0)
+				&& BytesAvailable > 0)
 	{
 		BytesAvailable = F_Min(BytesAvailable, F_PROCESS_STDOUT_CAPACITY);
 		if(ReadFile(Process->StdOut, Process->StdOutSinceLastPoll.Bytes,
-		            BytesAvailable, &BytesRead, F_Null))
+														BytesAvailable, &BytesRead, F_Null))
 		{
 			Process->StdOutSinceLastPoll.Size = (f_s64)BytesRead;
 		}
@@ -2651,4 +2673,9 @@ void F_PassedBanner(f_str8_array Stats)
 	}
 }
 
+#endif
+
+#if 0 /*
+'''
+# */
 #endif
