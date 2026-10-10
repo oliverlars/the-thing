@@ -55,9 +55,7 @@ F_LaneEntry
 	{
 		if(F_IsInGroup(UpdateGroup))
 		{
-			OS_BeginFrame();
 			Build->Update(&App);
-			OS_EndFrame();
 		}
 		F_UpdateBuild(BuildGroup, Build, &BuildOptions);
 		F_ResetTArena();

@@ -1556,7 +1556,6 @@ f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
 	if(Group.ID == 0)
 	{
 		Build = F_ArenaPushType(Arena, f_build);
-		atomic_init(&Build->TotalSuccessfulBuilds, 1);
 		Build->Update = F_UpdateStub;
 	}
 	Build = F_ReadFromGroupID(Group, 0, Build);
@@ -1705,11 +1704,11 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 			if(F_ProcessExitedCleanly(&DSYMProcess) && F_ProcessExitedCleanly(&LinkProcess))
 			{
 				atomic_fetch_add(&Build->TotalSuccessfulBuilds, 1);
+				f_dll AppDLL = F_OS_DLLFromPath(OutputPath);
+				Build->Update = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
 			}
 		}
 	}
-
-	F_GroupBarrier(Group);
 
 	f_range BuildCacheRange = F_SplitRange(Group, BuildCache.Count);
 	for(f_s32 I = BuildCacheRange.Start; I < BuildCacheRange.End; I++)
@@ -1719,9 +1718,7 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 			F_OS_DeleteFile(F_TArena(), F_Str8PushF(F_TArena(), "build/%llu.o", BuildCache.Objects[I]));
 		}
 	}
-	
-	f_dll AppDLL = F_OS_DLLFromPath(F_Str8PushF(F_TArena(), "build/app.dynlib%llu", atomic_load(&Build->TotalSuccessfulBuilds)));
-	Build->Update = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
+
 
 	F_GroupBarrier(Group);
 }

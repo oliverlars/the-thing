@@ -95,6 +95,8 @@ void AppUpdate(void *UserData)
 	if(!OS_UpdateWindow(&App->Window))
     return;
 
+	OS_BeginFrame();
+
 	App->FrameArenaIndex = 1 - App->FrameArenaIndex;
 	m_arena *Frame = App->FrameArenas[App->FrameArenaIndex];
 	ArenaReset(Frame);
@@ -362,4 +364,6 @@ void AppUpdate(void *UserData)
 	}
 
 	R_Update(&App->Render, OS_NextDrawable(&App->Window), Screen);
+
+	OS_EndFrame();
 }
