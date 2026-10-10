@@ -16,9 +16,6 @@
 #include "app.h"
 
 
-os_platform Platform;
-
-
 typedef struct app_state
 {
 	m_arena *FrameArenas[2];

@@ -25,12 +25,10 @@ F_LaneEntry
 	App.ThreadContext = Ctx;
 	SetThreadLocalContextPointer(Ctx);
 
-	f_dll AppDLL = F_OS_DLLFromPath(F_Str8("build/app.dynlib0"));
-	void (*AppUpdate)(void *) = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
-
 	f_build_options BuildOptions = {0};
 	BuildOptions.CompileFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc");
-	BuildOptions.LinkFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc", "build/platform.dynlib");
+	//BuildOptions.LinkFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc", "build/platform.dynlib");
+	BuildOptions.LinkFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc");
 	BuildOptions.Frameworks = F_Str8ArrayFromCStrs(F_PArena(), 
 		"Cocoa", "Metal", "QuartzCore"
 	);
@@ -52,19 +50,14 @@ F_LaneEntry
 
 	f_group UpdateGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID == 0);
 	f_group BuildGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID > 0);
-	f_build *Build = F_BuildFromGroup(F_PArena(), BuildGroup);
+	f_build *Build = F_BuildFromGroup(F_PArena(), F_DefaultGroup());
 	for(;;)
 	{
 		if(F_IsInGroup(UpdateGroup))
 		{
-			AppDLL = F_OS_DLLFromPath(F_Str8PushF(F_TArena(), "build/app.dynlib%llu", atomic_load(&Build->TotalSuccessfulBuilds) - 1));
-			AppUpdate = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
-			for(;!F_NeedsReloading(Build);)
-			{
-				OS_BeginFrame();
-				if(AppUpdate) AppUpdate(&App);
-				OS_EndFrame();
-			}
+			OS_BeginFrame();
+			Build->Update(&App);
+			OS_EndFrame();
 		}
 		F_UpdateBuild(BuildGroup, Build, &BuildOptions);
 		F_ResetTArena();

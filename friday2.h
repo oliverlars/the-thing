@@ -339,7 +339,7 @@ f_compilation_status;
 typedef struct f_build
 {
 	_Atomic(f_u64) TotalSuccessfulBuilds;
-	_Atomic(f_b32) WasBuiltSuccessfully;
+	void (*Update)(void *);
 }
 f_build;
 
@@ -1696,6 +1696,8 @@ void F_OS_ReleaseFile(f_file *File)
 	File->Handle = 0;
 }
 
+void F_UpdateStub(void *) {}
+
 f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
 {
 	f_build *Build = 0;
@@ -1703,6 +1705,7 @@ f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
 	{
 		Build = F_ArenaPushType(Arena, f_build);
 		atomic_init(&Build->TotalSuccessfulBuilds, 1);
+		Build->Update = F_UpdateStub;
 	}
 	Build = F_ReadFromGroupID(Group, 0, Build);
 
@@ -1785,69 +1788,76 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	ShouldLinkTUs = F_GroupAnyTrue(Group, ShouldLinkTUs);
 	F_GroupBarrier(Group);
 
-	if((ShouldLinkTUs) && Group.ID == 0)
+	if(Group.ID == 0)
 	{
 		
 		f_str8 OutputPath = {0};
 		if(BuildOptions->OutputPath.Size > 0)
 		{
-			OutputPath = F_Str8PushF(F_TArena(), "%.*s/%.*s%llu", F_Expand(BuildOptions->OutputPath), F_Expand(BuildOptions->OutputName), atomic_fetch_add(&Build->TotalSuccessfulBuilds, 1));
+			OutputPath = F_Str8PushF(F_TArena(), "%.*s/%.*s%llu", F_Expand(BuildOptions->OutputPath), F_Expand(BuildOptions->OutputName), atomic_load(&Build->TotalSuccessfulBuilds));
 		}
 		else
 		{
 			OutputPath = F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->OutputName));
 		}
 
-		f_str8_list Args = {0};
-
-		F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
-
-		for(int I = 0; I < BuildOptions->LinkFlags.Count; I++)
+		f_file_info Info = F_OS_FileInfoFromFilename(F_TArena(), OutputPath);
+		if(!Info.Exists || ShouldLinkTUs)
 		{
-			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->LinkFlags.Items[I]);
+			f_str8_list Args = {0};
+
+			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
+
+			for(int I = 0; I < BuildOptions->LinkFlags.Count; I++)
+			{
+				F_Str8ListAppend(F_TArena(), &Args, BuildOptions->LinkFlags.Items[I]);
+			}
+
+			for(int I = 0; I < BuildOptions->Frameworks.Count; I++)
+			{
+				F_Str8ListAppend(F_TArena(), &Args, F_Str8("-framework"));
+				F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Frameworks.Items[I]);
+			}
+
+			if(BuildOptions->Kind == F_OUTPUT_DYNAMIC)
+			{
+				F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->Toolchain.DynamicFlag)));
+			}
+			else if(BuildOptions->Kind == F_OUTPUT_STATIC)
+			{
+				F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->Toolchain.StaticFlag)));
+			}
+
+			F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s%.*s", F_Expand(BuildOptions->Toolchain.OutputFlag), F_Expand(OutputPath)));
+			
+			for(int I = 0; I < ObjectFiles.Count; I++)
+			{
+				F_Str8ListAppend(F_TArena(), &Args, ObjectFiles.Items[I]);
+			}
+			f_process LinkProcess = {0};
+			F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
+			F_StartProcess(F_TArena(), &LinkProcess, Args);
+			F_WaitForProcess(&LinkProcess);
+
+			f_process DSYMProcess = {0};
+			f_str8_list DSymArgs = {0};
+			F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("dsymutil"));
+			F_Str8ListAppend(F_TArena(), &DSymArgs, OutputPath);
+			F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("-o"));
+			F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8PushF(F_TArena(), "%.*s.dSYM", F_Expand(OutputPath)));
+
+			F_StartProcess(F_TArena(), &DSYMProcess, DSymArgs);
+			
+			F_WaitForProcess(&DSYMProcess);
+
+			if(F_ProcessExitedCleanly(&DSYMProcess) && F_ProcessExitedCleanly(&LinkProcess))
+			{
+				atomic_fetch_add(&Build->TotalSuccessfulBuilds, 1);
+			}
 		}
-
-		for(int I = 0; I < BuildOptions->Frameworks.Count; I++)
-		{
-			F_Str8ListAppend(F_TArena(), &Args, F_Str8("-framework"));
-			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Frameworks.Items[I]);
-		}
-
-		if(BuildOptions->Kind == F_OUTPUT_DYNAMIC)
-		{
-			F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->Toolchain.DynamicFlag)));
-		}
-		else if(BuildOptions->Kind == F_OUTPUT_STATIC)
-		{
-			F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->Toolchain.StaticFlag)));
-		}
-
-		F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s%.*s", F_Expand(BuildOptions->Toolchain.OutputFlag), OutputPath));
-		
-		for(int I = 0; I < ObjectFiles.Count; I++)
-		{
-			F_Str8ListAppend(F_TArena(), &Args, ObjectFiles.Items[I]);
-		}
-		f_process LinkProcess = {0};
-		F_StartProcess(F_TArena(), &LinkProcess, Args);
-		F_WaitForProcess(&LinkProcess);
-
-		f_process DSYMProcess = {0};
-		f_str8_list DSymArgs = {0};
-		F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("dsymutil"));
-		F_Str8ListAppend(F_TArena(), &DSymArgs, OutputPath);
-		F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("-o"));
-		F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8PushF(F_TArena(), "%.*s.dSYM", F_Expand(OutputPath)));
-
-		F_StartProcess(F_TArena(), &DSYMProcess, DSymArgs);
-		
-		F_WaitForProcess(&DSYMProcess);
-
-		atomic_store(&Build->WasBuiltSuccessfully, F_True);
-
-		F_Print(F_Str8("LINKING!!! "));
-		F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
 	}
+
+	F_GroupBarrier(Group);
 
 	f_range BuildCacheRange = F_SplitRange(Group, BuildCache.Count);
 	for(f_s32 I = BuildCacheRange.Start; I < BuildCacheRange.End; I++)
@@ -1857,18 +1867,11 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 			F_OS_DeleteFile(F_TArena(), F_Str8PushF(F_TArena(), "build/%llu.o", BuildCache.Objects[I]));
 		}
 	}
+	
+	f_dll AppDLL = F_OS_DLLFromPath(F_Str8PushF(F_TArena(), "build/app.dynlib%llu", atomic_load(&Build->TotalSuccessfulBuilds)));
+	Build->Update = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
 
 	F_GroupBarrier(Group);
-}
-
-
-f_b32 F_NeedsReloading(f_build *Build)
-{
-	if(!atomic_load_explicit(&Build->WasBuiltSuccessfully, memory_order_relaxed))
-	{
-		return F_False;
-	}
-	return atomic_exchange_explicit(&Build->WasBuiltSuccessfully, F_False, memory_order_acquire);
 }
 
 f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f_str8 OutputPath)
