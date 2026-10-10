@@ -274,6 +274,7 @@ typedef struct f_build
 {
 	_Atomic(f_u64) TotalSuccessfulBuilds;
 	void (*Update)(void *);
+	f_dll UpdateDLL;
 }
 f_build;
 
@@ -1649,8 +1650,10 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		}
 		else
 		{
-			OutputPath = F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->OutputName));
+			OutputPath = F_Str8PushF(F_TArena(), "%.*s%llu", F_Expand(BuildOptions->OutputName), atomic_load(&Build->TotalSuccessfulBuilds));
 		}
+
+		f_b32 NeedsToReload = !Build->UpdateDLL.Handle;
 
 		f_file_info Info = F_OS_FileInfoFromFilename(F_TArena(), OutputPath);
 		if(!Info.Exists || ShouldLinkTUs)
@@ -1703,10 +1706,15 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 
 			if(F_ProcessExitedCleanly(&DSYMProcess) && F_ProcessExitedCleanly(&LinkProcess))
 			{
+				printf(F_GREEN "\n\u2713" F_RESET F_DIM " [friday]" F_RESET " successfully reloaded" "\n\n");
+				NeedsToReload = F_True;
 				atomic_fetch_add(&Build->TotalSuccessfulBuilds, 1);
-				f_dll AppDLL = F_OS_DLLFromPath(OutputPath);
-				Build->Update = F_OS_DLLSymbolFromName(AppDLL, F_Str8("AppUpdate"));
 			}
+		}
+		if(NeedsToReload)
+		{
+			Build->UpdateDLL = F_OS_DLLFromPath(OutputPath);
+			Build->Update = F_OS_DLLSymbolFromName(Build->UpdateDLL, F_Str8("AppUpdate"));
 		}
 	}
 
