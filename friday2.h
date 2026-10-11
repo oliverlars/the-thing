@@ -1654,9 +1654,8 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		}
 
 		f_b32 NeedsToReload = !Build->UpdateDLL.Handle;
-
-		f_file_info Info = F_OS_FileInfoFromFilename(F_TArena(), OutputPath);
-		if(!Info.Exists || ShouldLinkTUs)
+		
+		if(!Build->UpdateDLL.Handle || ShouldLinkTUs)
 		{
 			f_str8_list Args = {0};
 
