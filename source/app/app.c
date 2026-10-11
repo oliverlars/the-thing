@@ -334,7 +334,7 @@ void AppUpdate(void *UserData)
 		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
 
 		D_Str8(
-			&App->Draw, Str8("no more objective C spam"),
+			&App->Draw, Str8("abc"),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.90f, 0),
 			.HeightInPixels = 64.0f,

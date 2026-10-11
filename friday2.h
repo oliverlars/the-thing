@@ -411,7 +411,8 @@ f_b32 F_PollProcess              (f_process *Process);
 void  F_WaitForProcess           (f_process *Process);
 void  F_WaitForMultipleProcesses (f_process *Processes, f_s32 ProcessCount);
 
-f_b32 F_ProcessExitedCleanly(f_process *Process);
+f_b32 F_ProcessFailed(f_process *Process);
+f_b32 F_AnyProcessesFailed(f_process *Processes, f_s32 ProcessCount);
 
 void F_Internal_WaitForMultipleProcesses (f_process **Processes, f_u64 ProcessCount);
 
@@ -1573,7 +1574,7 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	f_str8_array  SourceFiles = {0};
 	f_str8_array  ObjectFiles = {0};
 	f_str8_array  ObjectFilesToDelete = {0};
-	f_b32 ShouldLinkTUs = F_False;
+	f_b32 CompileStarted = F_False;
 	if(Group.ID == 0) 
 	{
 		SourceFiles = F_OS_ArrayOfEntriesInDirectories(
@@ -1607,9 +1608,9 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		ObjectFiles.Items[I] = ObjectPath;
 		if(!F_HashIsInBuildCache(BuildCache, Hash))
 		{
-
-			ShouldLinkTUs = F_True;
 			f_str8_list Args = {0};
+
+			CompileStarted = F_True;
 
 			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
 			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompileOnlyFlag);
@@ -1636,8 +1637,8 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		}
 	}
 	F_WaitForMultipleProcesses(Processes, SourceFileRange.End - SourceFileRange.Start);
-	ShouldLinkTUs = F_GroupAnyTrue(Group, ShouldLinkTUs);
-	F_GroupBarrier(Group);
+	f_b32 AnyProcessFailed = F_GroupAnyTrue(Group, F_AnyProcessesFailed(Processes, SourceFileRange.End - SourceFileRange.Start));
+	f_b32 ShouldLinkTUs = !AnyProcessFailed && F_GroupAnyTrue(Group, CompileStarted);
 
 	if(Group.ID == 0)
 	{
@@ -1652,9 +1653,9 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 			OutputPath = F_Str8PushF(F_TArena(), "%.*s%llu", F_Expand(BuildOptions->OutputName), atomic_load(&Build->TotalSuccessfulBuilds));
 		}
 
-		f_b32 NeedsToReload = !Build->UpdateDLL.Handle;
+		f_b32 NeedsToReload = F_False;
 		
-		if(!Build->UpdateDLL.Handle || ShouldLinkTUs)
+		if(ShouldLinkTUs || (!Build->UpdateDLL.Handle && !AnyProcessFailed))
 		{
 			f_str8_list Args = {0};
 
@@ -1701,7 +1702,7 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 			
 			F_WaitForProcess(&DSYMProcess);
 
-			if(F_ProcessExitedCleanly(&DSYMProcess) && F_ProcessExitedCleanly(&LinkProcess))
+			if(!(F_ProcessFailed(&DSYMProcess) || F_ProcessFailed(&LinkProcess)))
 			{
 				printf(F_GREEN "\u2713" F_RESET F_DIM " [friday]" F_RESET " successfully reloaded" "\n");
 				NeedsToReload = F_True;
@@ -2078,18 +2079,18 @@ f_b32 F_PollProcess(f_process *Process)
 #endif
 }
 
-f_b32 F_ProcessExitedCleanly(f_process *Process)
+f_b32 F_ProcessFailed(f_process *Process)
 {
-	f_b32 Result = F_True;
+	f_b32 Result = F_False;
 #if defined(OS_WINDOWS)
 	if(Process->ExitCode.Values[0] || Process->ExitCode.Values[1])
 	{
-		Result = F_False;
+		Result = F_True;
 	}
 #elif defined(OS_DARWIN)
 	if(Process->ExitCode.Values[0] || Process->ExitCode.Values[1])
 	{
-		Result = F_False;
+		Result = F_True;
 	}
 #else
 #error "Unsupported OS"
@@ -2097,6 +2098,16 @@ f_b32 F_ProcessExitedCleanly(f_process *Process)
 	return Result;
 }
 
+f_b32 F_AnyProcessesFailed(f_process *Processes, f_s32 ProcessCount)
+{
+	F_WaitForMultipleProcesses(Processes,ProcessCount);
+	for(f_s32 I = 0; I < ProcessCount; I++)
+	{
+		if(Processes[I].State == F_PROCESS_NONE) continue;
+		if(F_ProcessFailed(Processes + I)) return F_True;
+	}
+	return F_False;
+}
 
 void F_WaitForProcess(f_process *Process)
 {
