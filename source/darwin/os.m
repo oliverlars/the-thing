@@ -72,73 +72,6 @@ str8 OS_LoadEntireFileIntoMemory(m_arena *Arena, str8 Filename)
 	return (str8){ .Size = St.st_size, .Bytes = Buffer };
 }
 
-// Plain NSView backed by a CAMetalLayer. No MTKView, no display-link, no
-// delegate — the host owns the run loop and pulls drawables explicitly.
-@interface MetalView : NSView
-@end
-
-@implementation MetalView
-+ (Class)layerClass { return [CAMetalLayer class]; }
-- (CALayer *)makeBackingLayer { return [CAMetalLayer layer]; }
-- (BOOL)wantsUpdateLayer { return YES; }
-- (BOOL)acceptsFirstResponder { return YES; }
-
-- (void)resizeDrawable
-{
-	CAMetalLayer *Layer = (CAMetalLayer *)self.layer;
-	CGFloat Scale = self.window ? self.window.backingScaleFactor : 1.0;
-	NSSize Size = self.bounds.size;
-	Layer.contentsScale = Scale;
-	Layer.drawableSize  = CGSizeMake(Size.width * Scale, Size.height * Scale);
-}
-
-- (void)viewDidChangeBackingProperties
-{
-	[super viewDidChangeBackingProperties];
-	[self resizeDrawable];
-}
-
-- (void)setFrameSize:(NSSize)NewSize
-{
-	[super setFrameSize:NewSize];
-	[self resizeDrawable];
-}
-
-- (void)setBoundsSize:(NSSize)NewSize
-{
-	[super setBoundsSize:NewSize];
-	[self resizeDrawable];
-}
-@end
-
-@interface AppDelegate : NSObject <NSApplicationDelegate>
-@property (nonatomic, assign) BOOL ShouldQuit;
-@end
-
-@implementation AppDelegate
-- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender { return NSTerminateNow; }
-- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return YES; }
-@end
-
-@interface WindowDelegate : NSObject <NSWindowDelegate>
-@property (nonatomic, assign) BOOL ShouldQuit;
-@end
-
-@implementation WindowDelegate
-- (BOOL)windowShouldClose:(NSWindow *)sender
-{
-	self.ShouldQuit = YES;
-	[NSApp terminate:nil];
-	return YES;
-}
-@end
-
-// NSWindow.delegate and NSApp.delegate are weak references — hold these in
-// statics so ARC keeps them alive for the lifetime of the process.
-static AppDelegate    *GlobalAppDelegate    = nil;
-static WindowDelegate *GlobalWindowDelegate = nil;
-static MetalView      *GlobalView           = nil;
-
 // Ring buffer for OS_NextEvent. The run loop classifies each Cocoa NSEvent
 // it pulls off the system queue and pushes a corresponding os_event here;
 // the host's frame callback drains it with OS_NextEvent.
@@ -289,9 +222,7 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 	@autoreleasepool {
 		[NSApplication sharedApplication];
 		[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-
-		GlobalAppDelegate = [[AppDelegate alloc] init];
-		[NSApp setDelegate:GlobalAppDelegate];
+		[NSApp finishLaunching];
 
 		NSRect Frame = NSMakeRect(0, 0, Width, Height);
 		NSUInteger Style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
@@ -301,21 +232,20 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 		                                               styleMask:Style
 		                                                 backing:NSBackingStoreBuffered
 		                                                   defer:NO];
+		Window.releasedWhenClosed = NO;
 
 		m_scratch_arena Scratch = ScratchBegin(0, 0);
 		[Window setTitle:[NSString stringWithUTF8String:CStrFromStr8(Scratch.Arena, Name)]];
 		ScratchEnd(Scratch);
 
-		GlobalWindowDelegate = [[WindowDelegate alloc] init];
-		[Window setDelegate:GlobalWindowDelegate];
-
 		[Window setAcceptsMouseMovedEvents:YES];
 
 		id<MTLDevice> Device = MTLCreateSystemDefaultDevice();
 
-		GlobalView = [[MetalView alloc] initWithFrame:Frame];
-		GlobalView.wantsLayer = YES;
-		CAMetalLayer *Layer = (CAMetalLayer *)GlobalView.layer;
+		NSView *View = [[NSView alloc] initWithFrame:Frame];
+		CAMetalLayer *Layer = [CAMetalLayer layer];
+		View.layer = Layer;
+		View.wantsLayer = YES;
 		Layer.device          = Device;
 		Layer.pixelFormat     = MTLPixelFormatBGRA10_XR_sRGB;
 		Layer.framebufferOnly = YES;
@@ -326,7 +256,7 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 		Layer.contentsScale = Scale;
 		Layer.drawableSize  = CGSizeMake(Width * Scale, Height * Scale);
 
-		[Window setContentView:GlobalView];
+		[Window setContentView:View];
 		[Window center];
 		[Window makeKeyAndOrderFront:nil];
 		[NSApp activateIgnoringOtherApps:YES];
@@ -336,7 +266,7 @@ os_window OS_MakeWindow(str8 Name, int Width, int Height)
 		Result.Height = (int)Layer.drawableSize.height;
 		Result.Title     = Name;
 		Result.Handle    = (__bridge_retained void*)Window;
-		Result.MetalView = (__bridge void*)GlobalView;
+		Result.MetalView = (__bridge void*)View;
 		Result.Layer     = (__bridge void*)Layer;
 		Result.Device    = (__bridge_retained void*)Device;
 		return Result;
@@ -393,7 +323,6 @@ void *OS_NextDrawable(os_window *Window)
 b32 OS_UpdateWindow(os_window *Window)
 {
 	@autoreleasepool {
-		[NSApp finishLaunching];
 
 		NSWindow *NSWin = (__bridge NSWindow*)Window->Handle;
 		@autoreleasepool {
@@ -405,17 +334,28 @@ b32 OS_UpdateWindow(os_window *Window)
 																																								inMode:NSDefaultRunLoopMode
 																																							dequeue:YES]))
 			{
-				os_event Mapped = OS_EventFromNSEvent(Event, NSWin, GlobalView);
+				os_event Mapped = OS_EventFromNSEvent(Event, NSWin, (__bridge NSView*)Window->MetalView);
 				if (Mapped.Type != OS_EVENT_NONE)
 				{
 					OS_PushEvent(Mapped);
 					OS_UpdateInputState(Mapped);
 				}
-				
-				[NSApp sendEvent:Event];
+				b32 IsKey = Event.type == NSEventTypeKeyDown || Event.type == NSEventTypeKeyUp;
+				if (!IsKey || (Event.modifierFlags & NSEventModifierFlagCommand))
+					[NSApp sendEvent:Event];
 			}
 
-			if (GlobalAppDelegate.ShouldQuit) return False;
+			if (!NSWin.isVisible && !NSWin.isMiniaturized) return False;
+
+			NSView *View = (__bridge NSView*)Window->MetalView;
+			CAMetalLayer *Layer = (__bridge CAMetalLayer*)Window->Layer;
+			CGFloat Scale = NSWin.backingScaleFactor;
+			CGSize Want = CGSizeMake(View.bounds.size.width * Scale, View.bounds.size.height * Scale);
+			if (!CGSizeEqualToSize(Layer.drawableSize, Want))
+			{
+				Layer.contentsScale = Scale;
+				Layer.drawableSize  = Want;
+			}
 
 			Window->Width  = OS_WindowWidth(Window);
 			Window->Height = OS_WindowHeight(Window);

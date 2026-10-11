@@ -105,7 +105,7 @@ app *ClientMemory()
 
 void AppUpdate(void *UserData)
 {
-	app_interface *Interface = (app*)UserData;
+	app_interface *Interface = (app_interface*)UserData;
 	if(!Interface->App) Interface->App = ClientMemory();
 
 	app *App = Interface->App;
@@ -217,8 +217,8 @@ void AppUpdate(void *UserData)
 		}
 	}
 
-	r_buffer CubeVertexPositionsBuffer = R_BufferPermanent(&App->Render, Str8("Cube Positions"), .SizeInBytes = sizeof(v4f) * 36, .Data = CubeVertexPositions);
-	r_buffer CubeVertexColoursBuffer = R_BufferPermanent(&App->Render, Str8("Cube Colours"), .SizeInBytes = sizeof(v4f) * 36, .Data = CubeVertexColours);
+	r_buffer CubeVertexPositionsBuffer = R_BufferPermanent(&App->Render, Str8("Cube Positions"), .SizeInBytes = sizeof(v4f) * 36, .Data = (void*)CubeVertexPositions);
+	r_buffer CubeVertexColoursBuffer = R_BufferPermanent(&App->Render, Str8("Cube Colours"), .SizeInBytes = sizeof(v4f) * 36, .Data = (void*)CubeVertexColours);
 
 	m44f Model = MulM44FM44F(M44FromYAngle((f32)App->Render.Frame / 100.0 * 0.9f),
 	                         M44FromXAngle((f32)App->Render.Frame / 100.0 * 0.6f));
@@ -322,6 +322,8 @@ void AppUpdate(void *UserData)
 				.Extrusion = 1.0);
 		}
 
+		
+
 		f32 ElapsedSec = OS_MilliSecondsFromTimeStamp(OS_TimeStampNow() - App->StartTime) * 0.001f;
 		v4f CapsuleColours[2] = { v4f(1.0f, 0.4f, 0.0f, 1), v4f(0.8f, 0.35f, 0.0f, 1) };
 		static b32 Clicked = False;
@@ -331,7 +333,7 @@ void AppUpdate(void *UserData)
 		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
 
 		D_Str8(
-			&App->Draw, Str8("abc"),
+			&App->Draw, Str8("no more objective C spam"),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.90f, 0),
 			.HeightInPixels = 64.0f,

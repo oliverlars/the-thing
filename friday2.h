@@ -1630,8 +1630,6 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 			{
 				F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(BuildOptions->Toolchain.IncludeFlag), F_Expand(BuildOptions->IncludeDirectories.Items[I]));
 			}
-			F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
-			F_Print(F_Str8("\n"));
 
 			F_StartProcess(F_TArena(), Processes + I - SourceFileRange.Start, Args);
 		}
@@ -1688,7 +1686,6 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 				F_Str8ListAppend(F_TArena(), &Args, ObjectFiles.Items[I]);
 			}
 			f_process LinkProcess = {0};
-			F_Print(F_Str8JoinList(F_TArena(), Args, F_Str8(" ")));
 			F_StartProcess(F_TArena(), &LinkProcess, Args);
 			F_WaitForProcess(&LinkProcess);
 
@@ -1705,7 +1702,7 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 
 			if(F_ProcessExitedCleanly(&DSYMProcess) && F_ProcessExitedCleanly(&LinkProcess))
 			{
-				printf(F_GREEN "\n\u2713" F_RESET F_DIM " [friday]" F_RESET " successfully reloaded" "\n\n");
+				printf(F_GREEN "\u2713" F_RESET F_DIM " [friday]" F_RESET " successfully reloaded" "\n");
 				NeedsToReload = F_True;
 				atomic_fetch_add(&Build->TotalSuccessfulBuilds, 1);
 			}
