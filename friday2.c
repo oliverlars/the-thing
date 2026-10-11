@@ -35,13 +35,14 @@ F_LaneEntry
 
 	assert(Build->Update);
 
-	app_interface AppInterface = {0};
+	app_interface App = {0};
 
 	for(;;)
 	{
 		if(F_IsInGroup(UpdateGroup))
 		{
-			Build->Update(&AppInterface);
+			Build->Update(&App);
+			if(App.WantsToQuit) F_Exit();
 		}
 		F_UpdateBuild(BuildGroup, Build, &BuildOptions);
 		F_ResetTArena();

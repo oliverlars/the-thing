@@ -415,6 +415,7 @@ f_b32 F_ProcessExitedCleanly(f_process *Process);
 
 void F_Internal_WaitForMultipleProcesses (f_process **Processes, f_u64 ProcessCount);
 
+#define F_Exit() exit(0);
 
 #define F_DEFAULT_TIMEOUT_MS (16)
 

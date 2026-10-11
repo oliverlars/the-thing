@@ -113,6 +113,7 @@ void AppUpdate(void *UserData)
 	SetThreadLocalContextPointer(App->ThreadContext);
 
 
+	Interface->WantsToQuit = App->Window.WantsToQuit;
 	if(!OS_UpdateWindow(&App->Window)) return;
 
 	OS_BeginFrame();

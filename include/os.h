@@ -4,6 +4,8 @@
 
 typedef void* os_handle;
 
+
+// TODO: Remove OS specifics!
 typedef struct os_window
 {
 	int Width;
@@ -13,6 +15,9 @@ typedef struct os_window
 	os_handle MetalView;
 	os_handle Layer;
 	os_handle Device;
+
+
+	b32 WantsToQuit;
 
 	str8 Title;
 }

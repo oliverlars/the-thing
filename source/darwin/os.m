@@ -345,7 +345,14 @@ b32 OS_UpdateWindow(os_window *Window)
 					[NSApp sendEvent:Event];
 			}
 
-			if (!NSWin.isVisible && !NSWin.isMiniaturized) return False;
+			if (!NSWin.isVisible && !NSWin.isMiniaturized)
+			{
+				// TODO: We are assuming single documents here, so think settings app. Red button closes the program
+				// and because objective C is shit we can't just make a class without getting spam warnings on hot reload
+				// so this will suffice for now
+				Window->WantsToQuit = True;
+				return False;
+			}
 
 			NSView *View = (__bridge NSView*)Window->MetalView;
 			CAMetalLayer *Layer = (__bridge CAMetalLayer*)Window->Layer;

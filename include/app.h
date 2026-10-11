@@ -1,4 +1,4 @@
-
+#include "misc.h"
 
 
 typedef struct app_interface
@@ -8,5 +8,7 @@ typedef struct app_interface
 	// the initial load of the app?
 	// For now, internal is managed by the app instead
 	void *App;
+
+	b32 WantsToQuit;
 }
 app_interface;
