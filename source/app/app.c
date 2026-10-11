@@ -16,19 +16,23 @@
 #include "app.h"
 
 
-typedef struct app_state
+typedef struct app
 {
+	os_window   Window;
+	per_thread_context *ThreadContext;
+	m_arena *PermanentArena;
 	m_arena *FrameArenas[2];
 	int FrameArenaIndex;
 	render_context Render;
 	draw_context Draw;
-	os_window Window;
 	d_font Font;
 	d_font LucideFont;
 	u64 StartTime;
 
 	ui_context UI;
-} app_state;
+} app;
+
+
 
 
 // Perspective projection matching Metal's clip-space depth range [0, 1].
@@ -49,9 +53,8 @@ static m44f PerspectiveMetal(f32 Aspect, f32 FOVDegrees, f32 Near, f32 Far)
 }
 
 
-void Init(app_state *App, m_arena *PermanentArena)
+void Init(app *App, m_arena *PermanentArena)
 {
-
 	App->Window = OS_MakeWindow(Str8("the thing"), 1280, 720);
 
 	r_init_options Opts = {
@@ -76,24 +79,41 @@ void Init(app_state *App, m_arena *PermanentArena)
 	App->UI.Window = &App->Window;
 }
 
+app *ClientMemory()
+{
+	m_arena *PermanentArena = ArenaInitialise(GigaBytes(8));
+	app *App = ArenaPushArrayZero(PermanentArena, app, 1);
+	App->PermanentArena = PermanentArena;
+	App->FrameArenas[0] = ArenaInitialise(GigaBytes(8));
+	App->FrameArenas[1] = ArenaInitialise(GigaBytes(8));
+	
+	per_thread_context *ThreadContext = ArenaPushArrayZero(App->PermanentArena, per_thread_context, 1);
+
+	ThreadContext->ScratchArenas[0] = ArenaInitialise(MegaBytes(64));
+	ThreadContext->ScratchArenas[1] = ArenaInitialise(MegaBytes(64));
+	ThreadContext->TemporaryArena = ArenaInitialise(GigaBytes(4));
+	ThreadContext->LogArena = ArenaInitialise(MegaBytes(8));
+	ThreadContext->Logger = LoggerInitialise(ThreadContext->LogArena);
+
+	App->ThreadContext = ThreadContext;
+	SetThreadLocalContextPointer(ThreadContext);
+
+	Init(App, App->PermanentArena);
+
+	return App;
+}
+
 void AppUpdate(void *UserData)
 {
-	app_memory *Memory = (app_memory*)UserData;
-	app_state *App = Memory->AppState;
-	SetThreadLocalContextPointer(Memory->ThreadContext);
+	app_interface *Interface = (app*)UserData;
+	if(!Interface->App) Interface->App = ClientMemory();
 
-	if(!App)
-	{
-		Memory->AppState = ArenaPushArrayZero(Memory->PermanentArena, app_state, 1);
-		App = Memory->AppState;
-		App->Window = Memory->Window;
-		App->FrameArenas[0] = Memory->FrameArenas[0];
-		App->FrameArenas[1] = Memory->FrameArenas[1];
-		Init(App, Memory->PermanentArena);
-	}
+	app *App = Interface->App;
 
-	if(!OS_UpdateWindow(&App->Window))
-    return;
+	SetThreadLocalContextPointer(App->ThreadContext);
+
+
+	if(!OS_UpdateWindow(&App->Window)) return;
 
 	OS_BeginFrame();
 
@@ -233,7 +253,7 @@ void AppUpdate(void *UserData)
 	R_Pass(&App->Render, Str8("Cube Horizontal Blur"), .Colours[0] = Temp, .ColourOps[0] = LO_CLEAR, .ClearColour[0] = v4f(0, 0, 0, 0))
 	{
 		R_UniformV2F(&App->Render, Str8("Direction"), v2f(1, 0));
-		R_UniformF32(&App->Render, Str8("Radius"), 50);
+		R_UniformF32(&App->Render, Str8("Radius"), 10);
 		R_BindTexture(&App->Render, Str8("Texture"), TestTexture);
 		R_Draw(&App->Render, Str8("blur.metal"), 6, R_TRIANGLES);
 	}
@@ -241,7 +261,7 @@ void AppUpdate(void *UserData)
 	R_Pass(&App->Render, Str8("Cube Vertical Blur"), .Colours[0] = TestTexture, .ColourOps[0] = LO_CLEAR, .ClearColour = v4f(0, 0, 0, 0))
 	{
 		R_UniformV2F(&App->Render, Str8("Direction"), v2f(0, 1));
-		R_UniformF32(&App->Render, Str8("Radius"), 5);
+		R_UniformF32(&App->Render, Str8("Radius"), 10);
 		R_BindTexture(&App->Render, Str8("Texture"), Temp);
 		R_Draw(&App->Render, Str8("blur.metal"), 6, R_TRIANGLES);
 	}
@@ -318,8 +338,9 @@ void AppUpdate(void *UserData)
 			.Colour = v4f(1, 1, 1, 1)
 		);
 
+
 		D_Str8(
-			&App->Draw, Str8(":D abc 23"),
+			&App->Draw, Str8(":D abc 23 456"),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.85f, 0),
 			.HeightInPixels = 64.0f,

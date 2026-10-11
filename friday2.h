@@ -12,7 +12,7 @@ if len(sys.argv) == 2:
         command = ['cl', '/std:c11', '/experimental:c1atomics', '/O2', 'utf-8', '/TC', str(source), '/Fe:', str(output), '/link', 'Synchronization.lib']
     else:
         print('RUNGALO! ', str(output))
-        command = ['clang', '-x', 'c', '-std=c11', str(source), '-o', str(output)]
+        command = ['clang', '-x', 'c', '-std=c11', str(source), '-g', '-o', str(output)]
     subprocess.call(command)
 else:
     print("Usage: python3 friday2.h <your implementation>.c")
@@ -1767,7 +1767,7 @@ f_b32 F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
 		if(Cache.Objects[I] == Hash)
 		{
 			Cache.NeededObjects[I] = F_True;
-			return True;
+			return F_True;
 		}
 	}
 

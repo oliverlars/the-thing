@@ -1,24 +1,12 @@
 
-#include "misc.h"
-#include "memory.h"
-#include "maths.h"
-#include "os.h"
-#include "ui.h"
-#include "embed.h"
 
 
-typedef struct app_memory
+typedef struct app_interface
 {
-	m_arena *PermanentArena;
-	m_arena *FrameArenas[2];
-	per_thread_context *ThreadContext;
-	os_window   Window;
-	embed_data *Berkeley;
-	embed_data *Lucide;
-	b32 GPULogging;
-
-	void *AppState;
-	u64  StateSize;
-	u32  StateVersion;
-	b32  Reloaded;
-} app_memory;
+	// TODO: Can add any kind of information here that might be relevant for friday
+	// even the function pointers like Update could go in here and be filled in by
+	// the initial load of the app?
+	// For now, internal is managed by the app instead
+	void *App;
+}
+app_interface;
