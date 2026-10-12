@@ -54,8 +54,6 @@ typedef unsigned long long f_b64;
 #define F_MegaBytes(X) (1024ull * F_KiloBytes(X))
 #define F_GigaBytes(X) (1024ull * F_MegaBytes(X))
 
-#define F_Expand(String) (int)String.Size, (char*)String.Bytes
-#define F_Str8(String) ((f_str8) { sizeof(String"") - 1, (f_s8*)String })
 
 #define F_Min(X, Y) (X < Y ? X : Y)
 #define F_Max(X, Y) (X > Y ? X : Y)
@@ -104,34 +102,28 @@ typedef struct f_memory_arena
 }
 f_memory_arena;
 
-typedef struct f_str8
-{
-	f_s64 Size;
-	f_s8 *Bytes;
-}
-f_str8;
  
-typedef struct f_str8_list_node
+typedef struct f_string_list_node
 {
-	struct f_str8_list_node *Next;
-	struct f_str8_list_node *Previous;
-	f_str8 String;
+	struct f_string_list_node *Next;
+	struct f_string_list_node *Previous;
+	char *String;
 }
-f_str8_list_node;
+f_string_list_node;
 
-typedef struct f_str8_list
+typedef struct f_string_list
 {
-	f_str8_list_node *First;
-	f_str8_list_node *Last;
+	f_string_list_node *First;
+	f_string_list_node *Last;
 }
-f_str8_list;
+f_string_list;
 
-typedef struct f_str8_array
+typedef struct f_string_array
 {
-	f_str8 *Items;
+	char **Items;
 	f_s64   Count;
 }
-f_str8_array;
+f_string_array;
 
 typedef struct f_barrier
 {
@@ -191,7 +183,7 @@ typedef struct f_process
 	f_process_state State; 
 	f_exit_code ExitCode;
 	void *StdOut;
-	f_str8 StdOutSinceLastPoll;
+	char *StdOutSinceLastPoll;
 }
 f_process;
 
@@ -200,42 +192,42 @@ f_process;
 // into static library
 typedef struct f_toolchain
 {
-	f_str8 CompilerPath;
-	f_str8 LinkerPath;
+	char *CompilerPath;
+	char *LinkerPath;
 
-	f_str8 IncludeFlag;
-	f_str8 OutputFlag;
-	f_str8 DebugFlag;
-	f_str8 OptimiseFlag;
-	f_str8 DynamicFlag;
-	f_str8 StaticFlag;
-	f_str8 CompileOnlyFlag;
-	f_str8 LinkOnlyFlag;
+	char *IncludeFlag;
+	char *OutputFlag;
+	char *DebugFlag;
+	char *OptimiseFlag;
+	char *DynamicFlag;
+	char *StaticFlag;
+	char *CompileOnlyFlag;
+	char *LinkOnlyFlag;
 }
 f_toolchain;
 
 #define F_TOOLCHAIN_CLANG ((f_toolchain)\
 {\
-	.CompilerPath = F_Str8("clang"),\
-	.OutputFlag = F_Str8("-o"),\
-	.DebugFlag = F_Str8("-g"),\
-	.OptimiseFlag = F_Str8("-O2"),\
-	.IncludeFlag = F_Str8("-I"),\
-	.DynamicFlag = F_Str8("-dynamiclib"),\
-	.StaticFlag = F_Str8("-emit-static-lib"),\
-	.CompileOnlyFlag = F_Str8("-c")\
+	.CompilerPath = "clang",\
+	.OutputFlag = "-o",\
+	.DebugFlag = "-g",\
+	.OptimiseFlag = "-O2",\
+	.IncludeFlag = "-I",\
+	.DynamicFlag = "-dynamiclib",\
+	.StaticFlag = "-emit-static-lib",\
+	.CompileOnlyFlag = "-c"\
 })
 
 #define F_TOOLCHAIN_MSVC ((f_toolchain)\
 {\
-	.CompilerPath = F_Str8("cl"),\
-	.OutputFlag = F_Str8("/OUT"),\
-	.DebugFlag = F_Str8("/Zi"),\
-	.OptimiseFlag = F_Str8("/O2"),\
-	.IncludeFlag = F_Str8("/I"),\
-	.DynamicFlag = F_Str8("/LD"),\
-	.StaticFlag = F_Str8("/c /MT"),\
-	.CompileOnlyFlag = F_Str8("/c")\
+	.CompilerPath = "cl",\
+	.OutputFlag = "/OUT",\
+	.DebugFlag = "/Zi",\
+	.OptimiseFlag = "/O2",\
+	.IncludeFlag = "/I",\
+	.DynamicFlag = "/LD",\
+	.StaticFlag = "/c /MT",\
+	.CompileOnlyFlag = "/c"\
 })
 
 f_toolchain F_TOOLCHAIN_GCC;
@@ -262,8 +254,8 @@ typedef struct f_build_report
 {
 	f_b32  Succeeded;
 	f_b32  Changed;
-	f_str8 OutputPath;
-	f_str8 Diagnostics;
+	char *OutputPath;
+	char *Diagnostics;
 	f_s64  TUsCompiled;
 	f_f32  CompiledTimeInMilliseconds;
 	f_f32  LinkedTimeInMilliseconds;
@@ -278,26 +270,29 @@ typedef struct f_build
 }
 f_build;
 
+#define F_STRING_OPTION_CAPACITY 64
+#define F_DIRECTORY_CAPACITY 16
+
 typedef struct f_build_options
 {
 	f_output_kind  Kind;
 
-	f_str8         OutputPath;
-	f_str8         OutputName;
+	char *        OutputPath;
+	char *        OutputName;
 
-	f_str8_array   SourceDirectories;
-	f_str8_array   IncludeDirectories;
+	char *SourceDirectories[F_STRING_OPTION_CAPACITY];
+	char *IncludeDirectories[F_STRING_OPTION_CAPACITY];
 
-	f_str8_array   CompileFlags;
-	f_str8_array   LinkFlags;
+	char *CompileFlags[F_STRING_OPTION_CAPACITY];
+	char *LinkFlags[F_STRING_OPTION_CAPACITY];
 
 	f_b32          Debug;
 	f_b32          Optimise;
-	f_str8_array   Defines;
-	f_str8_array   Libraries;
-	f_str8_array   Frameworks;
+	char *Defines[F_STRING_OPTION_CAPACITY];
+	char *Libraries[F_STRING_OPTION_CAPACITY];
+	char *Frameworks[F_STRING_OPTION_CAPACITY];
 
-	f_str8_array   CompilerSpecificFlags;
+	char *CompilerSpecificFlags[F_STRING_OPTION_CAPACITY];
 	f_toolchain    Toolchain;
 }
 f_build_options;
@@ -340,32 +335,26 @@ void  F_ArenaResetTo(f_memory_arena *Arena, f_s64 Mark);
 
 #define F_ArrayCount(Array) (sizeof(Array) / sizeof((Array)[0]))
 
-#define F_Str8ArrayFromCStrs(Arena, ...) \
-F_Internal_Str8ArrayFromCStrs(Arena, ((char *[]){ __VA_ARGS__ }), ((sizeof(char *[]){ __VA_ARGS__})/sizeof(char *)))
 
-#define F_Str8ArrayFromStr8s(Arena, ...) \
-F_Internal_Str8ArrayFromStr8s(Arena, ((f_str8[]){ __VA_ARGS__ }), ((sizeof(f_str8[]){ __VA_ARGS__})/sizeof(f_str8)))
-
-f_str8_array F_Internal_Str8Array(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count);
-
-#define F_Str8ListAppendF(Arena, List, ...) \
-F_Str8ListAppend(Arena, List, F_Str8PushF(Arena, __VA_ARGS__))
+#define F_StringListAppendF(Arena, List, ...) \
+F_StringListAppend(Arena, List, F_StringPushF(Arena, __VA_ARGS__))
 
 
-char         *F_CStrFromStr8      (f_memory_arena *Arena, f_str8 String);
-f_str8       F_Str8PushF          (f_memory_arena *Arena, char *Format, ...);
-void         F_Str8ListAppend     (f_memory_arena *Arena, f_str8_list *List, f_str8 Sstring);
-void         F_Str8ListAppendMany (f_memory_arena *Arena, f_str8_list *Head, f_str8_list Tail);
-f_str8_array F_Str8ArrayFromList  (f_memory_arena *Arena, f_str8_list List);
-f_str8       F_Str8JoinList       (f_memory_arena *Arena, f_str8_list List,   f_str8 Separator);
-f_str8       F_Str8JoinArray      (f_memory_arena *Arena, f_str8_array Array, f_str8 Separator);
-f_b32        F_Str8Equal          (f_str8 A, f_str8 B);
-f_b32        F_Str8EndsWith       (f_str8 S, f_str8 Suffix);
-f_s64        F_Str8ListCount      (f_str8_list List);
-f_s64        F_Str8ListLength     (f_str8_list List);
+char *F_StringCopy(f_memory_arena *Arena, char *String);
+f_s64 F_StringLength(char *String);
+char *      F_StringPushF          (f_memory_arena *Arena, char *Format, ...);
+void         F_StringListAppend     (f_memory_arena *Arena, f_string_list *List, char *String);
+void         F_StringListAppendMany (f_memory_arena *Arena, f_string_list *Head, f_string_list Tail);
+f_string_array F_StringArrayFromList  (f_memory_arena *Arena, f_string_list List);
+char *      F_StringJoinList       (f_memory_arena *Arena, f_string_list List,   char *Separator);
+char *      F_StringJoinArray      (f_memory_arena *Arena, f_string_array Array, char *Separator);
+f_b32        F_StringEqual          (char *A, char *B);
+f_b32        F_StringEndsWith       (char *S, char *Suffix);
+f_s64        F_StringListCount      (f_string_list List);
+f_s64        F_StringListLength     (f_string_list List);
 
 
-#define F_AppendErrorF(ErrorList, ...) F_Str8ListAppend(&F_ErrorArena, ErrorList, F_Str8PushF(&F_ErrorArena, __VA_ARGS__))
+#define F_AppendErrorF(ErrorList, ...) F_StringListAppend(&F_ErrorArena, ErrorList, F_StringPushF(&F_ErrorArena, __VA_ARGS__))
 
 void F_DispatchAcrossNLanes (f_s64 LaneCount, char **Args, int ArgCount);
 
@@ -406,7 +395,7 @@ void *F_Internal_ReadFromGroupID(f_group Group, f_s32 ID, void *Variable, f_u64 
 #define F_ReadFromGroupID(Group, ID, Variable) \
 										*((__typeof__(Variable)*)(F_Internal_ReadFromGroupID(Group, ID, &Variable, sizeof(Variable))))
 
-void  F_StartProcess             (f_memory_arena *Arena, f_process *Process, f_str8_list Args);
+void  F_StartProcess             (f_memory_arena *Arena, f_process *Process, f_string_list Args);
 f_b32 F_PollProcess              (f_process *Process);
 void  F_WaitForProcess           (f_process *Process);
 void  F_WaitForMultipleProcesses (f_process *Processes, f_s32 ProcessCount);
@@ -427,9 +416,9 @@ f_u64 F_HashBytes(f_u64 HashStart, void *Data, f_u64 NumberOfBytesToHash);
 
 #define F_Hash(HashStart, Variable) F_HashBytes(HashStart, &(Variable), sizeof Variable)
 
-f_u64 F_HashStr8(f_str8 String);
+f_u64 F_HashString(char *String);
 
-f_u64 F_HashSourceAndIncludes (f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths);
+f_u64 F_HashSourceAndIncludes (f_memory_arena *Arena, char *PathToSource, char **IncludePaths);
 
 f_u8 *F_OS_Reserve   (f_s64 NumberOfBytes);
 void  F_OS_Commit    (void *Address, f_s64 BytesToCommit);
@@ -443,7 +432,7 @@ typedef struct f_file
 {
 	// In the future this can set more granular error bits
 	f_u64 Errors;
-	f_str8_list ErrorStream;
+	f_string_list ErrorStream;
 	f_u64 Handle;
 }
 f_file;
@@ -458,31 +447,31 @@ f_internal_file_options;
 #define F_OS_FileFromFilename(Arena, Filename, ...) \
 F_OS_Internal_FileFromFilename(Arena, Filename, (f_internal_file_options){ __VA_ARGS__ })
 
-#define F_OS_WriteStr8ToPath(Arena, PathToFile, StringToWrite, ...) \
-F_OS_Internal_WriteStr8ToPath(Arena, PathToFile, StringToWrite, (f_internal_file_options){ __VA_ARGS__ })
+#define F_OS_WriteStringToPath(Arena, PathToFile, StringToWrite, ...) \
+F_OS_Internal_WriteStringToPath(Arena, PathToFile, StringToWrite, (f_internal_file_options){ __VA_ARGS__ })
 
-f_file F_OS_Internal_FileFromFilename (f_memory_arena *Arena, f_str8 Filename, f_internal_file_options Options);
+f_file F_OS_Internal_FileFromFilename (f_memory_arena *Arena, char *Filename, f_internal_file_options Options);
 void   F_OS_ReleaseFile      (f_file *File);
 
-f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, f_str8 Filename);
+f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, char *Filename);
 f_file_info F_OS_FileInfoFromFile              (f_file *File);
-f_str8      F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
-f_str8      F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, f_str8 PathToFile);
-void        F_OS_WriteStr8ToFile               (f_file *File, f_str8 StringToWrite);
-void        F_OS_Internal_WriteStr8ToPath      (f_memory_arena *Arena, f_str8 PathToFile, f_str8 StringToWrite, f_internal_file_options Options);
-f_b32       F_OS_DeleteFile                    (f_memory_arena *Arena, f_str8 PathToFile);
-void        F_OS_RenameFileTo                  (f_memory_arena *Arena, f_str8 From, f_str8 To);
-void        F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, f_str8 Path);
+char *     F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
+char *     F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, char *PathToFile);
+void        F_OS_WriteStringToFile               (f_file *File, char *StringToWrite);
+void        F_OS_Internal_WriteStringToPath      (f_memory_arena *Arena, char *PathToFile, char *StringToWrite, f_internal_file_options Options);
+f_b32       F_OS_DeleteFile                    (f_memory_arena *Arena, char *PathToFile);
+void        F_OS_RenameFileTo                  (f_memory_arena *Arena, char *From, char *To);
+void        F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, char *Path);
 
-f_dll  F_OS_DLLFromPath (f_str8 Path);
-void *F_OS_DLLSymbolFromName (f_dll DLL, f_str8 ProcedureName);
+f_dll  F_OS_DLLFromPath (char *Path);
+void *F_OS_DLLSymbolFromName (f_dll DLL, char *ProcedureName);
 
 typedef struct f_internal_directory_options
 {
-	f_str8 Directories[16];
+	char *Directories[F_DIRECTORY_CAPACITY];
 	f_b32 ExcludeDirectories;
 	f_b32 PrependPath;
-	f_str8_array FilterByExtension;
+	char *FilterByExtension[F_DIRECTORY_CAPACITY];
 }
 f_internal_directory_options;
 
@@ -490,29 +479,29 @@ f_internal_directory_options;
 F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ .Directories = {DirectoryPath},__VA_ARGS__ })
 
 #define F_OS_ArrayOfEntriesInDirectory(Arena, DirectoryPath, ...) \
-F_Str8ArrayFromList(Arena, F_OS_Internal_ListOfEntriesInDirectories(Arena,  (f_internal_directory_options){ .Directories = {DirectoryPath},__VA_ARGS__ }))
+F_StringArrayFromList(Arena, F_OS_Internal_ListOfEntriesInDirectories(Arena,  (f_internal_directory_options){ .Directories = {DirectoryPath},__VA_ARGS__ }))
 
 #define F_OS_ListOfFilesInDirectory(Arena, DirectoryPath, ...) \
 F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ .Directories = {DirectoryPath}, .ExcludeDirectories = F_True, __VA_ARGS__ })
 
 #define F_OS_ArrayOfFilesInDirectory(Arena, DirectoryPath, ...) \
-F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, .Directories = {DirectoryPath}, .ExcludeDirectories = F_True, __VA_ARGS__))
+F_StringArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, .Directories = {DirectoryPath}, .ExcludeDirectories = F_True, __VA_ARGS__))
 
 
 #define F_OS_ListOfEntriesInDirectories(Arena, ...) \
 F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ __VA_ARGS__ })
 
 #define F_OS_ArrayOfEntriesInDirectories(Arena, ...) \
-F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, __VA_ARGS__))
+F_StringArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, __VA_ARGS__))
 
 #define F_OS_ListOfFilesInDirectories(Arena, ...) \
 F_OS_Internal_ListOfEntriesInDirectories(Arena, (f_internal_directory_options){ .ExcludeDirectories = F_True, __VA_ARGS__ })
 
 #define F_OS_ArrayOfFilesInDirectories(Arena, ...) \
-F_Str8ArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, .ExcludeDirectories = F_True, __VA_ARGS__))
+F_StringArrayFromList(Arena, F_OS_ListOfEntriesInDirectories(Arena, .ExcludeDirectories = F_True, __VA_ARGS__))
 
 
-f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_internal_directory_options Options);
+f_string_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_internal_directory_options Options);
 
 #if defined(OS_WINDOWS)
 typedef unsigned long (__stdcall *f_thread_function)(void *);
@@ -528,9 +517,9 @@ void  F_OS_WaitForThreads      (f_thread *Thread, f_s32 NumberOfThreadsToWaitFor
 void  F_OS_FutexWait    (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll (void *Address);
 
-void F_Print(f_str8 String);
+void F_Print(char *String);
 #define F_PrintF(...) \
-F_Print(F_Str8PushF(F_TArena(), __VA_ARGS__))
+F_Print(F_StringPushF(F_TArena(), __VA_ARGS__))
 
 f_file F_OS_StandardOut(void);
 
@@ -547,7 +536,7 @@ f_b32    F_NeedsReloading (f_build *Build);
 
 
 
-f_build_cache F_BuildCacheFromOutputPath (f_group Group, f_memory_arena *Arena, f_str8 OutputPath);
+f_build_cache F_BuildCacheFromOutputPath (f_group Group, f_memory_arena *Arena, char *OutputPath);
 f_b32         F_HashIsInBuildCache (f_build_cache Cache, f_u64 Hash);
 
 void F_Report(f_memory_arena *Arena, f_build_report Report);
@@ -586,12 +575,13 @@ int main(int ArgCount, char **Arguments)
 // TODO: Prefix with 'F_'
 thread_local f_lane  F_Internal_Lane;
 thread_local f_group F_Internal_DefaultGroup;
-f_str8_array F_CommandLineArgs;
+f_string_array F_CommandLineArgs;
 
 thread_local f_memory_arena F_ErrorArena;
 
 #include <stdatomic.h> // atomic_fetch_add, atomic_store, atomic_load, atomic_memory_fence ...
 #include <stdio.h> // printf()
+#include <stdlib.h> // exit()
 #include <assert.h> // assert()
 #include <stdarg.h> // va_list, va_args etc
 #include <string.h> // memset
@@ -713,10 +703,10 @@ f_file F_OS_StandardOut(void)
 	return File;
 }
 
-void F_Print(f_str8 String)
+void F_Print(char *String)
 {
 	f_file StdOut = F_OS_StandardOut();
-	F_OS_WriteStr8ToFile(&StdOut, String);
+	F_OS_WriteStringToFile(&StdOut, String);
 }
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs(void)
@@ -1046,14 +1036,11 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 	f_barrier Barrier = {0};
 	Barrier.LaneCount = NLanes;
 
-	F_CommandLineArgs.Items = F_ArenaPushArrayType(FirstLaneArena, ArgCount, f_str8);
+	F_CommandLineArgs.Items = F_ArenaPushArrayType(FirstLaneArena, ArgCount, char *);
 	F_CommandLineArgs.Count = ArgCount;
 	for(f_s32 I = 0; I < ArgCount; I++)
 	{
-		f_s32 ArgLength = strlen(Args[I]);
-		F_CommandLineArgs.Items[I].Bytes = F_ArenaPushArrayType(FirstLaneArena, ArgLength, f_s8);
-		F_MemoryCopy(F_CommandLineArgs.Items[I].Bytes, Args[I], ArgLength);
-		F_CommandLineArgs.Items[I].Size = ArgLength;
+		F_CommandLineArgs.Items[I] = F_StringCopy(FirstLaneArena, Args[I]);
 	}
 
 	_Atomic(f_u64) Vote = 0;
@@ -1097,204 +1084,121 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 	F_OS_WaitForThreads(Threads + 1, NLanes - 1);
 }
 
-f_s64 F_Str8ListCount(f_str8_list List)
+f_s64 F_StringLength(char *String)
+{
+	return (f_s64)strlen(String);
+}
+
+char *F_StringCopy(f_memory_arena *Arena, char *String)
+{
+	f_s64 Length = F_StringLength(String);
+	char *Result = F_ArenaPushArrayType(Arena, Length + 1, char);
+	if(Length) F_MemoryCopy(Result, String, Length);
+	return Result;
+}
+
+f_s64 F_StringListCount(f_string_list List)
 {
 	f_s64 Count = 0;
-	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
-	{
-		Count++;
-	}
+	for(f_string_list_node *Node = List.First; Node; Node = Node->Next) Count++;
 	return Count;
 }
 
-f_s64 F_Str8ListLength(f_str8_list List)
+f_s64 F_StringListLength(f_string_list List)
 {
 	f_s64 Length = 0;
-	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
-	{
-		Length += Node->String.Size;
-	}
+	for(f_string_list_node *Node = List.First; Node; Node = Node->Next) Length += F_StringLength(Node->String);
 	return Length;
 }
 
-f_str8 F_Str8PushFV(f_memory_arena *Arena, char *Format, va_list InputArgs)
+char *F_StringPushFV(f_memory_arena *Arena, char *Format, va_list InputArgs)
 {
-	va_list ArgList;
-	va_copy(ArgList, InputArgs);
-	f_u32 BytesNeeded = vsnprintf(0, 0, Format, InputArgs) + 1;
-	f_str8 Result;
-	Result.Bytes = F_ArenaPushArrayType(Arena, BytesNeeded, f_s8);
-	Result.Size = vsnprintf((char *)Result.Bytes, BytesNeeded, Format, ArgList);
-	Result.Bytes[Result.Size] = 0;
-	va_end(ArgList);
+	va_list Args;
+	va_copy(Args, InputArgs);
+	int Length = vsnprintf(0, 0, Format, Args);
+	va_end(Args);
+	if(Length < 0) return F_StringCopy(Arena, "");
+	char *Result = F_ArenaPushArrayType(Arena, (f_s64)Length + 1, char);
+	va_copy(Args, InputArgs);
+	vsnprintf(Result, (size_t)Length + 1, Format, Args);
+	va_end(Args);
 	return Result;
 }
 
-f_str8 F_Str8PushF(f_memory_arena *Arena, char *Format, ...)
+char *F_StringPushF(f_memory_arena *Arena, char *Format, ...)
 {
-	va_list args;
-	va_start(args, Format);
-	f_str8 Result = F_Str8PushFV(Arena, Format, args);
-	va_end(args);
+	va_list Args;
+	va_start(Args, Format);
+	char *Result = F_StringPushFV(Arena, Format, Args);
+	va_end(Args);
 	return Result;
 }
 
-f_str8_array F_Internal_Str8ArrayFromCStrs(f_memory_arena *Arena, char **CStrs, f_u64 Str8Count)
+void F_StringListAppend(f_memory_arena *Arena, f_string_list *List, char *String)
 {
-	f_str8_array Result = {0};
-	Result.Items = F_ArenaPushArrayType(Arena, Str8Count, f_str8);
-	Result.Count = Str8Count;
+	f_string_list_node *Node = F_ArenaPushType(Arena, f_string_list_node);
+	Node->String = String ? String : "";
+	Node->Previous = List->Last;
+	if(List->Last) List->Last->Next = Node;
+	else List->First = Node;
+	List->Last = Node;
+}
 
-	for(int I = 0; I < Str8Count; I++)
+void F_StringListAppendMany(f_memory_arena *Arena, f_string_list *Head, f_string_list Tail)
+{
+	for(f_string_list_node *Node = Tail.First; Node; Node = Node->Next)
 	{
-		f_s32 CStrLength = strlen(CStrs[I]);
-		Result.Items[I].Bytes = F_ArenaPushArrayType(Arena, CStrLength, f_s8);
-		Result.Items[I].Size = CStrLength;
-		F_MemoryCopy(Result.Items[I].Bytes, CStrs[I], CStrLength);
+		F_StringListAppend(Arena, Head, Node->String);
+		if(Node == Tail.Last) break;
 	}
+}
 
+f_string_array F_StringArrayFromList(f_memory_arena *Arena, f_string_list List)
+{
+	f_string_array Result = {0};
+	Result.Count = F_StringListCount(List);
+	Result.Items = F_ArenaPushArrayType(Arena, Result.Count + 1, char *);
+	f_s64 I = 0;
+	for(f_string_list_node *Node = List.First; Node; Node = Node->Next) Result.Items[I++] = Node->String;
 	return Result;
 }
 
-f_str8_array F_Internal_Str8ArrayFromStr8s(f_memory_arena *Arena, f_str8 *Str8s, f_u64 Str8Count)
+char *F_StringJoinArray(f_memory_arena *Arena, f_string_array Array, char *Separator)
 {
-	f_str8_array Result = {0};
-	Result.Items = F_ArenaPushArrayType(Arena, Str8Count, f_str8);
-	Result.Count = Str8Count;
-
-	for(int I = 0; I < Str8Count; I++)
-	{
-		Result.Items[I].Bytes = F_ArenaPushArrayType(Arena, Str8s[I].Size, f_s8);
-		Result.Items[I].Size = Str8s[I].Size;
-		F_MemoryCopy(Result.Items[I].Bytes, Str8s[I].Bytes, Str8s[I].Size);
-	}
-
-	return Result;
-}
-
-void F_Str8ListAppendMany(f_memory_arena *Arena, f_str8_list *Head, f_str8_list Tail)
-{
-	for(f_str8_list_node *Node = Tail.First; Node; Node = Node->Next)
-	{
-		F_Str8ListAppend(Arena, Head, Node->String);
-	}
-}
-
-void F_Str8ListAppend(f_memory_arena *Arena, f_str8_list *List, f_str8 StringToAppend)
-{
-	f_str8_list_node *Next = F_ArenaPushType(Arena, f_str8_list_node);
-	if(List->Last)
-	{
-		List->Last->Next = Next;
-		List->Last = Next;
-	}
-	else
-	{
-		List->Last = Next;
-		List->First = Next;
-	}
-	Next->String = StringToAppend;
-}
-
-f_str8_array F_Str8ArrayFromList(f_memory_arena *Arena, f_str8_list List)
-{
-	f_s64 Count = F_Str8ListCount(List);
-	f_str8_array Result;
-	Result.Items = F_ArenaPushArrayType(Arena, Count, f_str8);
-	Result.Count = Count;
-	f_s64 Index = 0;
-	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
-	{
-		Result.Items[Index] = Node->String;
-		Index++;
-	}
-	return Result;
-}
-
-f_str8 F_Str8JoinArray(f_memory_arena *Arena, f_str8_array Array, f_str8 Separator)
-{
-	f_s64 TotalStringSize = 0;
+	f_s64 SeparatorLength = F_StringLength(Separator);
+	f_s64 Length = Array.Count > 0 ? (Array.Count - 1) * SeparatorLength : 0;
+	for(f_s64 I = 0; I < Array.Count; I++) Length += F_StringLength(Array.Items[I]);
+	char *Result = F_ArenaPushArrayType(Arena, Length + 1, char);
+	char *At = Result;
 	for(f_s64 I = 0; I < Array.Count; I++)
 	{
-		TotalStringSize += Array.Items[I].Size;
-		if(I < Array.Count - 1) TotalStringSize += Separator.Size;
-	}
-	f_str8 Result;
-	Result.Bytes = F_ArenaPushArrayType(Arena, TotalStringSize, f_s8);
-	Result.Size = TotalStringSize;
-
-	f_s64 Start = 0;
-	for(f_s64 I = 0; I < Array.Count; I++)
-	{
-		F_MemoryCopy(Result.Bytes + Start, Array.Items[I].Bytes, Array.Items[I].Size);
-		Start += Array.Items[I].Size;
-		if(I < Array.Count - 1)
+		f_s64 ItemLength = F_StringLength(Array.Items[I]);
+		if(ItemLength) F_MemoryCopy(At, Array.Items[I], ItemLength);
+		At += ItemLength;
+		if(I + 1 < Array.Count && SeparatorLength)
 		{
-			F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
-			Start += Separator.Size;
+			F_MemoryCopy(At, Separator, SeparatorLength);
+			At += SeparatorLength;
 		}
 	}
 	return Result;
 }
 
-f_str8 F_Str8JoinList(f_memory_arena *Arena, f_str8_list List, f_str8 Separator)
+char *F_StringJoinList(f_memory_arena *Arena, f_string_list List, char *Separator)
 {
-	f_s64 TotalStringSize = 0;
-	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
-	{
-		TotalStringSize += Node->String.Size;
-		if(Node != List.Last) TotalStringSize += Separator.Size;
-	}
-	f_str8 Result;
-	Result.Bytes = F_ArenaPushArrayType(Arena, TotalStringSize, f_s8);
-	Result.Size = TotalStringSize;
-
-	f_s64 Start = 0;
-	for(f_str8_list_node *Node = List.First; Node; Node = Node->Next)
-	{
-		F_MemoryCopy(Result.Bytes + Start, Node->String.Bytes, Node->String.Size);
-		Start += Node->String.Size;
-		if(Node != List.Last)
-		{
-			F_MemoryCopy(Result.Bytes + Start, Separator.Bytes, Separator.Size);
-			Start += Separator.Size;
-		}
-	}
-	return Result;
+	return F_StringJoinArray(Arena, F_StringArrayFromList(Arena, List), Separator);
 }
 
-f_b32 F_Str8Equal(f_str8 A, f_str8 B)
+f_b32 F_StringEqual(char *A, char *B)
 {
-	if(A.Size != B.Size) return F_False;
-	f_b32 Result = F_True;
-	for(f_s64 I = 0; I < A.Size; I++)
-	{
-		if(A.Bytes[I] != B.Bytes[I])
-		{
-			Result = F_False;
-			break;
-		}
-	}
-	return Result;
+	return strcmp(A ? A : "", B ? B : "") == 0;
 }
 
-f_b32 F_Str8EndsWith(f_str8 String, f_str8 Suffix)
+f_b32 F_StringEndsWith(char *String, char *Suffix)
 {
-	if(String.Size < Suffix.Size) return F_False;
-	f_str8 StringTail = (f_str8)
-	{
-		Suffix.Size, String.Bytes + (String.Size - Suffix.Size)
-	};
-	f_b32 Result = F_Str8Equal(StringTail, Suffix);
-	return Result;
-}
-
-char *F_CStrFromStr8(f_memory_arena *Arena, f_str8 String)
-{
-	char *CString = (char *)F_ArenaPush(Arena, String.Size + 1);
-	F_MemoryCopy(CString, String.Bytes, String.Size);
-	CString[String.Size] = 0;
-	return CString;
+	f_s64 Length = F_StringLength(String);
+	f_s64 SuffixLength = F_StringLength(Suffix);
+	return Length >= SuffixLength && F_StringEqual((String ? String : "") + Length - SuffixLength, Suffix);
 }
 
 f_file_info F_OS_FileInfoFromFile(f_file *File)
@@ -1335,87 +1239,87 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 	return FileInfo;
 }
 
-void F_OS_WriteStr8ToFile(f_file *File, f_str8 FileToWrite)
+void F_OS_WriteStringToFile(f_file *File, char *FileToWrite)
 {
 	if(File->Errors) return;
 #if defined(OS_WINDOWS)
 		DWORD Written = 0;
 	File->Errors = !WriteFile(
 		(HANDLE)File->Handle,
-		FileToWrite.Bytes,
-		(DWORD)FileToWrite.Size,
+		FileToWrite,
+		(DWORD)F_StringLength(FileToWrite),
 		&Written, F_Null
 	);
 #elif defined(OS_DARWIN)
-	f_s32 Status = write(File->Handle, FileToWrite.Bytes, FileToWrite.Size);
+	f_s32 Status = write(File->Handle, FileToWrite, F_StringLength(FileToWrite));
 	File->Errors = Status < 0;
 #else
 #error "Unsupported OS"
 #endif
 }
 
-void F_OS_Internal_WriteStr8ToPath(f_memory_arena *Arena, f_str8 PathToFile, f_str8 StringToWrite, f_internal_file_options Options)
+void F_OS_Internal_WriteStringToPath(f_memory_arena *Arena, char *PathToFile, char *StringToWrite, f_internal_file_options Options)
 {
 	f_file File = F_OS_Internal_FileFromFilename(Arena, PathToFile, Options);
-	F_OS_WriteStr8ToFile(&File, StringToWrite);
+	F_OS_WriteStringToFile(&File, StringToWrite);
 	F_OS_ReleaseFile(&File);
 }
 
-f_b32 F_OS_DeleteFile(f_memory_arena *Arena, f_str8 PathToFile)
+f_b32 F_OS_DeleteFile(f_memory_arena *Arena, char *PathToFile)
 {
 	f_b32 Result = F_True;
 #if defined(OS_WINDOWS)
-	Result = DeleteFileA(F_CStrFromStr8(F_TArena(), PathToFile)) != 0;
+	Result = DeleteFileA(PathToFile) != 0;
 #elif defined(OS_DARWIN)
-	Result = remove(F_CStrFromStr8(F_TArena(), PathToFile));
+	Result = remove(PathToFile);
 #else
 #error "Unsupported OS"
 #endif
 	return Result;
 }
 
-f_dll  F_OS_DLLFromPath(f_str8 Path)
+f_dll  F_OS_DLLFromPath(char *Path)
 {
 	f_dll DLL = {0};
 #if defined(OS_WINDOWS)
-	DLL.Handle = (f_u64)LoadLibraryA(F_CStrFromStr8(F_TArena(), Path));
+	DLL.Handle = (f_u64)LoadLibraryA(Path);
 #elif defined(OS_DARWIN)
-	DLL.Handle = (f_u64)dlopen(F_CStrFromStr8(F_TArena(), Path), RTLD_NOW | RTLD_LOCAL);
+	DLL.Handle = (f_u64)dlopen(Path, RTLD_NOW | RTLD_LOCAL);
 #else
 #endif
 	return DLL;
 }
 
-void *F_OS_DLLSymbolFromName(f_dll DLL, f_str8 ProcedureName)
+void *F_OS_DLLSymbolFromName(f_dll DLL, char *ProcedureName)
 {
 	void *Procedure;
 #if defined(OS_WINDOWS)
-	Procedure = GetProcAddress(DLL.Handle, F_CStrFromStr8(F_TArena(), ProcedureName));
+	Procedure = GetProcAddress(DLL.Handle, ProcedureName);
 #elif defined(OS_DARWIN)
-	Procedure = dlsym((void *)DLL.Handle, F_CStrFromStr8(F_TArena(), ProcedureName));
+	Procedure = dlsym((void *)DLL.Handle, ProcedureName);
 #else
 #error "Unsupported OS"
 #endif
 	return Procedure;
 }
 
-void F_OS_RenameFileTo(f_memory_arena *Arena, f_str8 From, f_str8 To)
+void F_OS_RenameFileTo(f_memory_arena *Arena, char *From, char *To)
 {
 #if defined(OS_WINDOWS)
-	MoveFileExA(F_CStrFromStr8(F_TArena(), From), F_CStrFromStr8(F_TArena(), To), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
+	MoveFileExA(From, To, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
 #elif defined(OS_DARWIN)
-	rename(F_CStrFromStr8(F_TArena(), From), F_CStrFromStr8(F_TArena(), To));
+	rename(From, To);
 #else
 #error "Unsupported OS"
 #endif
 }
 
 
-f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
+char *F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 {
-		if(File->Errors) return F_Str8("");
+		if(File->Errors) return "";
 		f_file_info Info = F_OS_FileInfoFromFile(File);
-		f_s8 *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes, f_s8);
+		char *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes + 1, char);
 #if defined(OS_WINDOWS)
 	File->Errors = !ReadFile(
 		(HANDLE)File->Handle,
@@ -1430,7 +1334,7 @@ f_str8 F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 #else
 #error "Unsupported OS"
 #endif
-	return (f_str8) { (f_s64)Info.SizeInBytes, Backing };
+	return Backing;
 }
 
 f_b32 F_FileHasErrors(f_file File)
@@ -1438,23 +1342,23 @@ f_b32 F_FileHasErrors(f_file File)
 	return File.ErrorStream.First || File.Errors;
 }
 
-void F_LogError(f_str8 Message)
+void F_LogError(char *Message)
 {
 	F_PrintF(F_RED "error" F_RESET ":" "%s\n", Message);
 }
 
-void F_LogErrorStream(f_str8_list Messages)
+void F_LogErrorStream(f_string_list Messages)
 {
-	for(f_str8_list_node *Node = Messages.First; Node; Node = Node->Next)
+	for(f_string_list_node *Node = Messages.First; Node; Node = Node->Next)
 	{
 		F_LogError(Node->String);
 	}
 }
 
-f_str8 F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, f_str8 PathToFile)
+char *F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, char *PathToFile)
 {
 	f_file File = F_OS_FileFromFilename(Arena, PathToFile);
-	f_str8 Contents = F_OS_ReadEntireFile(Arena, &File);
+	char *Contents = F_OS_ReadEntireFile(Arena, &File);
 	if(F_FileHasErrors(File))
 	{
 		F_LogErrorStream(File.ErrorStream);
@@ -1463,18 +1367,18 @@ f_str8 F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, f_str8 PathToFile)
 	return Contents;
 }
 
-void F_OS_MakeDirectoryIfNotAlreadyMade(f_memory_arena *Arena, f_str8 Path)
+void F_OS_MakeDirectoryIfNotAlreadyMade(f_memory_arena *Arena, char *Path)
 {
 #if defined(OS_WINDOWS)
-	CreateDirectoryA(F_CStrFromStr8(Arena, Path), F_Null);
+	CreateDirectoryA(Path, F_Null);
 #elif defined(OS_DARWIN)
-	mkdir(F_CStrFromStr8(F_TArena(), Path), 0777);
+	mkdir(Path, 0777);
 #else
 #error "Unsupported OS"
 #endif
 }
 
-f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
+f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, char *Filename)
 {
 	f_file_info FileInfo = {0};
 #if defined(OS_WINDOWS)
@@ -1482,7 +1386,7 @@ f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 	FileInfo = F_OS_FileInfoFromFile(&File);
 #elif defined(OS_DARWIN)
 	struct stat FileStat = {0};
-	if(stat(F_CStrFromStr8(Arena, Filename), &FileStat) == 0)
+	if(stat(Filename, &FileStat) == 0)
 	{
 		FileInfo.SizeInBytes = FileStat.st_size;
 		FileInfo.Exists = F_True;
@@ -1497,12 +1401,12 @@ f_file_info F_OS_FileInfoFromFilename(f_memory_arena *Arena, f_str8 Filename)
 	return FileInfo;
 }
 
-f_file F_OS_Internal_FileFromFilename(f_memory_arena *Arena, f_str8 Filename, f_internal_file_options Options)
+f_file F_OS_Internal_FileFromFilename(f_memory_arena *Arena, char *Filename, f_internal_file_options Options)
 {
 	f_file File = {0};
 #if defined(OS_WINDOWS)
 	File.Handle = (f_u64)CreateFileA(
-		F_CStrFromStr8(Arena, Filename),
+		Filename,
 		GENERIC_READ | GENERIC_WRITE,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		F_Null,
@@ -1514,11 +1418,11 @@ f_file F_OS_Internal_FileFromFilename(f_memory_arena *Arena, f_str8 Filename, f_
 	{
 		File.Handle = 0;
 		File.Errors = F_True;
-		F_AppendErrorF(&File.ErrorStream, "Could not open file '%.*s'", F_Expand(Filename));
+		F_AppendErrorF(&File.ErrorStream, "Could not open file '%s'", Filename);
 	}
 #elif defined(OS_DARWIN)
 	f_s32 Handle = open(
-		F_CStrFromStr8(Arena, Filename),
+		Filename,
 		O_RDWR | (Options.Overwrite ? O_CREAT | O_TRUNC : 0),
 		0666
 	);
@@ -1531,7 +1435,7 @@ f_file F_OS_Internal_FileFromFilename(f_memory_arena *Arena, f_str8 Filename, f_
 	{
 		File.Errors = F_True;
 		F_AppendErrorF(&File.ErrorStream,
-			"Could not open or create file '%.*s'", F_Expand(Filename));
+			"Could not open or create file '%s'", Filename);
 	}
 #else
 #error "Unsupported OS"
@@ -1551,7 +1455,7 @@ void F_OS_ReleaseFile(f_file *File)
 	File->Handle = 0;
 }
 
-void F_UpdateStub(void *) {}
+void F_UpdateStub(void *App) { (void)App; }
 
 f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
 {
@@ -1569,24 +1473,23 @@ f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
 void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 {
 	if(!F_IsInGroup(Group)) return;
-	f_build_cache BuildCache = F_BuildCacheFromOutputPath(Group, F_TArena(), F_Str8("build/"));
+	f_build_cache BuildCache = F_BuildCacheFromOutputPath(Group, F_TArena(), "build/");
 	
-	f_str8_array  SourceFiles = {0};
-	f_str8_array  ObjectFiles = {0};
-	f_str8_array  ObjectFilesToDelete = {0};
+	f_string_array  SourceFiles = {0};
+	f_string_array  ObjectFiles = {0};
+	f_string_array  ObjectFilesToDelete = {0};
 	f_b32 CompileStarted = F_False;
 	if(Group.ID == 0) 
 	{
-		SourceFiles = F_OS_ArrayOfEntriesInDirectories(
-			F_TArena(), 
-			.Directories[0] = BuildOptions->SourceDirectories.Items[0],
-			.Directories[1] = BuildOptions->SourceDirectories.Items[1],
-			.Directories[2] = BuildOptions->SourceDirectories.Items[2],
-			.Directories[3] = BuildOptions->SourceDirectories.Items[3],
-			.PrependPath = F_True,
-			.FilterByExtension = F_Str8ArrayFromCStrs(F_TArena(), ".m", ".c")
-		);
-		ObjectFiles.Items = F_ArenaPushArrayType(F_TArena(), SourceFiles.Count, f_str8);
+		f_string_list Sources = {0};
+		for(f_s64 I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->SourceDirectories[I]; I++)
+		{
+			F_StringListAppendMany(F_TArena(), &Sources, F_OS_ListOfFilesInDirectory(
+				F_TArena(), BuildOptions->SourceDirectories[I], .PrependPath = F_True,
+				.FilterByExtension = { ".m", ".c" }));
+		}
+		SourceFiles = F_StringArrayFromList(F_TArena(), Sources);
+		ObjectFiles.Items = F_ArenaPushArrayType(F_TArena(), SourceFiles.Count, char *);
 		ObjectFiles.Count = SourceFiles.Count;
 	}
 	SourceFiles = F_ReadFromGroupID(Group, 0, SourceFiles);
@@ -1596,41 +1499,41 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	for(f_s32 I = SourceFileRange.Start; I < SourceFileRange.End; I++)
 	{
 		f_u64 Hash = F_HashSourceAndIncludes(F_TArena(), SourceFiles.Items[I], BuildOptions->IncludeDirectories);
-		f_str8 ObjectPath = {0};
-		if(BuildOptions->OutputPath.Size > 0)
+		char *ObjectPath = {0};
+		if(F_StringLength(BuildOptions->OutputPath) > 0)
 		{
-			ObjectPath = F_Str8PushF(F_TArena(), "%.*s/%llu.o", F_Expand(BuildOptions->OutputPath), Hash);
+			ObjectPath = F_StringPushF(F_TArena(), "%s/%llu.o", BuildOptions->OutputPath, Hash);
 		}
 		else
 		{
-			ObjectPath = F_Str8PushF(F_TArena(), "%llu.o", Hash);
+			ObjectPath = F_StringPushF(F_TArena(), "%llu.o", Hash);
 		}
 		ObjectFiles.Items[I] = ObjectPath;
 		if(!F_HashIsInBuildCache(BuildCache, Hash))
 		{
-			f_str8_list Args = {0};
+			f_string_list Args = {0};
 
 			CompileStarted = F_True;
 
-			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
-			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompileOnlyFlag);
-			F_Str8ListAppend(F_TArena(), &Args, SourceFiles.Items[I]);
+			F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
+			F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompileOnlyFlag);
+			F_StringListAppend(F_TArena(), &Args, SourceFiles.Items[I]);
 
 			if(BuildOptions->Debug)
 			{
-				F_Str8ListAppendF(F_TArena(), &Args, "%.*s", F_Expand(BuildOptions->Toolchain.DebugFlag));
+				F_StringListAppendF(F_TArena(), &Args, "%s", BuildOptions->Toolchain.DebugFlag);
 			}
 
-			for(int I = 0; I < BuildOptions->CompileFlags.Count; I++)
+			for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->CompileFlags[I]; I++)
 			{
-				F_Str8ListAppend(F_TArena(), &Args, BuildOptions->CompileFlags.Items[I]);
+				F_StringListAppend(F_TArena(), &Args, BuildOptions->CompileFlags[I]);
 			}
 
-			F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(BuildOptions->Toolchain.OutputFlag), F_Expand(ObjectPath));
+			F_StringListAppendF(F_TArena(), &Args, "%s%s", BuildOptions->Toolchain.OutputFlag, ObjectPath);
 
-			for(int I = 0; I < BuildOptions->IncludeDirectories.Count; I++)
+			for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->IncludeDirectories[I]; I++)
 			{
-				F_Str8ListAppendF(F_TArena(), &Args, "%.*s%.*s", F_Expand(BuildOptions->Toolchain.IncludeFlag), F_Expand(BuildOptions->IncludeDirectories.Items[I]));
+				F_StringListAppendF(F_TArena(), &Args, "%s%s", BuildOptions->Toolchain.IncludeFlag, BuildOptions->IncludeDirectories[I]);
 			}
 
 			F_StartProcess(F_TArena(), Processes + I - SourceFileRange.Start, Args);
@@ -1643,60 +1546,60 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	if(Group.ID == 0)
 	{
 		
-		f_str8 OutputPath = {0};
-		if(BuildOptions->OutputPath.Size > 0)
+		char *OutputPath = {0};
+		if(F_StringLength(BuildOptions->OutputPath) > 0)
 		{
-			OutputPath = F_Str8PushF(F_TArena(), "%.*s/%.*s%llu", F_Expand(BuildOptions->OutputPath), F_Expand(BuildOptions->OutputName), atomic_load(&Build->TotalSuccessfulBuilds));
+			OutputPath = F_StringPushF(F_TArena(), "%s/%s%llu", BuildOptions->OutputPath, BuildOptions->OutputName, atomic_load(&Build->TotalSuccessfulBuilds));
 		}
 		else
 		{
-			OutputPath = F_Str8PushF(F_TArena(), "%.*s%llu", F_Expand(BuildOptions->OutputName), atomic_load(&Build->TotalSuccessfulBuilds));
+			OutputPath = F_StringPushF(F_TArena(), "%s%llu", BuildOptions->OutputName, atomic_load(&Build->TotalSuccessfulBuilds));
 		}
 
 		f_b32 NeedsToReload = F_False;
 		
 		if(ShouldLinkTUs || (!Build->UpdateDLL.Handle && !AnyProcessFailed))
 		{
-			f_str8_list Args = {0};
+			f_string_list Args = {0};
 
-			F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
+			F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
 
-			for(int I = 0; I < BuildOptions->LinkFlags.Count; I++)
+			for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->LinkFlags[I]; I++)
 			{
-				F_Str8ListAppend(F_TArena(), &Args, BuildOptions->LinkFlags.Items[I]);
+				F_StringListAppend(F_TArena(), &Args, BuildOptions->LinkFlags[I]);
 			}
 
-			for(int I = 0; I < BuildOptions->Frameworks.Count; I++)
+			for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->Frameworks[I]; I++)
 			{
-				F_Str8ListAppend(F_TArena(), &Args, F_Str8("-framework"));
-				F_Str8ListAppend(F_TArena(), &Args, BuildOptions->Frameworks.Items[I]);
+				F_StringListAppend(F_TArena(), &Args, "-framework");
+				F_StringListAppend(F_TArena(), &Args, BuildOptions->Frameworks[I]);
 			}
 
 			if(BuildOptions->Kind == F_OUTPUT_DYNAMIC)
 			{
-				F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->Toolchain.DynamicFlag)));
+				F_StringListAppend(F_TArena(), &Args, F_StringPushF(F_TArena(), "%s", BuildOptions->Toolchain.DynamicFlag));
 			}
 			else if(BuildOptions->Kind == F_OUTPUT_STATIC)
 			{
-				F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s", F_Expand(BuildOptions->Toolchain.StaticFlag)));
+				F_StringListAppend(F_TArena(), &Args, F_StringPushF(F_TArena(), "%s", BuildOptions->Toolchain.StaticFlag));
 			}
 
-			F_Str8ListAppend(F_TArena(), &Args, F_Str8PushF(F_TArena(), "%.*s%.*s", F_Expand(BuildOptions->Toolchain.OutputFlag), F_Expand(OutputPath)));
+			F_StringListAppend(F_TArena(), &Args, F_StringPushF(F_TArena(), "%s%s", BuildOptions->Toolchain.OutputFlag, OutputPath));
 			
 			for(int I = 0; I < ObjectFiles.Count; I++)
 			{
-				F_Str8ListAppend(F_TArena(), &Args, ObjectFiles.Items[I]);
+				F_StringListAppend(F_TArena(), &Args, ObjectFiles.Items[I]);
 			}
 			f_process LinkProcess = {0};
 			F_StartProcess(F_TArena(), &LinkProcess, Args);
 			F_WaitForProcess(&LinkProcess);
 
 			f_process DSYMProcess = {0};
-			f_str8_list DSymArgs = {0};
-			F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("dsymutil"));
-			F_Str8ListAppend(F_TArena(), &DSymArgs, OutputPath);
-			F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8("-o"));
-			F_Str8ListAppend(F_TArena(), &DSymArgs, F_Str8PushF(F_TArena(), "%.*s.dSYM", F_Expand(OutputPath)));
+			f_string_list DSymArgs = {0};
+			F_StringListAppend(F_TArena(), &DSymArgs, "dsymutil");
+			F_StringListAppend(F_TArena(), &DSymArgs, OutputPath);
+			F_StringListAppend(F_TArena(), &DSymArgs, "-o");
+			F_StringListAppend(F_TArena(), &DSymArgs, F_StringPushF(F_TArena(), "%s.dSYM", OutputPath));
 
 			F_StartProcess(F_TArena(), &DSYMProcess, DSymArgs);
 			
@@ -1712,7 +1615,7 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		if(NeedsToReload)
 		{
 			Build->UpdateDLL = F_OS_DLLFromPath(OutputPath);
-			Build->Update = F_OS_DLLSymbolFromName(Build->UpdateDLL, F_Str8("AppUpdate"));
+			Build->Update = F_OS_DLLSymbolFromName(Build->UpdateDLL, "AppUpdate");
 		}
 	}
 
@@ -1721,7 +1624,7 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	{
 		if(!BuildCache.NeededObjects[I])
 		{
-			F_OS_DeleteFile(F_TArena(), F_Str8PushF(F_TArena(), "build/%llu.o", BuildCache.Objects[I]));
+			F_OS_DeleteFile(F_TArena(), F_StringPushF(F_TArena(), "build/%llu.o", BuildCache.Objects[I]));
 		}
 	}
 
@@ -1729,11 +1632,11 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	F_GroupBarrier(Group);
 }
 
-f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f_str8 OutputPath)
+f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, char *OutputPath)
 {
-		f_str8_array ObjectFiles = F_OS_ArrayOfEntriesInDirectory(
+		f_string_array ObjectFiles = F_OS_ArrayOfEntriesInDirectory(
 		Arena, OutputPath, .ExcludeDirectories = F_True,
-		.FilterByExtension = F_Str8ArrayFromCStrs(Arena, ".o")
+		.FilterByExtension = { ".o" }
 	);
 	f_build_cache Cache = {0};
 	if(Group.ID == 0)
@@ -1746,13 +1649,13 @@ f_build_cache F_BuildCacheFromOutputPath(f_group Group, f_memory_arena *Arena, f
 	f_range Range = F_SplitRange(Group, ObjectFiles.Count);
 	for (f_s32 I = Range.Start; I < Range.End; I++)
 	{
-		f_str8 HashAsString = ObjectFiles.Items[I];
+		char *HashAsString = ObjectFiles.Items[I];
 		// Remove extension
-		HashAsString.Size -= 2;
+		f_s64 HashLength = F_StringLength(HashAsString) - 2;
 		f_u64 Hash = 0;
-		for(f_s32 I = 0; I < HashAsString.Size; I++)
+		for(f_s32 I = 0; I < HashLength; I++)
 		{
-			Hash = HashAsString.Bytes[I] - '0' + Hash*10;
+			Hash = HashAsString[I] - '0' + Hash*10;
 		}
 		Cache.Objects[I] = Hash;
 	}
@@ -1773,7 +1676,7 @@ f_b32 F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
 	return F_False;
 }
 
-f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready);
+f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSource, char **IncludePaths, f_string_list *IncludesSeenAlready);
 
 
 f_u64 F_HashBytes(f_u64 HashStart, void *Data, f_u64 NumberOfBytesToHash)
@@ -1788,38 +1691,38 @@ f_u64 F_HashBytes(f_u64 HashStart, void *Data, f_u64 NumberOfBytesToHash)
 	return Hash;
 }
 
-f_u64 F_HashStr8(f_str8 String)
+f_u64 F_HashString(char *String)
 {
-	return F_HashBytes(F_HashStart, String.Bytes, String.Size);
+	return F_HashBytes(F_HashStart, String, F_StringLength(String));
 }
 
-f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_internal_directory_options Options)
+f_string_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_internal_directory_options Options)
 {
 #define IsCStrDotOrDotDot(Name) (Name[0] == '.' && (Name[1] == 0 || (Name[1] == '.' && Name[2] == 0)))
-	f_str8_list Entries = { 0 };
+	f_string_list Entries = { 0 };
 #if defined(OS_WINDOWS)
 	// Error handling or something
 	WIN32_FIND_DATA FindData;
 
 	HANDLE FoundHandle;
-	for(f_s32 Directory = 0; Options.Directories[Directory] && Directory < 16; Directory++)
+	for(f_s32 Directory = 0; Directory < F_DIRECTORY_CAPACITY && Options.Directories[Directory]; Directory++)
 	{
-		FoundHandle = FindFirstFile(F_CStrFromStr8(Arena, F_Str8PushF(Arena, "%.*s\\*", F_Expan(Options.Directories[Directory]))), &FindData);
-		if(FoundHandle == INVALID_HANDLE_VALUE) return Entries;
+		FoundHandle = FindFirstFile(F_StringPushF(Arena, "%s\\*", Options.Directories[Directory]), &FindData);
+		if(FoundHandle == INVALID_HANDLE_VALUE) continue;
 		do
 		{
 			f_b32 ShouldExcludeDirectories = (Options.ExcludeDirectories && FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
 			f_b32 IsActualEntry = !IsCStrDotOrDotDot(FindData.cFileName);
 			if(ShouldExcludeDirectories) continue;
 			if(!IsActualEntry) continue;
-			f_str8 EntryName = F_Str8PushF(Arena, "%s", FindData.cFileName);
+			char *EntryName = F_StringPushF(Arena, "%s", FindData.cFileName);
 			f_b32 MatchFound = F_True;
-			if(Options.FilterByExtension.Count > 0)
+			if(Options.FilterByExtension[0] != F_Null)
 			{
 				MatchFound = F_False;
-				for(f_s32 I = 0; I < Options.FilterByExtension.Count; I++)
+				for(f_s32 I = 0; I < F_DIRECTORY_CAPACITY && Options.FilterByExtension[I]; I++)
 				{
-					if(F_Str8EndsWith(EntryName, Options.FilterByExtension.Items[I]))
+					if(F_StringEndsWith(EntryName, Options.FilterByExtension[I]))
 					{
 						MatchFound = F_True;
 					}
@@ -1829,19 +1732,21 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 			if(!MatchFound) continue;
 			if(Options.PrependPath)
 			{
-				F_Str8ListAppendF(Arena, &Entries, "%.*s\\%.*s", F_Expand(DirectoryPath), F_Expand(EntryName));
+				F_StringListAppendF(Arena, &Entries, "%s\\%s", Options.Directories[Directory], EntryName);
 			}
 			else
 			{
-				F_Str8ListAppendF(Arena, &Entries, "%.*s", F_Expand(EntryName));
+				F_StringListAppendF(Arena, &Entries, "%s", EntryName);
 			}
 		}
 		while (FindNextFile(FoundHandle, &FindData) && FoundHandle != INVALID_HANDLE_VALUE);
+		FindClose(FoundHandle);
 	}
 #elif defined(OS_DARWIN)
-	for(f_s32 I = 0; Options.Directories[I].Size > 0 && I < 16; I++)
+	for(f_s32 I = 0; I < F_DIRECTORY_CAPACITY && Options.Directories[I]; I++)
 	{
-		DIR *Directory = opendir(F_CStrFromStr8(F_TArena(), Options.Directories[I]));
+		DIR *Directory = opendir(Options.Directories[I]);
+		if(!Directory) continue;
 		struct dirent *Entry;
 		while((Entry = readdir(Directory)))
 		{
@@ -1850,15 +1755,15 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 			if(!IsActualEntry) continue;
 			if(ShouldExcludeDirectories) continue;
 
-			f_str8 EntryName = F_Str8PushF(Arena, "%s", Entry->d_name);
+			char *EntryName = F_StringPushF(Arena, "%s", Entry->d_name);
 
 			f_b32 MatchFound = F_True;
-			if(Options.FilterByExtension.Count > 0)
+			if(Options.FilterByExtension[0] != F_Null)
 			{
 				MatchFound = F_False;
-				for(int I = 0; I < Options.FilterByExtension.Count; I++)
+				for(int I = 0; I < F_DIRECTORY_CAPACITY && Options.FilterByExtension[I]; I++)
 				{
-					if(F_Str8EndsWith(EntryName, Options.FilterByExtension.Items[I]))
+					if(F_StringEndsWith(EntryName, Options.FilterByExtension[I]))
 					{
 						MatchFound = F_True;
 						break;
@@ -1869,13 +1774,14 @@ f_str8_list F_OS_Internal_ListOfEntriesInDirectories(f_memory_arena *Arena, f_in
 			
 			if(Options.PrependPath)
 			{
-				F_Str8ListAppendF(Arena, &Entries, "%.*s/%s", F_Expand(Options.Directories[I]), Entry->d_name);
+				F_StringListAppendF(Arena, &Entries, "%s/%s", Options.Directories[I], Entry->d_name);
 			}
 			else
 			{
-				F_Str8ListAppendF(Arena, &Entries, "%s", Entry->d_name);
+				F_StringListAppendF(Arena, &Entries, "%s", Entry->d_name);
 			}
 		}
+		closedir(Directory);
 	}
 #else
 #error "Unsupported OS"
@@ -1905,10 +1811,10 @@ void *F_Internal_ReadFromGroupID(f_group Group, f_s32 ID, void *Variable, f_u64 
 	return Variable;
 }
 
-void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
+void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_string_list Args)
 {
 	if(!Process) return;
-	Process->StdOutSinceLastPoll.Bytes = F_ArenaPushArrayType(Arena, F_PROCESS_STDOUT_CAPACITY, f_s8);
+	Process->StdOutSinceLastPoll = F_ArenaPushArrayType(Arena, F_PROCESS_STDOUT_CAPACITY + 1, char);
 #if defined(OS_WINDOWS)
 	
 	SECURITY_ATTRIBUTES Attributes = {0};
@@ -1928,7 +1834,7 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 	PROCESS_INFORMATION ProcessInfo = {0};
 	f_b32 ProcessStatus = CreateProcessA(
 			F_Null,
-			F_CStrFromStr8(Arena, F_Str8JoinList(Arena, Args, F_Str8(" "))),
+			F_StringJoinList(Arena, Args, " "),
 			F_Null,
 			F_Null,
 			F_True,
@@ -1953,12 +1859,12 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 	}
 #elif defined(OS_DARWIN)
 
-	f_s32 MaxArguments = 1024;
+	f_s64 MaxArguments = F_StringListCount(Args) + 1;
 	char **CompilerArguments = F_ArenaPushArrayType(Arena, MaxArguments, char*);
 	f_s32 ArgumentCount = 0;
-	for(f_str8_list_node *Node = Args.First; Node; Node = Node->Next)
+	for(f_string_list_node *Node = Args.First; Node; Node = Node->Next)
 	{
-		CompilerArguments[ArgumentCount++] = F_CStrFromStr8(Arena, Node->String);
+		CompilerArguments[ArgumentCount++] = Node->String;
 	}
 	CompilerArguments[ArgumentCount] = F_Null;
 
@@ -1976,12 +1882,14 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 	posix_spawn_file_actions_addclose(&SpawnActions, FileDescriptors[0]);
 	posix_spawn_file_actions_addclose(&SpawnActions, FileDescriptors[1]);
 
-	f_s32 ProcessStatus = posix_spawnp(&Process->ID, CompilerArguments[0], &SpawnActions, F_Null, CompilerArguments, environ);
+	pid_t ChildPID = 0;
+	f_s32 ProcessStatus = posix_spawnp(&ChildPID, CompilerArguments[0], &SpawnActions, F_Null, CompilerArguments, environ);
 	posix_spawn_file_actions_destroy(&SpawnActions);
 	close(FileDescriptors[1]);
 
 	if(ProcessStatus == 0)
 	{
+		Process->ID = ChildPID;
 		fcntl(FileDescriptors[0], F_SETFL, O_NONBLOCK);
 		Process->StdOut = (void*)((f_u64)FileDescriptors[0]);
 		Process->State = F_PROCESS_RUNNING;
@@ -1998,7 +1906,8 @@ void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_str8_list Args)
 
 f_b32 F_PollProcess(f_process *Process)
 {
-	Process->StdOutSinceLastPoll.Size = 0;
+	f_u64 OutputLength = 0;
+	if(Process->StdOutSinceLastPoll) Process->StdOutSinceLastPoll[0] = 0;
 
 	if(Process->State != F_PROCESS_RUNNING) return F_False;
 #if defined(OS_WINDOWS)
@@ -2012,14 +1921,15 @@ f_b32 F_PollProcess(f_process *Process)
 				&& BytesAvailable > 0)
 	{
 		BytesAvailable = F_Min(BytesAvailable, F_PROCESS_STDOUT_CAPACITY);
-		if(ReadFile(Process->StdOut, Process->StdOutSinceLastPoll.Bytes,
+		if(ReadFile(Process->StdOut, Process->StdOutSinceLastPoll,
 														BytesAvailable, &BytesRead, F_Null))
 		{
-			Process->StdOutSinceLastPoll.Size = (f_s64)BytesRead;
+			OutputLength = BytesRead;
+			Process->StdOutSinceLastPoll[OutputLength] = 0;
 		}
 	}
 
-	if(!StillRunning && Process->StdOutSinceLastPoll.Size == 0)
+	if(!StillRunning && OutputLength == 0)
 	{
 		DWORD ExitCode = 0;
 		GetExitCodeProcess((HANDLE)Process->ID, &ExitCode);
@@ -2034,10 +1944,11 @@ f_b32 F_PollProcess(f_process *Process)
 	return F_True;
 #elif defined(OS_DARWIN)
 
-	f_s64 BytesRead = read((f_s32)((f_u64)Process->StdOut), Process->StdOutSinceLastPoll.Bytes, F_PROCESS_STDOUT_CAPACITY);
+	f_s64 BytesRead = read((f_s32)((f_u64)Process->StdOut), Process->StdOutSinceLastPoll, F_PROCESS_STDOUT_CAPACITY);
 	if(BytesRead > 0)
 	{
-		Process->StdOutSinceLastPoll.Size = (f_u64)BytesRead;
+		OutputLength = BytesRead;
+		Process->StdOutSinceLastPoll[OutputLength] = 0;
 	}
 
 	int Status = 0;
@@ -2046,16 +1957,17 @@ f_b32 F_PollProcess(f_process *Process)
 		return F_True;
 	}
 
-	for(;Process->StdOutSinceLastPoll.Size < F_PROCESS_STDOUT_CAPACITY;)
+	for(;OutputLength < F_PROCESS_STDOUT_CAPACITY;)
 	{
-		f_s8 *BytesTail = Process->StdOutSinceLastPoll.Bytes + Process->StdOutSinceLastPoll.Size;
-		f_u64 BytesLeft = F_PROCESS_STDOUT_CAPACITY - Process->StdOutSinceLastPoll.Size;
+		char *BytesTail = Process->StdOutSinceLastPoll + OutputLength;
+		f_u64 BytesLeft = F_PROCESS_STDOUT_CAPACITY - OutputLength;
 		f_s64 Tail = read((f_u32)((f_u64)Process->StdOut), BytesTail, BytesLeft);
 
 		if(Tail <= 0) break;
 		else
 		{
-			Process->StdOutSinceLastPoll.Size += (f_u64)Tail;
+			OutputLength += Tail;
+			Process->StdOutSinceLastPoll[OutputLength] = 0;
 		}
 	}
 	if (WIFEXITED(Status))
@@ -2113,9 +2025,9 @@ void F_WaitForProcess(f_process *Process)
 {
 	while(F_PollProcess(Process))
 	{
-		if(Process->StdOutSinceLastPoll.Size > 0) F_Print(Process->StdOutSinceLastPoll);
+		if(F_StringLength(Process->StdOutSinceLastPoll) > 0) F_Print(Process->StdOutSinceLastPoll);
 	}
-	if(Process->StdOutSinceLastPoll.Size > 0) F_Print(Process->StdOutSinceLastPoll);
+	if(F_StringLength(Process->StdOutSinceLastPoll) > 0) F_Print(Process->StdOutSinceLastPoll);
 }
 
 void  F_WaitForMultipleProcesses(f_process *Processes, f_s32 ProcessCount)
@@ -2126,54 +2038,55 @@ void  F_WaitForMultipleProcesses(f_process *Processes, f_s32 ProcessCount)
 	}
 }
 
-f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths, f_str8_list *IncludesSeenAlready)
+f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSource, char **IncludePaths, f_string_list *IncludesSeenAlready)
 {
-#define CharAt(Index) ((Index) < Source.Size ? Source.Bytes[Index] : 0)
-#define AdvanceBy(Index, Amount) ((Index += Amount), Index < Source.Size)
+#define CharAt(Index) ((Index) < SourceLength ? Source[Index] : 0)
+#define AdvanceBy(Index, Amount) ((Index += Amount), Index < SourceLength)
 #define Advance(Index) (AdvanceBy(Index, 1))
-#define MatchAt(String, Index) F_Str8Equal((f_str8){ F_Min(String.Size, (Source.Size - (Index))), Source.Bytes + (Index) }, String)
+#define MatchAt(String, Index) (strncmp(Source + (Index), String, F_StringLength(String)) == 0)
 #define SkipWhiteSpace(Index) for(;CharAt(Index) == ' ' || CharAt(Index) == '\t';Advance(Index))
 #define SkipUntilMatch(Index, Char) for(;CharAt(Index) != 0 && CharAt(Index) != Char; Advance(Index))
-#define SkipUntilMatch2(Index, CharA, CharB) for(;CharAt(Index) != 0 && CharAt(Index) != CharA && CharAt(Index + 1) != CharB; Advance(Index))
+#define SkipUntilMatch2(Index, CharA, CharB) for(;CharAt(Index) != 0 && (CharAt(Index) != CharA || CharAt(Index + 1) != CharB); Advance(Index))
 
-	f_str8 Source = F_OS_ReadEntireFileFromPath(Arena, PathToSource);
+	char *Source = F_OS_ReadEntireFileFromPath(Arena, PathToSource);
+	f_s64 SourceLength = F_StringLength(Source);
 	// Hash whilst advancing?
-	f_u64 SourceAndIncludesHash = F_HashStr8(Source);
-	for(f_s64 I = 0; I < Source.Size; I++)
+	f_u64 SourceAndIncludesHash = F_HashString(Source);
+	for(f_s64 I = 0; I < SourceLength; I++)
 	{
-		switch(Source.Bytes[I])
+		switch(Source[I])
 		{
 			case '#': {
 				Advance(I);
-				f_str8 Include = F_Str8("include");
-				f_str8 PathToInclude = {0};
+				char *Include = "include";
+				char *PathToInclude = {0};
 				if(MatchAt(Include, I))
 				{
-					AdvanceBy(I, Include.Size);
+					AdvanceBy(I, F_StringLength(Include));
 					SkipWhiteSpace(I);
 					if(CharAt(I) == '<')
 					{
 						Advance(I);
 						f_u64 Start = I;
 						SkipUntilMatch(I, '>');
-						PathToInclude = (f_str8){I - Start, Source.Bytes + Start};
+						PathToInclude = F_StringPushF(Arena, "%.*s", (int)(I - Start), Source + Start);
 					}
 					else if(CharAt(I) == '\"')
 					{
 						Advance(I);
 						f_u64 Start = I;
 						SkipUntilMatch(I, '\"');
-						PathToInclude = (f_str8){I - Start, Source.Bytes + Start};
+						PathToInclude = F_StringPushF(Arena, "%.*s", (int)(I - Start), Source + Start);
 					}
 				}
-				if(PathToInclude.Size > 0)
+				if(F_StringLength(PathToInclude) > 0)
 				{
 					f_file_info Info = {0};
 					Info = F_OS_FileInfoFromFilename(Arena, PathToInclude);
 					
-					for(f_s32 IncludePathIndex = 0; IncludePathIndex < IncludePaths.Count; IncludePathIndex++)
+					for(f_s32 IncludePathIndex = 0; !Info.Exists && IncludePaths && IncludePathIndex < F_STRING_OPTION_CAPACITY && IncludePaths[IncludePathIndex]; IncludePathIndex++)
 					{
-						f_str8 PrependedPathToInclude = F_Str8PushF(Arena, "%.*s/%.*s", F_Expand(IncludePaths.Items[IncludePathIndex]), F_Expand(PathToInclude));
+						char *PrependedPathToInclude = F_StringPushF(Arena, "%s/%s", IncludePaths[IncludePathIndex], PathToInclude);
 						Info = F_OS_FileInfoFromFilename(Arena, PrependedPathToInclude);
 						if(Info.Exists)
 						{
@@ -2182,15 +2095,15 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSou
 						}
 					}
 					f_b32 IncludeSeenAlready = F_False;
-					for(f_str8_list_node *Node = IncludesSeenAlready->First; Node; Node = Node->Next)
+					for(f_string_list_node *Node = IncludesSeenAlready->First; Node; Node = Node->Next)
 					{
-						if(F_Str8Equal(Node->String, PathToInclude)) IncludeSeenAlready = F_True;
+						if(F_StringEqual(Node->String, PathToInclude)) IncludeSeenAlready = F_True;
 					}
 					if(Info.Exists && !IncludeSeenAlready)
 					{
 						// This isn't perfect but it's actually find since even though the order of hashing with xor doesn't now matter,
 						// it's never an issue with includes.
-						F_Str8ListAppend(Arena, IncludesSeenAlready, PathToInclude);
+						F_StringListAppend(Arena, IncludesSeenAlready, PathToInclude);
 						SourceAndIncludesHash ^= __F_Internal_HashSourceAndIncludes(Arena, PathToInclude, IncludePaths, IncludesSeenAlready);
 					}
 				}
@@ -2214,6 +2127,7 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSou
 		}
 	}
 	return SourceAndIncludesHash;
+#undef MatchAt
 #undef CharAt
 #undef Advance
 #undef AdvanceBy
@@ -2222,9 +2136,9 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSou
 #undef SkipUntilMatch2
 }
 
-f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_str8 PathToSource, f_str8_array IncludePaths)
+f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSource, char **IncludePaths)
 {
-	f_str8_list IncludesSeenAlready = {0};
+	f_string_list IncludesSeenAlready = {0};
 	return __F_Internal_HashSourceAndIncludes(Arena, PathToSource, IncludePaths, &IncludesSeenAlready);
 }
 
@@ -2244,29 +2158,29 @@ static char *__PassedASCII[] = {
 "  \\/_/     \\/_/\\/_/   \\/_____/   \\/_____/   \\/_____/   \\/____/",
 };
 
-void F_FailedBanner(f_str8_array Stats)
+void F_FailedBanner(f_string_array Stats)
 {
 	for(int I = 0; I < 5; I++)
 	{
-		f_str8 Stat = F_Str8("");
+		char *Stat = "";
 		if(I < Stats.Count)
 		{
 			Stat = Stats.Items[I];
 		}
-		printf(F_RED "%-64s" F_RESET F_DIM "\u2502" F_RESET "  %.*s\n", __FailedASCII[I],  F_Expand(Stat));
+		printf(F_RED "%-64s" F_RESET F_DIM "\u2502" F_RESET "  %s\n", __FailedASCII[I],  Stat);
 	}
 }
 
-void F_PassedBanner(f_str8_array Stats)
+void F_PassedBanner(f_string_array Stats)
 {
 	for(int I = 0; I < 5; I++)
 	{
-		f_str8 Stat = F_Str8("");
+		char *Stat = "";
 		if(I < Stats.Count)
 		{
 			Stat = Stats.Items[I];
 		}
-		printf(F_GREEN "%-64s" F_RESET F_DIM "\u2502" F_RESET "  %.*s\n", __PassedASCII[I],  F_Expand(Stat));
+		printf(F_GREEN "%-64s" F_RESET F_DIM "\u2502" F_RESET "  %s\n", __PassedASCII[I],  Stat);
 	}
 }
 

@@ -1,4 +1,4 @@
-#include "include/app.h"
+#include "../include/app.h"
 
 #define FRIDAY_IMPLEMENTATION
 #define FRIDAY_MAIN
@@ -6,27 +6,18 @@
 
 F_LaneEntry
 {
-	f_build_options BuildOptions = {0};
-	BuildOptions.CompileFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc");
-	BuildOptions.LinkFlags = F_Str8ArrayFromCStrs(F_PArena(), "-fobjc-arc");
-	BuildOptions.Frameworks = F_Str8ArrayFromCStrs(F_PArena(), 
-		"Cocoa", "Metal", "QuartzCore"
-	);
-
-	BuildOptions.OutputPath = F_Str8("build");
-	BuildOptions.OutputName = F_Str8("app.dynlib");
-
-	BuildOptions.IncludeDirectories = F_Str8ArrayFromCStrs(F_PArena(),
-	"include/",
-	"external/",
-	"build/",
-	);
-
-	BuildOptions.SourceDirectories = F_Str8ArrayFromCStrs(F_PArena(), "source", "source/app", "source/darwin", "external");
-	BuildOptions.Kind = F_OUTPUT_DYNAMIC;
-
-	BuildOptions.Toolchain = F_TOOLCHAIN_CLANG;
-	BuildOptions.Debug = F_True;
+	f_build_options BuildOptions = {
+		.CompileFlags = { "-fobjc-arc" },
+		.LinkFlags = { "-fobjc-arc" },
+		.Frameworks = { "Cocoa", "Metal", "QuartzCore" },
+		.OutputPath = "build",
+		.OutputName = "app.dynlib",
+		.IncludeDirectories = { "include/", "external/", "build/" },
+		.SourceDirectories = { "source", "source/app", "source/darwin", "external" },
+		.Kind = F_OUTPUT_DYNAMIC,
+		.Toolchain = F_TOOLCHAIN_CLANG,
+		.Debug = F_True,
+	};
 
 	f_group UpdateGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID == 0);
 	f_group BuildGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID > 0);
