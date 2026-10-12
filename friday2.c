@@ -1,4 +1,4 @@
-#include "../include/app.h"
+#include "include/app.h"
 
 #define FRIDAY_IMPLEMENTATION
 #define FRIDAY_MAIN

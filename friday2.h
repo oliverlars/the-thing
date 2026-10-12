@@ -11,7 +11,6 @@ if len(sys.argv) == 2:
     if os.name == 'nt':
         command = ['cl', '/std:c11', '/experimental:c1atomics', '/O2', 'utf-8', '/TC', str(source), '/Fe:', str(output), '/link', 'Synchronization.lib']
     else:
-        print('RUNGALO! ', str(output))
         command = ['clang', '-x', 'c', '-std=c11', str(source), '-g', '-o', str(output)]
     subprocess.call(command)
 else:
@@ -1086,6 +1085,7 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 
 f_s64 F_StringLength(char *String)
 {
+	if(!String) return 0;
 	return (f_s64)strlen(String);
 }
 
