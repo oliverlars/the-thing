@@ -11,7 +11,7 @@ if len(sys.argv) == 2:
     if os.name == 'nt':
         command = ['cl', '/std:c11', '/experimental:c1atomics', '/O2', 'utf-8', '/TC', str(source), '/Fe:', str(output), '/link', 'Synchronization.lib']
     else:
-        command = ['clang', '-x', 'c', '-std=c11', str(source), '-g', '-o', str(output)]
+        command = ['clang', '-x', 'c', '-fobjc-arc', '-std=c11', str(source), '-framework', 'Cocoa', '-o', str(output)]
     subprocess.call(command)
 else:
     print("Usage: python3 friday2.h <your implementation>.c")
@@ -276,22 +276,22 @@ typedef struct f_build_options
 {
 	f_output_kind  Kind;
 
-	char *        OutputPath;
-	char *        OutputName;
+	char          *OutputPath;
+	char          *OutputName;
 
-	char *SourceDirectories[F_STRING_OPTION_CAPACITY];
-	char *IncludeDirectories[F_STRING_OPTION_CAPACITY];
+	char          *SourceDirectories[F_STRING_OPTION_CAPACITY];
+	char          *IncludeDirectories[F_STRING_OPTION_CAPACITY];
 
-	char *CompileFlags[F_STRING_OPTION_CAPACITY];
-	char *LinkFlags[F_STRING_OPTION_CAPACITY];
+	char          *CompileFlags[F_STRING_OPTION_CAPACITY];
+	char          *LinkFlags[F_STRING_OPTION_CAPACITY];
 
 	f_b32          Debug;
 	f_b32          Optimise;
-	char *Defines[F_STRING_OPTION_CAPACITY];
-	char *Libraries[F_STRING_OPTION_CAPACITY];
-	char *Frameworks[F_STRING_OPTION_CAPACITY];
+	char          *Defines[F_STRING_OPTION_CAPACITY];
+	char          *Libraries[F_STRING_OPTION_CAPACITY];
+	char          *Frameworks[F_STRING_OPTION_CAPACITY];
 
-	char *CompilerSpecificFlags[F_STRING_OPTION_CAPACITY];
+	char          *CompilerSpecificFlags[F_STRING_OPTION_CAPACITY];
 	f_toolchain    Toolchain;
 }
 f_build_options;
@@ -530,7 +530,8 @@ void F_Internal_LaneEntry();
 
 
 f_build *F_BuildFromGroup (f_memory_arena *Arena, f_group Group);
-void     F_UpdateBuild    (f_group Group, f_build *Build, f_build_options *BuildOptions);
+void     F_Build    (f_group Group, f_build *Build, f_build_options *BuildOptions);
+void     F_Update   (f_group Group, f_build *Build, void *User);
 f_b32    F_NeedsReloading (f_build *Build);
 
 
@@ -545,9 +546,6 @@ f_memory_arena *F_TArena();
 void F_ResetTArena();
 f_group F_DefaultGroup();
 
-f_b32 F_IsBuildLane();
-f_b32 F_IsUpdateLane();
-
 #endif
 
 #ifdef FRIDAY_IMPLEMENTATION
@@ -556,11 +554,7 @@ f_b32 F_IsUpdateLane();
 
 int main(int ArgCount, char **Arguments)
 {
-#ifdef FRIDAY_SINGLE_THREAD
-	F_DispatchAcrossNLanes(1, Arguments, ArgCount);
-#else
 	F_DispatchAcrossNLanes(F_OS_NumberOFHighPerformanceCPUs(), Arguments, ArgCount);
-#endif
 }
 
 #endif
@@ -1455,7 +1449,13 @@ void F_OS_ReleaseFile(f_file *File)
 	File->Handle = 0;
 }
 
-void F_UpdateStub(void *App) { (void)App; }
+void F_UpdateStub(void *User) { (void)User; }
+
+void F_Update(f_group Group, f_build *Build, void *User)
+{
+	if(!F_IsInGroup(Group)) return;
+	Build->Update(User);
+}
 
 f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
 {
@@ -1470,7 +1470,7 @@ f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
 	return Build;
 }
 
-void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
+void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 {
 	if(!F_IsInGroup(Group)) return;
 	f_build_cache BuildCache = F_BuildCacheFromOutputPath(Group, F_TArena(), "build/");
@@ -1499,6 +1499,36 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	for(f_s32 I = SourceFileRange.Start; I < SourceFileRange.End; I++)
 	{
 		f_u64 Hash = F_HashSourceAndIncludes(F_TArena(), SourceFiles.Items[I], BuildOptions->IncludeDirectories);
+
+		for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->CompileFlags[I]; I++)
+		{
+			Hash ^= F_HashString(BuildOptions->CompileFlags[I]);
+		}
+		for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->Defines[I]; I++)
+		{
+			Hash ^= F_HashString( BuildOptions->Defines[I]);
+		}
+		for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->Libraries[I]; I++)
+		{
+			Hash ^= F_HashString( BuildOptions->Libraries[I]);
+		}
+		for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->Frameworks[I]; I++)
+		{
+			Hash ^= F_HashString(BuildOptions->Frameworks[I]);
+		}
+
+		Hash ^= F_HashString(BuildOptions->Toolchain.CompilerPath);
+		Hash ^= F_HashString(BuildOptions->Toolchain.LinkerPath);
+		Hash ^= F_HashString(BuildOptions->Toolchain.IncludeFlag);
+		Hash ^= F_HashString(BuildOptions->Toolchain.OutputFlag);
+		Hash ^= F_HashString(BuildOptions->Toolchain.OptimiseFlag);
+		Hash ^= F_HashString(BuildOptions->Toolchain.DynamicFlag);
+		Hash ^= F_HashString(BuildOptions->Toolchain.StaticFlag);
+		Hash ^= F_HashString(BuildOptions->Toolchain.CompileOnlyFlag);
+		Hash ^= F_HashString(BuildOptions->Toolchain.LinkOnlyFlag);	
+
+		Hash = F_HashBytes(Hash, &BuildOptions->Debug, sizeof BuildOptions->Debug);
+		Hash = F_HashBytes(Hash, &BuildOptions->Optimise, sizeof BuildOptions->Optimise);
 		char *ObjectPath = {0};
 		if(F_StringLength(BuildOptions->OutputPath) > 0)
 		{
@@ -1607,7 +1637,7 @@ void F_UpdateBuild(f_group Group, f_build *Build, f_build_options *BuildOptions)
 
 			if(!(F_ProcessFailed(&DSYMProcess) || F_ProcessFailed(&LinkProcess)))
 			{
-				printf(F_GREEN "\u2713" F_RESET F_DIM " [friday]" F_RESET " successfully reloaded" "\n");
+				printf(F_GREEN "\u2713" F_RESET F_DIM " [FRIDAY]" F_RESET " RELOAD SUCCESSFUL" "\n");
 				NeedsToReload = F_True;
 				atomic_fetch_add(&Build->TotalSuccessfulBuilds, 1);
 			}

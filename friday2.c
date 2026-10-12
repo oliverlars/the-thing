@@ -19,23 +19,26 @@ F_LaneEntry
 		.Debug = F_True,
 	};
 
+	for(f_s32 I = 0; I < F_CommandLineArgs.Count; I++)
+	{
+		if(F_StringEqual(F_CommandLineArgs.Items[I], "release"))	
+		{
+			BuildOptions.Debug = F_False;
+			BuildOptions.Optimise = F_True;
+		}
+	}
+
 	f_group UpdateGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID == 0);
 	f_group BuildGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID > 0);
 	f_build *Build = F_BuildFromGroup(F_PArena(), F_DefaultGroup());
-	
-
-	assert(Build->Update);
 
 	app_interface App = {0};
 
 	for(;;)
 	{
-		if(F_IsInGroup(UpdateGroup))
-		{
-			Build->Update(&App);
-			if(App.WantsToQuit) F_Exit();
-		}
-		F_UpdateBuild(BuildGroup, Build, &BuildOptions);
+		if(App.WantsToQuit) F_Exit();
+		F_Update(UpdateGroup, Build, &App);
+		F_Build(BuildGroup, Build, &BuildOptions);
 		F_ResetTArena();
 	}
 }
