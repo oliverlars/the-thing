@@ -1604,11 +1604,18 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		if(ShouldLinkTUs || (!Build->UpdateDLL.Handle && !AnyProcessFailed))
 		{
 
-			for(f_s32 I = 0; I < F_STRING_OPTION_CAPACITY; I++)
+			if(BuildOptions->EmbedOutputPath)
 			{
-				if(BuildOptions->EmbedOutputPath)
+				for(f_s32 I = 0; I < F_STRING_OPTION_CAPACITY; I++)
 				{
-					F_OS_WriteStringToPath(F_TArena(), F_StringPushF(F_TArena(), "%s/%s", BuildOptions->OutputPath, BuildOptions->EmbedOutputPath), "hello");
+					if(BuildOptions->Embeds[I].PathToFile)
+					{
+						f_string_list Embed = {0};
+						F_StringListAppend(F_TArena(), &Embed, "struct \n{");
+						char *Data = F_OS_ReadEntireFileFromPath(F_TArena(), BuildOptions->Embeds[I].PathToFile);
+						F_StringListAppendF(F_TArena(), &Embed, "\n} %s;", BuildOptions->Embeds[I].Name);
+						F_OS_WriteStringToPath(F_TArena(), F_StringPushF(F_TArena(), "%s/%s", BuildOptions->OutputPath, BuildOptions->EmbedOutputPath), "hello");
+					}
 				}
 			}
 
