@@ -11,7 +11,7 @@ if len(sys.argv) == 2:
     if os.name == 'nt':
         command = ['cl', '/std:c11', '/experimental:c1atomics', '/O2', 'utf-8', '/TC', str(source), '/Fe:', str(output), '/link', 'Synchronization.lib']
     else:
-        command = ['clang', '-x', 'c', '-fobjc-arc', '-std=c11', str(source), '-framework', 'Cocoa', '-o', str(output)]
+        command = ['clang', '-x', 'c', '-O2', '-fobjc-arc', '-std=c11', str(source), '-framework', 'Cocoa', '-o', str(output)]
     subprocess.call(command)
 else:
     print("Usage: python3 friday2.h <your implementation>.c")
@@ -272,6 +272,14 @@ f_build;
 #define F_STRING_OPTION_CAPACITY 64
 #define F_DIRECTORY_CAPACITY 16
 
+
+typedef struct f_embed
+{
+	char *Name;
+	char *PathToFile;
+}
+f_embed;
+
 typedef struct f_build_options
 {
 	f_output_kind  Kind;
@@ -292,6 +300,11 @@ typedef struct f_build_options
 	char          *Frameworks[F_STRING_OPTION_CAPACITY];
 
 	char          *CompilerSpecificFlags[F_STRING_OPTION_CAPACITY];
+
+
+	char          *EmbedOutputPath;
+	f_embed        Embeds[F_STRING_OPTION_CAPACITY];
+
 	f_toolchain    Toolchain;
 }
 f_build_options;
@@ -1590,6 +1603,15 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		
 		if(ShouldLinkTUs || (!Build->UpdateDLL.Handle && !AnyProcessFailed))
 		{
+
+			for(f_s32 I = 0; I < F_STRING_OPTION_CAPACITY; I++)
+			{
+				if(BuildOptions->EmbedOutputPath)
+				{
+					F_OS_WriteStringToPath(F_TArena(), F_StringPushF(F_TArena(), "%s/%s", BuildOptions->OutputPath, BuildOptions->EmbedOutputPath), "hello");
+				}
+			}
+
 			f_string_list Args = {0};
 
 			F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
