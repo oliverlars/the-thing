@@ -11,7 +11,7 @@ if len(sys.argv) == 2:
     if os.name == 'nt':
         command = ['cl', '/std:c11', '/experimental:c1atomics', '/O2', 'utf-8', '/TC', str(source), '/Fe:', str(output), '/link', 'Synchronization.lib']
     else:
-        command = ['clang', '-x', 'c', '-O2', '-fobjc-arc', '-std=c11', str(source), '-framework', 'Cocoa', '-o', str(output)]
+        command = ['clang', '-x', 'c', '-O0', '-g', '-fobjc-arc', '-std=c11', str(source), '-framework', 'Cocoa', '-o', str(output)]
     subprocess.call(command)
 else:
     print("Usage: python3 friday2.h <your implementation>.c")
@@ -460,20 +460,27 @@ f_internal_file_options;
 F_OS_Internal_FileFromFilename(Arena, Filename, (f_internal_file_options){ __VA_ARGS__ })
 
 #define F_OS_WriteStringToPath(Arena, PathToFile, StringToWrite, ...) \
-F_OS_Internal_WriteStringToPath(Arena, PathToFile, StringToWrite, (f_internal_file_options){ __VA_ARGS__ })
+F_OS_Internal_WriteStringToPath(Arena, PathToFile, StringToWrite, (f_internal_file_options){ .Overwrite = F_True, __VA_ARGS__ })
 
 f_file F_OS_Internal_FileFromFilename (f_memory_arena *Arena, char *Filename, f_internal_file_options Options);
 void   F_OS_ReleaseFile      (f_file *File);
 
-f_file_info F_OS_FileInfoFromFilename          (f_memory_arena *Arena, char *Filename);
-f_file_info F_OS_FileInfoFromFile              (f_file *File);
-char *     F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
-char *     F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, char *PathToFile);
-void        F_OS_WriteStringToFile               (f_file *File, char *StringToWrite);
-void        F_OS_Internal_WriteStringToPath      (f_memory_arena *Arena, char *PathToFile, char *StringToWrite, f_internal_file_options Options);
-f_b32       F_OS_DeleteFile                    (f_memory_arena *Arena, char *PathToFile);
-void        F_OS_RenameFileTo                  (f_memory_arena *Arena, char *From, char *To);
-void        F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, char *Path);
+typedef struct f_buffer
+{
+	u8 *Bytes;
+	f_s64 NumberOfBytes;
+}
+f_buffer;
+
+f_file_info  F_OS_FileInfoFromFilename          (f_memory_arena *Arena, char *Filename);
+f_file_info  F_OS_FileInfoFromFile              (f_file *File);
+f_buffer     F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
+f_buffer     F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, char *PathToFile);
+void         F_OS_WriteStringToFile             (f_file *File, char *StringToWrite);
+void         F_OS_Internal_WriteStringToPath    (f_memory_arena *Arena, char *PathToFile, char *StringToWrite, f_internal_file_options Options);
+f_b32        F_OS_DeleteFile                    (f_memory_arena *Arena, char *PathToFile);
+void         F_OS_RenameFileTo                  (f_memory_arena *Arena, char *From, char *To);
+void         F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, char *Path);
 
 f_dll  F_OS_DLLFromPath (char *Path);
 void *F_OS_DLLSymbolFromName (f_dll DLL, char *ProcedureName);
@@ -1322,9 +1329,9 @@ void F_OS_RenameFileTo(f_memory_arena *Arena, char *From, char *To)
 }
 
 
-char *F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
+f_buffer F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 {
-		if(File->Errors) return "";
+		if(File->Errors) return (f_buffer){(u8*)"", 0};
 		f_file_info Info = F_OS_FileInfoFromFile(File);
 		char *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes + 1, char);
 #if defined(OS_WINDOWS)
@@ -1341,7 +1348,7 @@ char *F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 #else
 #error "Unsupported OS"
 #endif
-	return Backing;
+	return (f_buffer){ (u8*)Backing, Info.SizeInBytes };
 }
 
 f_b32 F_FileHasErrors(f_file File)
@@ -1362,16 +1369,16 @@ void F_LogErrorStream(f_string_list Messages)
 	}
 }
 
-char *F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, char *PathToFile)
+f_buffer F_OS_ReadEntireFileFromPath(f_memory_arena *Arena, char *PathToFile)
 {
 	f_file File = F_OS_FileFromFilename(Arena, PathToFile);
-	char *Contents = F_OS_ReadEntireFile(Arena, &File);
+	f_buffer Buffer = F_OS_ReadEntireFile(Arena, &File);
 	if(F_FileHasErrors(File))
 	{
 		F_LogErrorStream(File.ErrorStream);
 	}
 	F_OS_ReleaseFile(&File);
-	return Contents;
+	return Buffer;
 }
 
 void F_OS_MakeDirectoryIfNotAlreadyMade(f_memory_arena *Arena, char *Path)
@@ -1603,20 +1610,34 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		
 		if(ShouldLinkTUs || (!Build->UpdateDLL.Handle && !AnyProcessFailed))
 		{
-
 			if(BuildOptions->EmbedOutputPath)
 			{
+				f_string_list EmbedList = {0};
 				for(f_s32 I = 0; I < F_STRING_OPTION_CAPACITY; I++)
 				{
 					if(BuildOptions->Embeds[I].PathToFile)
 					{
-						f_string_list Embed = {0};
-						F_StringListAppend(F_TArena(), &Embed, "struct \n{");
-						char *Data = F_OS_ReadEntireFileFromPath(F_TArena(), BuildOptions->Embeds[I].PathToFile);
-						F_StringListAppendF(F_TArena(), &Embed, "\n} %s;", BuildOptions->Embeds[I].Name);
-						F_OS_WriteStringToPath(F_TArena(), F_StringPushF(F_TArena(), "%s/%s", BuildOptions->OutputPath, BuildOptions->EmbedOutputPath), "hello");
+						F_StringListAppendF(F_TArena(), &EmbedList, "struct {\n");
+						f_buffer Buffer = F_OS_ReadEntireFileFromPath(F_TArena(), BuildOptions->Embeds[I].PathToFile);
+						if(Buffer.NumberOfBytes > 0)
+						{
+							// Get this to work as an arrays so it's cheaper than linked list per byte 
+							char *FirstByteAsString = F_StringPushF(F_TArena(), "0x%02x, \n", Buffer.Bytes[0]);
+							f_s64 ElementSize = F_StringLength(FirstByteAsString);
+							char *ElementsAsString = F_ArenaPushArrayType(F_TArena(), Buffer.NumberOfBytes*ElementSize + 1, char);
+							f_s64 ElementCursor = 0;
+							for(f_s64 Byte = 0; Byte < Buffer.NumberOfBytes; Byte++)
+							{
+								char *ByteAsString = F_StringPushF(F_TArena(), "0x%02x, \n", Buffer.Bytes[Byte]);
+								F_MemoryCopy(ElementsAsString + ElementCursor, ByteAsString, ElementSize);
+								ElementCursor += ElementSize;
+							}
+							F_StringListAppendF(F_TArena(), &EmbedList, "%s", ElementsAsString);
+							F_StringListAppendF(F_TArena(), &EmbedList, "\n} %s;\n", BuildOptions->Embeds[I].Name);
+						}
 					}
 				}
+				F_OS_WriteStringToPath(F_TArena(), BuildOptions->EmbedOutputPath, F_StringJoinList(F_TArena(), EmbedList, ""));
 			}
 
 			f_string_list Args = {0};
@@ -2099,21 +2120,20 @@ void  F_WaitForMultipleProcesses(f_process *Processes, f_s32 ProcessCount)
 
 f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSource, char **IncludePaths, f_string_list *IncludesSeenAlready)
 {
-#define CharAt(Index) ((Index) < SourceLength ? Source[Index] : 0)
-#define AdvanceBy(Index, Amount) ((Index += Amount), Index < SourceLength)
+#define CharAt(Index) ((Index) < Source.NumberOfBytes ? Source.Bytes[Index] : 0)
+#define AdvanceBy(Index, Amount) ((Index += Amount), Index < Source.NumberOfBytes)
 #define Advance(Index) (AdvanceBy(Index, 1))
-#define MatchAt(String, Index) (strncmp(Source + (Index), String, F_StringLength(String)) == 0)
+#define MatchAt(String, Index) (strncmp((char*)Source.Bytes + (Index), String, F_StringLength(String)) == 0)
 #define SkipWhiteSpace(Index) for(;CharAt(Index) == ' ' || CharAt(Index) == '\t';Advance(Index))
 #define SkipUntilMatch(Index, Char) for(;CharAt(Index) != 0 && CharAt(Index) != Char; Advance(Index))
 #define SkipUntilMatch2(Index, CharA, CharB) for(;CharAt(Index) != 0 && (CharAt(Index) != CharA || CharAt(Index + 1) != CharB); Advance(Index))
 
-	char *Source = F_OS_ReadEntireFileFromPath(Arena, PathToSource);
-	f_s64 SourceLength = F_StringLength(Source);
+	f_buffer Source = F_OS_ReadEntireFileFromPath(Arena, PathToSource);
 	// Hash whilst advancing?
-	f_u64 SourceAndIncludesHash = F_HashString(Source);
-	for(f_s64 I = 0; I < SourceLength; I++)
+	f_u64 SourceAndIncludesHash = F_HashString((char*)Source.Bytes);
+	for(f_s64 I = 0; I < Source.NumberOfBytes; I++)
 	{
-		switch(Source[I])
+		switch(Source.Bytes[I])
 		{
 			case '#': {
 				Advance(I);
@@ -2128,14 +2148,14 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSour
 						Advance(I);
 						f_u64 Start = I;
 						SkipUntilMatch(I, '>');
-						PathToInclude = F_StringPushF(Arena, "%.*s", (int)(I - Start), Source + Start);
+						PathToInclude = F_StringPushF(Arena, "%.*s", (int)(I - Start), Source.Bytes + Start);
 					}
 					else if(CharAt(I) == '\"')
 					{
 						Advance(I);
 						f_u64 Start = I;
 						SkipUntilMatch(I, '\"');
-						PathToInclude = F_StringPushF(Arena, "%.*s", (int)(I - Start), Source + Start);
+						PathToInclude = F_StringPushF(Arena, "%.*s", (int)(I - Start), Source.Bytes + Start);
 					}
 				}
 				if(F_StringLength(PathToInclude) > 0)

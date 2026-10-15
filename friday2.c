@@ -17,6 +17,8 @@ F_LaneEntry
 		.Kind = F_OUTPUT_DYNAMIC,
 		.Toolchain = F_TOOLCHAIN_CLANG,
 		.Debug = F_True,
+		.EmbedOutputPath = "build/embed.h",
+		.Embeds = { {"G_BerkeleyMono", "fonts/BerkeleyMono-Regular.ttf"}, {"G_Lucide", "fonts/lucide.ttf"}}
 	};
 
 	for(f_s32 I = 0; I < F_CommandLineArgs.Count; I++)
