@@ -301,8 +301,6 @@ typedef struct f_build_options
 
 	char          *CompilerSpecificFlags[F_STRING_OPTION_CAPACITY];
 
-
-	char          *EmbedOutputPath;
 	f_embed        Embeds[F_STRING_OPTION_CAPACITY];
 
 	f_toolchain    Toolchain;
@@ -459,8 +457,8 @@ f_internal_file_options;
 #define F_OS_FileFromFilename(Arena, Filename, ...) \
 F_OS_Internal_FileFromFilename(Arena, Filename, (f_internal_file_options){ __VA_ARGS__ })
 
-#define F_OS_WriteStringToPath(Arena, PathToFile, StringToWrite, ...) \
-F_OS_Internal_WriteStringToPath(Arena, PathToFile, StringToWrite, (f_internal_file_options){ .Overwrite = F_True, __VA_ARGS__ })
+#define F_OS_WriteBytesToPath(Arena, PathToFile, BytesToWrite, ...) \
+F_OS_Internal_WriteBytesToPath(Arena, PathToFile, BytesToWrite, (f_internal_file_options){ .Overwrite = F_True, __VA_ARGS__ })
 
 f_file F_OS_Internal_FileFromFilename (f_memory_arena *Arena, char *Filename, f_internal_file_options Options);
 void   F_OS_ReleaseFile      (f_file *File);
@@ -476,8 +474,8 @@ f_file_info  F_OS_FileInfoFromFilename          (f_memory_arena *Arena, char *Fi
 f_file_info  F_OS_FileInfoFromFile              (f_file *File);
 f_buffer     F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
 f_buffer     F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, char *PathToFile);
-void         F_OS_WriteStringToFile             (f_file *File, char *StringToWrite);
-void         F_OS_Internal_WriteStringToPath    (f_memory_arena *Arena, char *PathToFile, char *StringToWrite, f_internal_file_options Options);
+void         F_OS_WriteBytesToFile             (f_file *File, u8 *BytesToWrite);
+void         F_OS_Internal_WriteBytesToPath    (f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_internal_file_options Options);
 f_b32        F_OS_DeleteFile                    (f_memory_arena *Arena, char *PathToFile);
 void         F_OS_RenameFileTo                  (f_memory_arena *Arena, char *From, char *To);
 void         F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, char *Path);
@@ -535,6 +533,9 @@ void  F_OS_WaitForSingleThread (f_thread Thread);
 void  F_OS_WaitForThreads      (f_thread *Thread, f_s32 NumberOfThreadsToWaitFor);
 void  F_OS_FutexWait    (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll (void *Address);
+
+
+void F_OS_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data);
 
 void F_Print(char *String);
 #define F_PrintF(...) \
@@ -719,7 +720,7 @@ f_file F_OS_StandardOut(void)
 void F_Print(char *String)
 {
 	f_file StdOut = F_OS_StandardOut();
-	F_OS_WriteStringToFile(&StdOut, String);
+	F_OS_WriteBytesToFile(&StdOut, (u8*)String);
 }
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs(void)
@@ -817,6 +818,61 @@ void F_OS_FutexWakeAll(void *Address)
 	os_sync_wake_by_address_all(Address, sizeof(f_u64), OS_SYNC_WAKE_BY_ADDRESS_NONE);
 #else
 #error "Unsupported OS"
+#endif
+}
+
+
+void F_OS_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data)
+{
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	f_file File = F_OS_FileFromFilename(F_TArena(), ObjectFileName, .Overwrite = F_True);
+	
+	u8 MachOHeader[32] = {0};
+	MachOHeader[0] = 0xCF;
+	MachOHeader[1] = 0xFA;
+	MachOHeader[2] = 0xED;
+	MachOHeader[3] = 0xFE;
+
+	MachOHeader[4] = 0x0C;
+	MachOHeader[5] = 0x0;
+	MachOHeader[6] = 0x0;
+	MachOHeader[7] = 0x01;
+
+	MachOHeader[8] = 0x0;
+	MachOHeader[9] = 0x0;
+	MachOHeader[10] = 0x0;
+	MachOHeader[11] = 0x0;
+
+	MachOHeader[12] = 0x01;
+	MachOHeader[13] = 0x0;
+	MachOHeader[14] = 0x0;
+	MachOHeader[15] = 0x0;
+
+	MachOHeader[16] = 0x02;
+	MachOHeader[17] = 0x0;
+	MachOHeader[18] = 0x0;
+	MachOHeader[19] = 0x0;
+
+	MachOHeader[20] = 0xB0;
+	MachOHeader[21] = 0x0;
+	MachOHeader[22] = 0x0;
+	MachOHeader[23] = 0x0;
+
+	MachOHeader[24] = 0x0;
+	MachOHeader[25] = 0x0;
+	MachOHeader[26] = 0x0;
+	MachOHeader[27] = 0x0;
+
+	MachOHeader[28] = 0x0;
+	MachOHeader[29] = 0x0;
+	MachOHeader[30] = 0x0;
+	MachOHeader[31] = 0x0;
+
+	F_OS_WriteBytesToFile(&File, MachOHeader);
+
+#else
+#error "Unsupported"
 #endif
 }
 
@@ -1253,7 +1309,7 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 	return FileInfo;
 }
 
-void F_OS_WriteStringToFile(f_file *File, char *FileToWrite)
+void F_OS_WriteBytesToFile(f_file *File, u8 *FileToWrite)
 {
 	if(File->Errors) return;
 #if defined(OS_WINDOWS)
@@ -1265,17 +1321,17 @@ void F_OS_WriteStringToFile(f_file *File, char *FileToWrite)
 		&Written, F_Null
 	);
 #elif defined(OS_DARWIN)
-	f_s32 Status = write(File->Handle, FileToWrite, F_StringLength(FileToWrite));
+	f_s32 Status = write(File->Handle, FileToWrite, F_StringLength((char*)FileToWrite));
 	File->Errors = Status < 0;
 #else
 #error "Unsupported OS"
 #endif
 }
 
-void F_OS_Internal_WriteStringToPath(f_memory_arena *Arena, char *PathToFile, char *StringToWrite, f_internal_file_options Options)
+void F_OS_Internal_WriteBytesToPath(f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_internal_file_options Options)
 {
 	f_file File = F_OS_Internal_FileFromFilename(Arena, PathToFile, Options);
-	F_OS_WriteStringToFile(&File, StringToWrite);
+	F_OS_WriteBytesToFile(&File, BytesToWrite);
 	F_OS_ReleaseFile(&File);
 }
 
@@ -1610,36 +1666,6 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		
 		if(ShouldLinkTUs || (!Build->UpdateDLL.Handle && !AnyProcessFailed))
 		{
-			if(BuildOptions->EmbedOutputPath)
-			{
-				f_string_list EmbedList = {0};
-				for(f_s32 I = 0; I < F_STRING_OPTION_CAPACITY; I++)
-				{
-					if(BuildOptions->Embeds[I].PathToFile)
-					{
-						F_StringListAppendF(F_TArena(), &EmbedList, "struct {\n");
-						f_buffer Buffer = F_OS_ReadEntireFileFromPath(F_TArena(), BuildOptions->Embeds[I].PathToFile);
-						if(Buffer.NumberOfBytes > 0)
-						{
-							// Get this to work as an arrays so it's cheaper than linked list per byte 
-							char *FirstByteAsString = F_StringPushF(F_TArena(), "0x%02x, \n", Buffer.Bytes[0]);
-							f_s64 ElementSize = F_StringLength(FirstByteAsString);
-							char *ElementsAsString = F_ArenaPushArrayType(F_TArena(), Buffer.NumberOfBytes*ElementSize + 1, char);
-							f_s64 ElementCursor = 0;
-							for(f_s64 Byte = 0; Byte < Buffer.NumberOfBytes; Byte++)
-							{
-								char *ByteAsString = F_StringPushF(F_TArena(), "0x%02x, \n", Buffer.Bytes[Byte]);
-								F_MemoryCopy(ElementsAsString + ElementCursor, ByteAsString, ElementSize);
-								ElementCursor += ElementSize;
-							}
-							F_StringListAppendF(F_TArena(), &EmbedList, "%s", ElementsAsString);
-							F_StringListAppendF(F_TArena(), &EmbedList, "\n} %s;\n", BuildOptions->Embeds[I].Name);
-						}
-					}
-				}
-				F_OS_WriteStringToPath(F_TArena(), BuildOptions->EmbedOutputPath, F_StringJoinList(F_TArena(), EmbedList, ""));
-			}
-
 			f_string_list Args = {0};
 
 			F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
