@@ -29,7 +29,7 @@ F_LaneEntry
 		}
 	}
 
-	F_OS_EmitDataAsObjectFile("test.o", "abc", (u8*)"abc");
+	F_EmitDataAsObjectFile("test.o", "abc", (u8*)"abc");
 
 	f_group UpdateGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID == 0);
 	f_group BuildGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID > 0);

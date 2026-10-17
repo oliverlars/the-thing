@@ -9,7 +9,7 @@ if len(sys.argv) == 2:
     output = source.with_suffix('.exe' if os.name == 'nt' else '')
     command = None
     if os.name == 'nt':
-        command = ['cl', '/std:c11', '/experimental:c1atomics', '/O2', 'utf-8', '/TC', str(source), '/Fe:', str(output), '/link', 'Synchronization.lib']
+        command = ['cl', '/std:c11', '/experimental:c11atomics', '/O2', 'utf-8', '/TC', str(source), '/Fe:', str(output), '/link', 'Synchronization.lib']
     else:
         command = ['clang', '-x', 'c', '-O0', '-g', '-fobjc-arc', '-std=c11', str(source), '-framework', 'Cocoa', '-o', str(output)]
     subprocess.call(command)
@@ -535,7 +535,7 @@ void  F_OS_FutexWait    (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll (void *Address);
 
 
-void F_OS_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data);
+void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data);
 
 void F_Print(char *String);
 #define F_PrintF(...) \
@@ -822,52 +822,85 @@ void F_OS_FutexWakeAll(void *Address)
 }
 
 
-void F_OS_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data)
+void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data)
 {
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
 	f_file File = F_OS_FileFromFilename(F_TArena(), ObjectFileName, .Overwrite = F_True);
 	
-	u8 MachOHeader[32] = {0};
-	MachOHeader[0] = 0xCF;
-	MachOHeader[1] = 0xFA;
-	MachOHeader[2] = 0xED;
-	MachOHeader[3] = 0xFE;
+	u32 MachOHeader[8] = {0};
+	MachOHeader[0] = 0xFEEDFACF;
+	MachOHeader[1] = 0x0100000C;
+	MachOHeader[2] = 0x00000000;
+	MachOHeader[3] = 0x00000001;
+	MachOHeader[4] = 0x00000002;
+	MachOHeader[5] = 0x000000B0;
+	MachOHeader[6] = 0x00000000;
+	MachOHeader[7] = 0x00000000;
 
-	MachOHeader[4] = 0x0C;
-	MachOHeader[5] = 0x0;
-	MachOHeader[6] = 0x0;
-	MachOHeader[7] = 0x01;
+	u32 LoadCommand[18] = {0};
+	LoadCommand[0] = 0x00000019;
+	LoadCommand[1] = 0x00000098;
 
-	MachOHeader[8] = 0x0;
-	MachOHeader[9] = 0x0;
-	MachOHeader[10] = 0x0;
-	MachOHeader[11] = 0x0;
+	LoadCommand[2] = 0x00000000;
+	LoadCommand[3] = 0x00000000;
+	LoadCommand[4] = 0x00000000;
+	LoadCommand[5] = 0x00000000;
 
-	MachOHeader[12] = 0x01;
-	MachOHeader[13] = 0x0;
-	MachOHeader[14] = 0x0;
-	MachOHeader[15] = 0x0;
+	LoadCommand[6] = 0x00000000;
+	LoadCommand[7] = 0x00000000;
 
-	MachOHeader[16] = 0x02;
-	MachOHeader[17] = 0x0;
-	MachOHeader[18] = 0x0;
-	MachOHeader[19] = 0x0;
+	LoadCommand[8] = 0x00000004;
+	LoadCommand[9] = 0x00000000;
 
-	MachOHeader[20] = 0xB0;
-	MachOHeader[21] = 0x0;
-	MachOHeader[22] = 0x0;
-	MachOHeader[23] = 0x0;
+	LoadCommand[10] = 0x000000D0;
+	LoadCommand[11] = 0x00000000;
 
-	MachOHeader[24] = 0x0;
-	MachOHeader[25] = 0x0;
-	MachOHeader[26] = 0x0;
-	MachOHeader[27] = 0x0;
+	LoadCommand[12] = 0x00000004;
+	LoadCommand[13] = 0x00000000;
 
-	MachOHeader[28] = 0x0;
-	MachOHeader[29] = 0x0;
-	MachOHeader[30] = 0x0;
-	MachOHeader[31] = 0x0;
+	LoadCommand[14] = 0x00000007;
+	LoadCommand[15] = 0x00000007;
+	LoadCommand[16] = 0x00000001;
+	LoadCommand[17] = 0x00000000;
+
+	u32 Section[20] = {0};
+
+	Section[0] = 0x6F635F5F;
+	Section[1] = 0x0074736E;
+	Section[2] = 0x00000000;
+	Section[3] = 0x00000000;
+
+	Section[4] = 0x45545F5F;
+	Section[5] = 0x00005854;
+	Section[6] = 0x00000000;
+	Section[7] = 0x00000000;
+
+	Section[8] = 0x00000000;
+	Section[9] = 0x00000000;
+
+	Section[10] = 0x00000004;
+	Section[11] = 0x00000000;
+
+	Section[12] = 0x000000D0;
+	Section[13] = 0x00000000;
+	Section[14] = 0x00000000;
+	Section[15] = 0x00000000;
+	Section[16] = 0x00000000;
+	Section[17] = 0x00000000;
+	Section[18] = 0x00000000;
+	Section[19] = 0x00000000;
+
+
+	u32 SymTab[6] = {0};
+
+	SymTab[0] = 0x00000002;
+	SymTab[1] = 0x00000018;
+	SymTab[2] = 0x000000D8;
+	SymTab[3] = 0x00000001;
+	SymTab[4] = 0x000000E8;
+	SymTab[5] = 0x00000006;
+	
 
 	F_OS_WriteBytesToFile(&File, MachOHeader);
 
