@@ -457,9 +457,6 @@ f_internal_file_options;
 #define F_OS_FileFromFilename(Arena, Filename, ...) \
 F_OS_Internal_FileFromFilename(Arena, Filename, (f_internal_file_options){ __VA_ARGS__ })
 
-#define F_OS_WriteBytesToPath(Arena, PathToFile, BytesToWrite, ...) \
-F_OS_Internal_WriteBytesToPath(Arena, PathToFile, BytesToWrite, (f_internal_file_options){ .Overwrite = F_True, __VA_ARGS__ })
-
 f_file F_OS_Internal_FileFromFilename (f_memory_arena *Arena, char *Filename, f_internal_file_options Options);
 void   F_OS_ReleaseFile      (f_file *File);
 
@@ -474,8 +471,8 @@ f_file_info  F_OS_FileInfoFromFilename          (f_memory_arena *Arena, char *Fi
 f_file_info  F_OS_FileInfoFromFile              (f_file *File);
 f_buffer     F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
 f_buffer     F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, char *PathToFile);
-void         F_OS_WriteBytesToFile             (f_file *File, u8 *BytesToWrite);
-void         F_OS_Internal_WriteBytesToPath    (f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_internal_file_options Options);
+void         F_OS_WriteBytesToFile             (f_file *File, u8 *BytesToWrite, f_u64 NumberOfBytes);
+void         F_OS_WriteBytesToPath             (f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_u64 NumberOfBytes);
 f_b32        F_OS_DeleteFile                    (f_memory_arena *Arena, char *PathToFile);
 void         F_OS_RenameFileTo                  (f_memory_arena *Arena, char *From, char *To);
 void         F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, char *Path);
@@ -535,7 +532,7 @@ void  F_OS_FutexWait    (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll (void *Address);
 
 
-void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data);
+void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data, f_u64 NumberOfBytes);
 
 void F_Print(char *String);
 #define F_PrintF(...) \
@@ -720,7 +717,7 @@ f_file F_OS_StandardOut(void)
 void F_Print(char *String)
 {
 	f_file StdOut = F_OS_StandardOut();
-	F_OS_WriteBytesToFile(&StdOut, (u8*)String);
+	F_OS_WriteBytesToFile(&StdOut, (u8*)String, F_StringLength(String));
 }
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs(void)
@@ -822,13 +819,35 @@ void F_OS_FutexWakeAll(void *Address)
 }
 
 
-void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data)
+void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data, f_u64 NumberOfBytes)
 {
+	f_file File = F_OS_FileFromFilename(F_TArena(), ObjectFileName, .Overwrite = F_True);
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
-	f_file File = F_OS_FileFromFilename(F_TArena(), ObjectFileName, .Overwrite = F_True);
+
+	// [descriptions][your data][padding][symbol entry][name table]
+
+	f_u32 SymbolEntry[4] = {0};
+
+	f_u64 SymbolNameLength = F_StringLength(SymbolName);
+
+	f_u64 DataOffset = 0xD0;
+	f_u64 DataEnd = DataOffset + NumberOfBytes;
+	f_u64 SymbolOffset = (DataEnd + 7) & ~(f_u64)7;
+	f_u64 StringOffset = SymbolOffset + sizeof(SymbolEntry);
+	f_u64 StringSize = (SymbolNameLength + 2 + 7) & ~(f_u64)7;
+
+	f_u64 DataPadding = SymbolOffset - DataEnd;
+	f_u64 StringPadding = StringSize - (SymbolNameLength + 2);
+	f_u64 BytesToWrite = StringOffset + StringSize;
 	
-	u32 MachOHeader[8] = {0};
+	f_u32 MachOHeader[8] = {0};
+	f_u32 LoadCommand[18] = {0};
+	f_u32 Section[20] = {0};
+	f_u32 SymTab[6] = {0};
+
+	//f_u64 BytesToWrite = sizeof(MachOHeader) + sizeof(LoadCommand) + sizeof(Section) + sizeof(SymTab);
+
 	MachOHeader[0] = 0xFEEDFACF;
 	MachOHeader[1] = 0x0100000C;
 	MachOHeader[2] = 0x00000000;
@@ -838,50 +857,37 @@ void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data)
 	MachOHeader[6] = 0x00000000;
 	MachOHeader[7] = 0x00000000;
 
-	u32 LoadCommand[18] = {0};
 	LoadCommand[0] = 0x00000019;
 	LoadCommand[1] = 0x00000098;
-
 	LoadCommand[2] = 0x00000000;
 	LoadCommand[3] = 0x00000000;
 	LoadCommand[4] = 0x00000000;
 	LoadCommand[5] = 0x00000000;
-
 	LoadCommand[6] = 0x00000000;
 	LoadCommand[7] = 0x00000000;
-
-	LoadCommand[8] = 0x00000004;
-	LoadCommand[9] = 0x00000000;
-
+	LoadCommand[8] = (f_u32)(NumberOfBytes >> 0);
+	LoadCommand[9] = (f_u32)(NumberOfBytes >> 32);
 	LoadCommand[10] = 0x000000D0;
 	LoadCommand[11] = 0x00000000;
-
-	LoadCommand[12] = 0x00000004;
-	LoadCommand[13] = 0x00000000;
-
+	LoadCommand[12] = (f_u32)(NumberOfBytes >> 0);
+	LoadCommand[13] = (f_u32)(NumberOfBytes >> 32);
 	LoadCommand[14] = 0x00000007;
 	LoadCommand[15] = 0x00000007;
 	LoadCommand[16] = 0x00000001;
 	LoadCommand[17] = 0x00000000;
 
-	u32 Section[20] = {0};
-
 	Section[0] = 0x6F635F5F;
 	Section[1] = 0x0074736E;
 	Section[2] = 0x00000000;
 	Section[3] = 0x00000000;
-
 	Section[4] = 0x45545F5F;
 	Section[5] = 0x00005854;
 	Section[6] = 0x00000000;
 	Section[7] = 0x00000000;
-
 	Section[8] = 0x00000000;
 	Section[9] = 0x00000000;
-
-	Section[10] = 0x00000004;
-	Section[11] = 0x00000000;
-
+	Section[10] = (f_u32)(NumberOfBytes >> 0);
+	Section[11] = (f_u32)(NumberOfBytes >> 32);
 	Section[12] = 0x000000D0;
 	Section[13] = 0x00000000;
 	Section[14] = 0x00000000;
@@ -891,18 +897,20 @@ void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data)
 	Section[18] = 0x00000000;
 	Section[19] = 0x00000000;
 
-
-	u32 SymTab[6] = {0};
-
 	SymTab[0] = 0x00000002;
 	SymTab[1] = 0x00000018;
-	SymTab[2] = 0x000000D8;
+	SymTab[2] = (f_u32)SymbolOffset;
 	SymTab[3] = 0x00000001;
-	SymTab[4] = 0x000000E8;
-	SymTab[5] = 0x00000006;
+	SymTab[4] = (f_u32)(StringOffset);
+	SymTab[5] = (f_u32)(StringSize);
+
+	SymbolEntry[0] = 0x00000001;
+	SymbolEntry[1] = 0x0000010F;
+	SymbolEntry[2] = 0;
+	SymbolEntry[3] = 0;
 	
 
-	F_OS_WriteBytesToFile(&File, MachOHeader);
+	F_OS_WriteBytesToFile(&File, (u8*)MachOHeader, sizeof(MachOHeader));
 
 #else
 #error "Unsupported"
@@ -1342,29 +1350,35 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 	return FileInfo;
 }
 
-void F_OS_WriteBytesToFile(f_file *File, u8 *FileToWrite)
+void F_OS_WriteBytesToFile(f_file *File, u8 *BytesToWrite, f_u64 NumberOfBytes)
 {
 	if(File->Errors) return;
 #if defined(OS_WINDOWS)
-		DWORD Written = 0;
+	if(NumberOfBytes > 0xFFFFFFFFull)
+	{
+		File->Errors = F_True;
+		return;
+	}
+	DWORD Written = 0;
 	File->Errors = !WriteFile(
 		(HANDLE)File->Handle,
-		FileToWrite,
-		(DWORD)F_StringLength(FileToWrite),
+		BytesToWrite,
+		(DWORD)NumberOfBytes,
 		&Written, F_Null
-	);
+	) || Written != NumberOfBytes;
 #elif defined(OS_DARWIN)
-	f_s32 Status = write(File->Handle, FileToWrite, F_StringLength((char*)FileToWrite));
-	File->Errors = Status < 0;
+	ssize_t Status = write(File->Handle, BytesToWrite, NumberOfBytes);
+	File->Errors = Status < 0 || (f_u64)Status != NumberOfBytes;
 #else
 #error "Unsupported OS"
 #endif
 }
 
-void F_OS_Internal_WriteBytesToPath(f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_internal_file_options Options)
+void F_OS_WriteBytesToPath(f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_u64 NumberOfBytes)
 {
-	f_file File = F_OS_Internal_FileFromFilename(Arena, PathToFile, Options);
-	F_OS_WriteBytesToFile(&File, BytesToWrite);
+	f_file File = F_OS_FileFromFilename(Arena, PathToFile, .Overwrite = F_True);
+	if(File.Errors) return;
+	F_OS_WriteBytesToFile(&File, BytesToWrite, NumberOfBytes);
 	F_OS_ReleaseFile(&File);
 }
 
