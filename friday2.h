@@ -612,6 +612,10 @@ thread_local f_memory_arena F_ErrorArena;
 #include <sys/wait.h> // waitpid()
 #include <dirent.h>
 #include <dlfcn.h> // dlopen
+#include <mach/machine.h>
+#include <mach/vm_prot.h>
+#include <mach-o/loader.h>
+#include <mach-o/nlist.h>
 #endif
 
 extern char **environ;
@@ -825,92 +829,83 @@ void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data, f_
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
 
-	// [descriptions][your data][padding][symbol entry][name table]
+	f_u64 CommandSize = sizeof(struct segment_command_64) + sizeof(struct section_64) + sizeof(struct symtab_command);
+	f_u64 DataOffset = sizeof(struct mach_header_64) + CommandSize;
+	f_u64 SymbolOffset = (DataOffset + (f_u64)NumberOfBytes + 7) & ~UINT64_C(7);
+	f_u64 StringOffset = SymbolOffset + sizeof(struct nlist_64);
+	f_u64 StringSize = (f_u64)F_StringLength(SymbolName) + 2;
 
-	f_u32 SymbolEntry[4] = {0};
+	struct mach_header_64 Header = {0};
+	Header.magic = MH_MAGIC_64;
+	Header.cputype = CPU_TYPE_ARM64;
+	Header.cpusubtype = CPU_SUBTYPE_ARM64_ALL;
+	Header.filetype = MH_OBJECT;
+	Header.ncmds = 2;
+	Header.sizeofcmds = (f_u32)CommandSize;
 
-	f_u64 SymbolNameLength = F_StringLength(SymbolName);
 
-	f_u64 DataOffset = 0xD0;
-	f_u64 DataEnd = DataOffset + NumberOfBytes;
-	f_u64 SymbolOffset = (DataEnd + 7) & ~(f_u64)7;
-	f_u64 StringOffset = SymbolOffset + sizeof(SymbolEntry);
-	f_u64 StringSize = (SymbolNameLength + 2 + 7) & ~(f_u64)7;
+	struct segment_command_64 Segment = {0};
+	Segment.cmd = LC_SEGMENT_64;
+	Segment.cmdsize = sizeof(Segment) + sizeof(struct section_64);
+	Segment.vmsize = NumberOfBytes;
+	Segment.fileoff = DataOffset;
+	Segment.filesize = NumberOfBytes;
+	Segment.maxprot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
+	Segment.initprot = VM_PROT_READ | VM_PROT_WRITE;
+	Segment.nsects = 1;
 
-	f_u64 DataPadding = SymbolOffset - DataEnd;
-	f_u64 StringPadding = StringSize - (SymbolNameLength + 2);
-	f_u64 BytesToWrite = StringOffset + StringSize;
-	
-	f_u32 MachOHeader[8] = {0};
-	f_u32 LoadCommand[18] = {0};
-	f_u32 Section[20] = {0};
-	f_u32 SymTab[6] = {0};
 
-	//f_u64 BytesToWrite = sizeof(MachOHeader) + sizeof(LoadCommand) + sizeof(Section) + sizeof(SymTab);
+	struct section_64 Section = {0};
+	F_MemoryCopy(Section.sectname, "__data", sizeof("__data"));
+	F_MemoryCopy(Section.segname, "__DATA", sizeof("__DATA"));
+	Section.size = NumberOfBytes;
+	Section.offset = (uint32_t)DataOffset;
+	Section.align = 0;
+	Section.flags = S_REGULAR;
 
-	MachOHeader[0] = 0xFEEDFACF;
-	MachOHeader[1] = 0x0100000C;
-	MachOHeader[2] = 0x00000000;
-	MachOHeader[3] = 0x00000001;
-	MachOHeader[4] = 0x00000002;
-	MachOHeader[5] = 0x000000B0;
-	MachOHeader[6] = 0x00000000;
-	MachOHeader[7] = 0x00000000;
 
-	LoadCommand[0] = 0x00000019;
-	LoadCommand[1] = 0x00000098;
-	LoadCommand[2] = 0x00000000;
-	LoadCommand[3] = 0x00000000;
-	LoadCommand[4] = 0x00000000;
-	LoadCommand[5] = 0x00000000;
-	LoadCommand[6] = 0x00000000;
-	LoadCommand[7] = 0x00000000;
-	LoadCommand[8] = (f_u32)(NumberOfBytes >> 0);
-	LoadCommand[9] = (f_u32)(NumberOfBytes >> 32);
-	LoadCommand[10] = 0x000000D0;
-	LoadCommand[11] = 0x00000000;
-	LoadCommand[12] = (f_u32)(NumberOfBytes >> 0);
-	LoadCommand[13] = (f_u32)(NumberOfBytes >> 32);
-	LoadCommand[14] = 0x00000007;
-	LoadCommand[15] = 0x00000007;
-	LoadCommand[16] = 0x00000001;
-	LoadCommand[17] = 0x00000000;
+	struct symtab_command SymTab = {0};
+	SymTab.cmd = LC_SYMTAB;
+	SymTab.cmdsize = sizeof(SymTab);
+	SymTab.symoff = (uint32_t)SymbolOffset;
+	SymTab.nsyms = 1;
+	SymTab.stroff = (uint32_t)StringOffset;
+	SymTab.strsize = (uint32_t)StringSize;
 
-	Section[0] = 0x6F635F5F;
-	Section[1] = 0x0074736E;
-	Section[2] = 0x00000000;
-	Section[3] = 0x00000000;
-	Section[4] = 0x45545F5F;
-	Section[5] = 0x00005854;
-	Section[6] = 0x00000000;
-	Section[7] = 0x00000000;
-	Section[8] = 0x00000000;
-	Section[9] = 0x00000000;
-	Section[10] = (f_u32)(NumberOfBytes >> 0);
-	Section[11] = (f_u32)(NumberOfBytes >> 32);
-	Section[12] = 0x000000D0;
-	Section[13] = 0x00000000;
-	Section[14] = 0x00000000;
-	Section[15] = 0x00000000;
-	Section[16] = 0x00000000;
-	Section[17] = 0x00000000;
-	Section[18] = 0x00000000;
-	Section[19] = 0x00000000;
+	struct nlist_64 Symbol = {0};
+	Symbol.n_un.n_strx = 1;
+	Symbol.n_type = N_SECT | N_EXT;
+	Symbol.n_sect = 1;
+	Symbol.n_value = Section.addr;
 
-	SymTab[0] = 0x00000002;
-	SymTab[1] = 0x00000018;
-	SymTab[2] = (f_u32)SymbolOffset;
-	SymTab[3] = 0x00000001;
-	SymTab[4] = (f_u32)(StringOffset);
-	SymTab[5] = (f_u32)(StringSize);
+	u8 Zeros[8] = {0};
+ f_u64 Padding = (f_u64)(SymbolOffset - (DataOffset + NumberOfBytes));
 
-	SymbolEntry[0] = 0x00000001;
-	SymbolEntry[1] = 0x0000010F;
-	SymbolEntry[2] = 0;
-	SymbolEntry[3] = 0;
-	
 
-	F_OS_WriteBytesToFile(&File, (u8*)MachOHeader, sizeof(MachOHeader));
+	f_u64 MachOFileSize = (f_u64)(StringOffset + StringSize); 
+	f_u8 *MachOFile = F_ArenaPushArrayType(F_TArena(), MachOFileSize, f_u8);
+
+	f_u64 Cursor = 0;
+	F_MemoryCopy(MachOFile + Cursor, &Header, sizeof Header);
+	Cursor += sizeof Header;
+	F_MemoryCopy(MachOFile + Cursor, &Segment, sizeof Segment);
+	Cursor += sizeof Segment;
+	F_MemoryCopy(MachOFile + Cursor, &Section, sizeof Section);
+	Cursor += sizeof Section;
+	F_MemoryCopy(MachOFile + Cursor, &SymTab, sizeof SymTab);
+	Cursor += sizeof SymTab;
+	F_MemoryCopy(MachOFile + Cursor, Data, NumberOfBytes);
+	Cursor += NumberOfBytes;
+	F_MemoryCopy(MachOFile + Cursor, Zeros, Padding);
+	Cursor += Padding;
+	F_MemoryCopy(MachOFile + Cursor, &Symbol, sizeof Symbol);
+	Cursor += sizeof Symbol;
+	F_MemoryCopy(MachOFile + Cursor, Zeros, 1);
+	Cursor += 1;
+	F_MemoryCopy(MachOFile + Cursor, SymbolName, F_StringLength(SymbolName) + 1);
+	Cursor += F_StringLength(SymbolName) + 1;
+
+	F_OS_WriteBytesToFile(&File, MachOFile, MachOFileSize);
 
 #else
 #error "Unsupported"
