@@ -1629,7 +1629,7 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 
 		for(f_string_list_node *Embed = Embeds.First; Embed; Embed = Embed->Next)
 		{
-			TUs[TUIndex++] = (f_translation_unit){ .FullRelativePath = Embed->String, .FilenameWithNoExtension = F_FilenameNoExtensionFromPath(F_TArena(), Embed->String) };
+			TUs[TUIndex++] = (f_translation_unit){ .IsEmbed = F_True, .FullRelativePath = Embed->String, .FilenameWithNoExtension = F_FilenameNoExtensionFromPath(F_TArena(), Embed->String) };
 		}
 
 		ObjectFiles = F_ArenaPushArrayType(F_TArena(), TUCount, char *);
@@ -1641,7 +1641,17 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	f_process *Processes = F_ArenaPushArrayType(F_TArena(), TURange.End - TURange.Start, f_process);
 	for(f_s32 I = TURange.Start; I < TURange.End; I++)
 	{
-		f_u64 Hash = F_HashSourceAndIncludes(F_TArena(), TUs[I].FullRelativePath, BuildOptions->IncludeDirectories);
+		f_u64 Hash = 0;
+		f_buffer EmbedContents = {0};
+		if(TUs[I].IsEmbed)
+		{
+			EmbedContents = F_OS_ReadEntireFileFromPath(F_TArena(), TUs[I].FullRelativePath);
+			Hash = F_HashBytes(F_HashStart, EmbedContents.Bytes, EmbedContents.NumberOfBytes);
+		}
+		else
+		{
+			Hash = F_HashSourceAndIncludes(F_TArena(), TUs[I].FullRelativePath, BuildOptions->IncludeDirectories);
+		}
 
 		for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->CompileFlags[I]; I++)
 		{
@@ -1688,28 +1698,36 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 
 			CompileStarted = F_True;
 
-			F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
-			F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompileOnlyFlag);
-			F_StringListAppend(F_TArena(), &Args, TUs[I].FullRelativePath);
 
-			if(BuildOptions->Debug)
+			if(TUs[I].IsEmbed)
 			{
-				F_StringListAppendF(F_TArena(), &Args, "%s", BuildOptions->Toolchain.DebugFlag);
+				F_EmitDataAsObjectFile(ObjectPath, TUs[I].FilenameWithNoExtension, EmbedContents.Bytes, EmbedContents.NumberOfBytes);
 			}
-
-			for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->CompileFlags[I]; I++)
+			else
 			{
-				F_StringListAppend(F_TArena(), &Args, BuildOptions->CompileFlags[I]);
+				F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompilerPath);
+				F_StringListAppend(F_TArena(), &Args, BuildOptions->Toolchain.CompileOnlyFlag);
+				F_StringListAppend(F_TArena(), &Args, TUs[I].FullRelativePath);
+
+				if(BuildOptions->Debug)
+				{
+					F_StringListAppendF(F_TArena(), &Args, "%s", BuildOptions->Toolchain.DebugFlag);
+				}
+
+				for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->CompileFlags[I]; I++)
+				{
+					F_StringListAppend(F_TArena(), &Args, BuildOptions->CompileFlags[I]);
+				}
+
+				F_StringListAppendF(F_TArena(), &Args, "%s%s", BuildOptions->Toolchain.OutputFlag, ObjectPath);
+
+				for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->IncludeDirectories[I]; I++)
+				{
+					F_StringListAppendF(F_TArena(), &Args, "%s%s", BuildOptions->Toolchain.IncludeFlag, BuildOptions->IncludeDirectories[I]);
+				}
+
+				F_StartProcess(F_TArena(), Processes + I - TURange.Start, Args);
 			}
-
-			F_StringListAppendF(F_TArena(), &Args, "%s%s", BuildOptions->Toolchain.OutputFlag, ObjectPath);
-
-			for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->IncludeDirectories[I]; I++)
-			{
-				F_StringListAppendF(F_TArena(), &Args, "%s%s", BuildOptions->Toolchain.IncludeFlag, BuildOptions->IncludeDirectories[I]);
-			}
-
-			F_StartProcess(F_TArena(), Processes + I - TURange.Start, Args);
 		}
 	}
 	F_WaitForMultipleProcesses(Processes, TURange.End - TURange.Start);
@@ -1896,7 +1914,7 @@ char *F_FilenameNoExtensionFromPath(f_memory_arena *Arena, char *Path)
 
 	PathLength = IndexOfLastPeriod - IndexOfLastForwardSlash;
 
-	return F_StringPushF(Arena, "%s", PathLength, Path + IndexOfLastForwardSlash);
+	return F_StringPushF(Arena, "%.*s", PathLength, Path + IndexOfLastForwardSlash);
 }
 
 char *F_PathWithNoFilename(f_memory_arena *Arena, char *Path)
