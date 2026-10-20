@@ -17,7 +17,7 @@ F_LaneEntry
 		.Kind = F_OUTPUT_DYNAMIC,
 		.Toolchain = F_TOOLCHAIN_CLANG,
 		.Debug = F_True,
-		.Embeds = { {"G_BerkeleyMono", "fonts/BerkeleyMono-Regular.ttf"}, {"G_Lucide", "fonts/lucide.ttf"}}
+		.EmbedDirectories = { "fonts" }
 	};
 
 	for(f_s32 I = 0; I < F_CommandLineArgs.Count; I++)
@@ -29,7 +29,8 @@ F_LaneEntry
 		}
 	}
 
-	F_EmitDataAsObjectFile("test.o", "abc", (u8*)"abc", 3);
+
+	F_EmitDataAsObjectFile("build/test.o", "abc", (u8*)"abc", 3);
 
 	f_group UpdateGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID == 0);
 	f_group BuildGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID > 0);
