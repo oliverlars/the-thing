@@ -1,3 +1,5 @@
+#include <math.h>
+
 #include "misc.h"
 #include "memory.h"
 #include "render_common.h"
@@ -8,10 +10,8 @@
 #include "render.h"
 #include "draw.h"
 #include "ui.h"
+#include "embeds.h"
 
-#include "embedded_fonts.h"
-
-#include <math.h>
 
 #include "app.h"
 
@@ -63,13 +63,14 @@ void Init(app *App, m_arena *PermanentArena)
 		.ShaderDir = Str8("shaders"),
 		.Logging = False,
 	};
+
 	R_Init(&App->Render, PermanentArena, v2i(App->Window.Width, App->Window.Height), Opts);
 
 	App->Draw.Arena = PermanentArena;
 	App->Draw.Render = &App->Render;
 
-	App->Font = D_LoadFontFromTTF(&App->Draw, G_BerkeleyMono.Data);
-	App->LucideFont = D_LoadFontFromTTF(&App->Draw, G_Lucide.Data);
+	App->Font = D_LoadFontFromTTF(&App->Draw, E_BerkeleyMono);
+	App->LucideFont = D_LoadFontFromTTF(&App->Draw, E_Lucide);
 
 	App->StartTime = OS_TimeStampNow();
 
@@ -343,7 +344,7 @@ void AppUpdate(void *UserData)
 
 
 		D_Str8(
-			&App->Draw, Str8(":D abc 23 456"),
+			&App->Draw, Str8("adasdfadf"),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.85f, 0),
 			.HeightInPixels = 64.0f,

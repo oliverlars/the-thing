@@ -29,9 +29,6 @@ F_LaneEntry
 		}
 	}
 
-
-	F_EmitDataAsObjectFile("build/test.o", "abc", (u8*)"abc", 3);
-
 	f_group UpdateGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID == 0);
 	f_group BuildGroup = F_GroupFromPartition(F_DefaultGroup(), F_DefaultGroup().ID > 0);
 	f_build *Build = F_BuildFromGroup(F_PArena(), F_DefaultGroup());

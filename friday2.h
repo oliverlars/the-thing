@@ -463,8 +463,8 @@ f_file_info  F_OS_FileInfoFromFilename          (f_memory_arena *Arena, char *Fi
 f_file_info  F_OS_FileInfoFromFile              (f_file *File);
 f_buffer     F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
 f_buffer     F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, char *PathToFile);
-void         F_OS_WriteBytesToFile             (f_file *File, u8 *BytesToWrite, f_u64 NumberOfBytes);
-void         F_OS_WriteBytesToPath             (f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_u64 NumberOfBytes);
+void         F_OS_WriteBytesToFile              (f_file *File, u8 *BytesToWrite, f_u64 NumberOfBytes);
+void         F_OS_WriteBytesToPath              (f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_u64 NumberOfBytes);
 f_b32        F_OS_DeleteFile                    (f_memory_arena *Arena, char *PathToFile);
 void         F_OS_RenameFileTo                  (f_memory_arena *Arena, char *From, char *To);
 void         F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, char *Path);
@@ -824,6 +824,8 @@ void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data, f_
 	f_file File = F_OS_FileFromFilename(F_TArena(), ObjectFileName, .Overwrite = F_True);
 #if defined(OS_WINDOWS)
 #elif defined(OS_DARWIN)
+
+	SymbolName = F_StringPushF(F_TArena(), "_%s", SymbolName);
 
 	f_u64 CommandSize = sizeof(struct segment_command_64) + sizeof(struct section_64) + sizeof(struct symtab_command);
 	f_u64 DataOffset = sizeof(struct mach_header_64) + CommandSize;
@@ -1617,8 +1619,9 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		{
 			F_StringListAppendMany(F_TArena(), &Embeds, F_OS_ListOfFilesInDirectory(F_TArena(), BuildOptions->EmbedDirectories[I], .PrependPath = F_True));
 		}
-
-		TUCount = F_StringListCount(Sources) + F_StringListCount(Embeds);
+		f_u64 EmbedCount = F_StringListCount(Embeds);
+		f_u64 SourcesCount = F_StringListCount(Sources);
+		TUCount = SourcesCount + EmbedCount;
 		TUs = F_ArenaPushArrayType(F_TArena(), TUCount, f_translation_unit);
 
 		f_u64 TUIndex = 0;
@@ -1627,10 +1630,17 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 			TUs[TUIndex++] = (f_translation_unit){ .FullRelativePath = Source->String, .FilenameWithNoExtension = F_FilenameNoExtensionFromPath(F_TArena(), Source->String) };
 		}
 
+
+		f_string_list EmbedHeader = {0};
 		for(f_string_list_node *Embed = Embeds.First; Embed; Embed = Embed->Next)
 		{
-			TUs[TUIndex++] = (f_translation_unit){ .IsEmbed = F_True, .FullRelativePath = Embed->String, .FilenameWithNoExtension = F_FilenameNoExtensionFromPath(F_TArena(), Embed->String) };
+			TUs[TUIndex] = (f_translation_unit){ .IsEmbed = F_True, .FullRelativePath = Embed->String, .FilenameWithNoExtension = F_FilenameNoExtensionFromPath(F_TArena(), Embed->String) };
+			F_StringListAppend(F_TArena(), &EmbedHeader, F_StringPushF(F_TArena(), "extern unsigned char E_%s[];\n", TUs[TUIndex].FilenameWithNoExtension));
+			TUIndex++;
 		}
+
+		char *EmbedHeaderString = F_StringJoinList(F_TArena(), EmbedHeader, "");
+		F_OS_WriteBytesToPath(F_TArena(), "include/embeds.h", EmbedHeaderString, F_StringLength(EmbedHeaderString));
 
 		ObjectFiles = F_ArenaPushArrayType(F_TArena(), TUCount, char *);
 	}
@@ -1701,7 +1711,7 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 
 			if(TUs[I].IsEmbed)
 			{
-				F_EmitDataAsObjectFile(ObjectPath, TUs[I].FilenameWithNoExtension, EmbedContents.Bytes, EmbedContents.NumberOfBytes);
+				F_EmitDataAsObjectFile(ObjectPath, F_StringPushF(F_TArena(), "E_%s", TUs[I].FilenameWithNoExtension), EmbedContents.Bytes, EmbedContents.NumberOfBytes);
 			}
 			else
 			{
@@ -1912,9 +1922,9 @@ char *F_FilenameNoExtensionFromPath(f_memory_arena *Arena, char *Path)
 		if(Path[I] == '.') IndexOfLastPeriod = I;
 	}
 
-	PathLength = IndexOfLastPeriod - IndexOfLastForwardSlash;
+	PathLength = IndexOfLastPeriod - (IndexOfLastForwardSlash + 1);
 
-	return F_StringPushF(Arena, "%.*s", PathLength, Path + IndexOfLastForwardSlash);
+	return F_StringPushF(Arena, "%.*s", PathLength, Path + IndexOfLastForwardSlash + 1);
 }
 
 char *F_PathWithNoFilename(f_memory_arena *Arena, char *Path)
@@ -1924,7 +1934,7 @@ char *F_PathWithNoFilename(f_memory_arena *Arena, char *Path)
 	f_u64 PathLength = F_StringLength(Path);
 	for(f_u64 I = 0; I < PathLength; I++)
 	{
-		if(Path[I] == '/') IndexOfLastForwardSlash = I;
+		if(Path[I] == '/') IndexOfLastForwardSlash = I + 1;
 	}
 
 	return F_StringPushF(Arena, "%s", IndexOfLastForwardSlash, Path);
