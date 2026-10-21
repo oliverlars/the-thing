@@ -264,6 +264,7 @@ f_build_report;
 typedef struct f_build
 {
 	_Atomic(f_u64) TotalSuccessfulBuilds;
+	f_u64 LastUpdated;
 	void (*Update)(void *);
 	f_dll UpdateDLL;
 }
@@ -310,6 +311,15 @@ typedef struct f_thread
 	f_u64 Handle;
 }
 f_thread;
+
+typedef struct f_file
+{
+	// In the future this can set more granular error bits
+	f_u64 Errors;
+	f_string_list ErrorStream;
+	f_u64 Handle;
+}
+f_file;
 
 typedef struct f_thread_entry_params
 {
@@ -418,7 +428,7 @@ f_u64 F_HashBytes(f_u64 HashStart, void *Data, f_u64 NumberOfBytesToHash);
 
 f_u64 F_HashString(char *String);
 
-f_u64 F_HashSourceAndIncludes (f_memory_arena *Arena, char *PathToSource, char **IncludePaths);
+f_u64 F_HashSourceAndIncludes (f_memory_arena *Arena, f_file File, char **IncludePaths);
 
 f_u8 *F_OS_Reserve   (f_s64 NumberOfBytes);
 void  F_OS_Commit    (void *Address, f_s64 BytesToCommit);
@@ -427,15 +437,6 @@ f_s64 F_OS_PageSize  (void);
 f_u64 F_OS_TimeStamp (void);
 f_f32 F_MilliSecondsFromTimeStamp (f_u64 TimeStamp);
 f_f32 F_SecondsFromTimeStamp (f_u64 TimeStamp);
-
-typedef struct f_file
-{
-	// In the future this can set more granular error bits
-	f_u64 Errors;
-	f_string_list ErrorStream;
-	f_u64 Handle;
-}
-f_file;
 
 typedef struct f_internal_file_options
 {
@@ -1589,7 +1590,6 @@ f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
 void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 {
 	if(!F_IsInGroup(Group)) return;
-	f_build_cache BuildCache = F_BuildCacheFromOutputPath(Group, F_TArena(), "build/");
 	
 	typedef struct f_translation_unit
 	{
@@ -1598,6 +1598,8 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		f_b32 IsEmbed;
 	}
 	f_translation_unit;
+
+	f_build_cache BuildCache = F_BuildCacheFromOutputPath(Group, F_TArena(), "build/");
 
 	f_translation_unit *TUs = {0};
 	f_u64 TUCount = 0;
@@ -1651,16 +1653,23 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	f_process *Processes = F_ArenaPushArrayType(F_TArena(), TURange.End - TURange.Start, f_process);
 	for(f_s32 I = TURange.Start; I < TURange.End; I++)
 	{
+		f_file File = F_OS_FileFromFilename(F_TArena(), TUs[I].FullRelativePath);
+		f_file_info FileInfo = F_OS_FileInfoFromFile(&File);
+		if(FileInfo.LastModifiedInMillisecondsSinceEpoch < Build->LastUpdated)
+		{
+			F_OS_ReleaseFile(&File);
+			continue;
+		}
 		f_u64 Hash = 0;
 		f_buffer EmbedContents = {0};
 		if(TUs[I].IsEmbed)
 		{
-			EmbedContents = F_OS_ReadEntireFileFromPath(F_TArena(), TUs[I].FullRelativePath);
+			EmbedContents = F_OS_ReadEntireFile(F_TArena(), &File);
 			Hash = F_HashBytes(F_HashStart, EmbedContents.Bytes, EmbedContents.NumberOfBytes);
 		}
 		else
 		{
-			Hash = F_HashSourceAndIncludes(F_TArena(), TUs[I].FullRelativePath, BuildOptions->IncludeDirectories);
+			Hash = F_HashSourceAndIncludes(F_TArena(), File, BuildOptions->IncludeDirectories);
 		}
 
 		for(int I = 0; I < F_STRING_OPTION_CAPACITY && BuildOptions->CompileFlags[I]; I++)
@@ -1816,6 +1825,7 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		}
 		if(NeedsToReload)
 		{
+			Build->LastUpdated = F_OS_TimeStamp();
 			Build->UpdateDLL = F_OS_DLLFromPath(OutputPath);
 			Build->Update = F_OS_DLLSymbolFromName(Build->UpdateDLL, "AppUpdate");
 		}
@@ -1878,7 +1888,7 @@ f_b32 F_HashIsInBuildCache(f_build_cache Cache, f_u64 Hash)
 	return F_False;
 }
 
-f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSource, char **IncludePaths, f_string_list *IncludesSeenAlready);
+f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_file File, char **IncludePaths, f_string_list *IncludesSeenAlready);
 
 
 f_u64 F_HashBytes(f_u64 HashStart, void *Data, f_u64 NumberOfBytesToHash)
@@ -2282,7 +2292,7 @@ void  F_WaitForMultipleProcesses(f_process *Processes, f_s32 ProcessCount)
 	}
 }
 
-f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSource, char **IncludePaths, f_string_list *IncludesSeenAlready)
+f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, f_file File, char **IncludePaths, f_string_list *IncludesSeenAlready)
 {
 #define CharAt(Index) ((Index) < Source.NumberOfBytes ? Source.Bytes[Index] : 0)
 #define AdvanceBy(Index, Amount) ((Index += Amount), Index < Source.NumberOfBytes)
@@ -2292,7 +2302,7 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSour
 #define SkipUntilMatch(Index, Char) for(;CharAt(Index) != 0 && CharAt(Index) != Char; Advance(Index))
 #define SkipUntilMatch2(Index, CharA, CharB) for(;CharAt(Index) != 0 && (CharAt(Index) != CharA || CharAt(Index + 1) != CharB); Advance(Index))
 
-	f_buffer Source = F_OS_ReadEntireFileFromPath(Arena, PathToSource);
+	f_buffer Source = F_OS_ReadEntireFile(Arena, &File);
 	// Hash whilst advancing?
 	f_u64 SourceAndIncludesHash = F_HashString((char*)Source.Bytes);
 	for(f_s64 I = 0; I < Source.NumberOfBytes; I++)
@@ -2347,7 +2357,9 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSour
 						// This isn't perfect but it's actually find since even though the order of hashing with xor doesn't now matter,
 						// it's never an issue with includes.
 						F_StringListAppend(Arena, IncludesSeenAlready, PathToInclude);
-						SourceAndIncludesHash ^= __F_Internal_HashSourceAndIncludes(Arena, PathToInclude, IncludePaths, IncludesSeenAlready);
+						f_file IncludeFile = F_OS_FileFromFilename(F_TArena(), PathToInclude);
+						SourceAndIncludesHash ^= __F_Internal_HashSourceAndIncludes(Arena, IncludeFile, IncludePaths, IncludesSeenAlready);
+						F_OS_ReleaseFile(&IncludeFile);
 					}
 				}
 			} break;
@@ -2379,10 +2391,10 @@ f_u64 __F_Internal_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSour
 #undef SkipUntilMatch2
 }
 
-f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, char *PathToSource, char **IncludePaths)
+f_u64 F_HashSourceAndIncludes(f_memory_arena *Arena, f_file File, char **IncludePaths)
 {
 	f_string_list IncludesSeenAlready = {0};
-	return __F_Internal_HashSourceAndIncludes(Arena, PathToSource, IncludePaths, &IncludesSeenAlready);
+	return __F_Internal_HashSourceAndIncludes(Arena, File, IncludePaths, &IncludesSeenAlready);
 }
 
 static char *__FailedASCII[] = {

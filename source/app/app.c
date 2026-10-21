@@ -13,6 +13,8 @@
 #include "embeds.h"
 
 
+#include "new.h"
+
 #include "app.h"
 
 
@@ -335,7 +337,7 @@ void AppUpdate(void *UserData)
 		Extrusion = LerpF32(Extrusion, ExtrusionTarget, 0.1);
 
 		D_Str8(
-			&App->Draw, Str8("abc"),
+			&App->Draw, Str8(NewFunction()),
 			.Font = App->Font,
 			.Position = v3f(W * 0.55f, H * 0.90f, 0),
 			.HeightInPixels = 64.0f,
