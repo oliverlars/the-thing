@@ -264,7 +264,6 @@ f_build_report;
 typedef struct f_build
 {
 	_Atomic(f_u64) TotalSuccessfulBuilds;
-	f_u64 LastUpdated;
 	void (*Update)(void *);
 	f_dll UpdateDLL;
 }
@@ -1658,11 +1657,6 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	{
 		f_file File = F_OS_FileFromFilename(F_TArena(), TUs[I].FullRelativePath);
 		f_file_info FileInfo = F_OS_FileInfoFromFile(&File);
-		if(FileInfo.LastModifiedInMillisecondsSinceEpoch < Build->LastUpdated)
-		{
-			F_OS_ReleaseFile(&File);
-			continue;
-		}
 		f_u64 Hash = 0;
 		f_buffer EmbedContents = {0};
 		if(TUs[I].IsEmbed)
@@ -1751,6 +1745,7 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 				F_StartProcess(F_TArena(), Processes + I - TURange.Start, Args);
 			}
 		}
+		F_OS_ReleaseFile(&File);
 	}
 	F_WaitForMultipleProcesses(Processes, TURange.End - TURange.Start);
 	
@@ -1828,7 +1823,6 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		}
 		if(NeedsToReload)
 		{
-			Build->LastUpdated = F_OS_TimeStamp();
 			Build->UpdateDLL = F_OS_DLLFromPath(OutputPath);
 			Build->Update = F_OS_DLLSymbolFromName(Build->UpdateDLL, "AppUpdate");
 		}
