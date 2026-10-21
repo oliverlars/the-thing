@@ -405,6 +405,9 @@ void *F_Internal_ReadFromGroupID(f_group Group, f_s32 ID, void *Variable, f_u64 
 #define F_ReadFromGroupID(Group, ID, Variable) \
 										*((__typeof__(Variable)*)(F_Internal_ReadFromGroupID(Group, ID, &Variable, sizeof(Variable))))
 
+
+void F_OS_WaitForNMilliseconds (f_group Group, f_u64 Milliseconds);
+
 void  F_StartProcess             (f_memory_arena *Arena, f_process *Process, f_string_list Args);
 f_b32 F_PollProcess              (f_process *Process);
 void  F_WaitForProcess           (f_process *Process);
@@ -2063,6 +2066,19 @@ void *F_Internal_ReadFromGroupID(f_group Group, f_s32 ID, void *Variable, f_u64 
 	}
 
 	return Variable;
+}
+
+void F_OS_WaitForNMilliseconds(f_group Group, f_u64 Milliseconds)
+{
+	if(!F_IsInGroup(Group)) return;
+#if defined(OS_WINDOWS)
+#elif defined(OS_DARWIN)
+	mach_timebase_info_data_t Info;
+	mach_timebase_info(&Info);
+	mach_wait_until(mach_absolute_time() + (f_u64)Milliseconds * 1000000ULL * Info.denom / Info.numer);
+#else
+#error "Unsupported OS"
+#endif
 }
 
 void F_StartProcess(f_memory_arena *Arena, f_process *Process, f_string_list Args)

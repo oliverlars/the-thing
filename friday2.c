@@ -40,6 +40,7 @@ F_LaneEntry
 		if(App.WantsToQuit) F_Exit();
 		F_Update(UpdateGroup, Build, &App);
 		F_Build(BuildGroup, Build, &BuildOptions);
+		F_OS_WaitForNMilliseconds(BuildGroup, 64);
 		F_ResetTArena();
 	}
 }
