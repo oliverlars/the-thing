@@ -266,6 +266,7 @@ typedef struct f_build
 	_Atomic(f_u64) TotalSuccessfulBuilds;
 	void (*Update)(void *);
 	f_dll UpdateDLL;
+	f_b32 Reloaded;
 }
 f_build;
 
@@ -290,6 +291,8 @@ typedef struct f_build_options
 	char          *Defines[F_STRING_OPTION_CAPACITY];
 	char          *Libraries[F_STRING_OPTION_CAPACITY];
 	char          *Frameworks[F_STRING_OPTION_CAPACITY];
+
+	char          *UpdateName;
 
 	char          *CompilerSpecificFlags[F_STRING_OPTION_CAPACITY];
 
@@ -455,7 +458,7 @@ void   F_OS_ReleaseFile      (f_file *File);
 
 typedef struct f_buffer
 {
-	u8 *Bytes;
+	f_u8 *Bytes;
 	f_s64 NumberOfBytes;
 }
 f_buffer;
@@ -466,10 +469,11 @@ f_file_info  F_OS_FileInfoFromFilename          (f_memory_arena *Arena, char *Fi
 f_file_info  F_OS_FileInfoFromFile              (f_file *File);
 f_buffer     F_OS_ReadEntireFile                (f_memory_arena *Arena, f_file *File);
 f_buffer     F_OS_ReadEntireFileFromPath        (f_memory_arena *Arena, char *PathToFile);
-void         F_OS_WriteBytesToFile              (f_file *File, u8 *BytesToWrite, f_u64 NumberOfBytes);
-void         F_OS_WriteBytesToPath              (f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_u64 NumberOfBytes);
+void         F_OS_WriteBytesToFile              (f_file *File, f_u8 *BytesToWrite, f_u64 NumberOfBytes);
+void         F_OS_WriteBytesToPath              (f_memory_arena *Arena, char *PathToFile, f_u8 *BytesToWrite, f_u64 NumberOfBytes);
 f_b32        F_OS_DeleteFile                    (f_memory_arena *Arena, char *PathToFile);
 void         F_OS_RenameFileTo                  (f_memory_arena *Arena, char *From, char *To);
+void         F_OS_TouchFilename                 (char *Filename);
 void         F_OS_MakeDirectoryIfNotAlreadyMade (f_memory_arena *Arena, char *Path);
 
 f_dll  F_OS_DLLFromPath (char *Path);
@@ -531,7 +535,7 @@ void  F_OS_FutexWait    (void *Address, f_u64 Expected);
 void  F_OS_FutexWakeAll (void *Address);
 
 
-void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data, f_u64 NumberOfBytes);
+void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, f_u8 *Data, f_u64 NumberOfBytes);
 
 void F_Print(char *String);
 #define F_PrintF(...) \
@@ -549,7 +553,7 @@ void F_Internal_LaneEntry();
 f_build *F_BuildFromGroup (f_memory_arena *Arena, f_group Group);
 void     F_Build    (f_group Group, f_build *Build, f_build_options *BuildOptions);
 void     F_Update   (f_group Group, f_build *Build, void *User);
-f_b32    F_NeedsReloading (f_build *Build);
+void     F_UpdateOnceOnReload (f_group Group, f_build *Build, void *User);
 
 
 
@@ -600,6 +604,7 @@ thread_local f_memory_arena F_ErrorArena;
 #include <windows.h>
 #elif defined(OS_DARWIN)
 #include <sys/mman.h> // mmap, mprotect
+#include <sys/time.h> // utimes
 #include <unistd.h> // getpagesize()
 #include <os/os_sync_wait_on_address.h> // os_sync_wake_on_address(), os_sync_wait_on_address()
 #include <pthread.h> // pthread_create(), pthread_join()
@@ -720,7 +725,7 @@ f_file F_OS_StandardOut(void)
 void F_Print(char *String)
 {
 	f_file StdOut = F_OS_StandardOut();
-	F_OS_WriteBytesToFile(&StdOut, (u8*)String, F_StringLength(String));
+	F_OS_WriteBytesToFile(&StdOut, (f_u8*)String, F_StringLength(String));
 }
 
 f_s64 F_OS_NumberOFHighPerformanceCPUs(void)
@@ -822,7 +827,7 @@ void F_OS_FutexWakeAll(void *Address)
 }
 
 
-void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data, f_u64 NumberOfBytes)
+void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, f_u8 *Data, f_u64 NumberOfBytes)
 {
 	f_file File = F_OS_FileFromFilename(F_TArena(), ObjectFileName, .Overwrite = F_True);
 #if defined(OS_WINDOWS)
@@ -879,7 +884,7 @@ void F_EmitDataAsObjectFile(char *ObjectFileName, char *SymbolName, u8 *Data, f_
 	Symbol.n_sect = 1;
 	Symbol.n_value = Section.addr;
 
-	u8 Zeros[8] = {0};
+	f_u8 Zeros[8] = {0};
  f_u64 Padding = (f_u64)(SymbolOffset - (DataOffset + NumberOfBytes));
 
 
@@ -1132,6 +1137,7 @@ f_group F_GroupFromPartition(f_group ParentGroup, f_b32 Condition)
 	return Group;
 }
 
+#if !defined(FRIDAY_UTILS_ONLY)
 void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 {
 	f_memory_arena *FirstLaneArena = F_ArenaReserveButCommitFirstPage(F_GigaBytes(8));
@@ -1189,6 +1195,7 @@ void F_DispatchAcrossNLanes(f_s64 NLanes, char **Args, f_s32 ArgCount)
 
 	F_OS_WaitForThreads(Threads + 1, NLanes - 1);
 }
+#endif
 
 f_s64 F_StringLength(char *String)
 {
@@ -1346,7 +1353,7 @@ f_file_info F_OS_FileInfoFromFile(f_file *File)
 	return FileInfo;
 }
 
-void F_OS_WriteBytesToFile(f_file *File, u8 *BytesToWrite, f_u64 NumberOfBytes)
+void F_OS_WriteBytesToFile(f_file *File, f_u8 *BytesToWrite, f_u64 NumberOfBytes)
 {
 	if(File->Errors) return;
 #if defined(OS_WINDOWS)
@@ -1370,7 +1377,7 @@ void F_OS_WriteBytesToFile(f_file *File, u8 *BytesToWrite, f_u64 NumberOfBytes)
 #endif
 }
 
-void F_OS_WriteBytesToPath(f_memory_arena *Arena, char *PathToFile, u8 *BytesToWrite, f_u64 NumberOfBytes)
+void F_OS_WriteBytesToPath(f_memory_arena *Arena, char *PathToFile, f_u8 *BytesToWrite, f_u64 NumberOfBytes)
 {
 	f_file File = F_OS_FileFromFilename(Arena, PathToFile, .Overwrite = F_True);
 	if(File.Errors) return;
@@ -1416,6 +1423,17 @@ void *F_OS_DLLSymbolFromName(f_dll DLL, char *ProcedureName)
 	return Procedure;
 }
 
+void F_OS_TouchFilename(char *Filename)
+{
+#if defined(OS_WINDOWS)
+#error "TODO"
+#elif defined(OS_DARWIN)
+	utimes(Filename, NULL);
+#else
+#error "Unsupported OS"
+#endif
+}
+
 void F_OS_RenameFileTo(f_memory_arena *Arena, char *From, char *To)
 {
 #if defined(OS_WINDOWS)
@@ -1430,7 +1448,7 @@ void F_OS_RenameFileTo(f_memory_arena *Arena, char *From, char *To)
 
 f_buffer F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 {
-		if(File->Errors) return (f_buffer){(u8*)"", 0};
+		if(File->Errors) return (f_buffer){(f_u8*)"", 0};
 		f_file_info Info = F_OS_FileInfoFromFile(File);
 		char *Backing = F_ArenaPushArrayType(Arena, Info.SizeInBytes + 1, char);
 #if defined(OS_WINDOWS)
@@ -1447,7 +1465,7 @@ f_buffer F_OS_ReadEntireFile(f_memory_arena *Arena, f_file *File)
 #else
 #error "Unsupported OS"
 #endif
-	return (f_buffer){ (u8*)Backing, Info.SizeInBytes };
+	return (f_buffer){ (f_u8*)Backing, Info.SizeInBytes };
 }
 
 f_b32 F_FileHasErrors(f_file File)
@@ -1574,6 +1592,15 @@ void F_Update(f_group Group, f_build *Build, void *User)
 {
 	if(!F_IsInGroup(Group)) return;
 	Build->Update(User);
+	Build->Reloaded = F_False;
+}
+
+void F_UpdateOnceOnReload(f_group Group, f_build *Build, void *User)
+{
+	if(!F_IsInGroup(Group)) return;
+	if(!Build->Reloaded) return;
+	Build->Update(User);
+	Build->Reloaded = F_False;
 }
 
 f_build *F_BuildFromGroup(f_memory_arena *Arena, f_group Group)
@@ -1610,6 +1637,7 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 	f_b32 CompileStarted = F_False;
 	if(Group.ID == 0) 
 	{
+		F_OS_MakeDirectoryIfNotAlreadyMade(F_TArena(), BuildOptions->OutputPath);
 		f_string_list Sources = {0};
 		for(f_s64 I = 0; I < F_DIRECTORY_CAPACITY && BuildOptions->SourceDirectories[I]; I++)
 		{
@@ -1824,7 +1852,8 @@ void F_Build(f_group Group, f_build *Build, f_build_options *BuildOptions)
 		if(NeedsToReload)
 		{
 			Build->UpdateDLL = F_OS_DLLFromPath(OutputPath);
-			Build->Update = F_OS_DLLSymbolFromName(Build->UpdateDLL, "AppUpdate");
+			Build->Update = F_OS_DLLSymbolFromName(Build->UpdateDLL, BuildOptions->UpdateName);
+			Build->Reloaded = F_True;
 		}
 	}
 
