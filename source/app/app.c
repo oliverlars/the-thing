@@ -119,8 +119,6 @@ void AppUpdate(void *UserData)
 	Interface->WantsToQuit = App->Window.WantsToQuit;
 	if(!OS_UpdateWindow(&App->Window)) return;
 
-	OS_BeginFrame();
-
 	App->FrameArenaIndex = 1 - App->FrameArenaIndex;
 	m_arena *Frame = App->FrameArenas[App->FrameArenaIndex];
 	ArenaReset(Frame);
@@ -390,7 +388,5 @@ void AppUpdate(void *UserData)
 		// UI_End(&App->UI);
 	}
 
-	R_Update(&App->Render, OS_NextDrawable(&App->Window), Screen);
-
-	OS_EndFrame();
+	R_Present(&App->Render, Screen);
 }

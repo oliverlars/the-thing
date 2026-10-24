@@ -17,7 +17,8 @@ F_LaneEntry
 		.Kind = F_OUTPUT_DYNAMIC,
 		.Toolchain = F_TOOLCHAIN_CLANG,
 		.Debug = F_True,
-		.EmbedDirectories = { "fonts" }
+		.EmbedDirectories = { "fonts" },
+		.UpdateName = "AppUpdate"
 	};
 
 	for(f_s32 I = 0; I < F_CommandLineArgs.Count; I++)

@@ -154,28 +154,32 @@ metal_shader LoadMetalShader(render_context *R, u64 TimeStamp, str8 Name, str8 U
 // HACK(Oliver): This should eventually use the allocator system
 id<MTLTexture> MakeMetalTexture(render_context *R, str8 Name, v2i Size, r_texture_format Format)
 {
-	metal_context *Metal = R->Backend;
-	MTLPixelFormat MetalFormat;
-	switch(Format)
+	id<MTLTexture> Texture;
+	@autoreleasepool
 	{
-		case TF_RGBA16: MetalFormat = MTLPixelFormatRGBA16Float; break;
-		case TF_RGBA32: MetalFormat = MTLPixelFormatRGBA32Float; break;
-		case TF_DEPTH32: MetalFormat = MTLPixelFormatDepth32Float; break;
-		case TF_BGRA10_SRGB: MetalFormat = MTLPixelFormatBGRA10_XR_sRGB; break;
+		metal_context *Metal = R->Backend;
+		MTLPixelFormat MetalFormat;
+		switch(Format)
+		{
+			case TF_RGBA16: MetalFormat = MTLPixelFormatRGBA16Float; break;
+			case TF_RGBA32: MetalFormat = MTLPixelFormatRGBA32Float; break;
+			case TF_DEPTH32: MetalFormat = MTLPixelFormatDepth32Float; break;
+			case TF_BGRA10_SRGB: MetalFormat = MTLPixelFormatBGRA10_XR_sRGB; break;
+		}
+		MTLTextureDescriptor *Desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MetalFormat
+			width:Size.X
+			height:Size.Y
+			mipmapped:NO
+		];
+		Desc.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
+		Desc.storageMode = MTLStorageModeShared;
+		NSError *Error = nil;
+		Texture = [Metal->Device newTextureWithDescriptor:Desc];
+		Texture.label = [
+			[NSString alloc] initWithBytes:Name.Bytes
+			length:Name.Size encoding:NSUTF8StringEncoding
+		];
 	}
-	MTLTextureDescriptor *Desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MetalFormat
-		width:Size.X
-		height:Size.Y
-		mipmapped:NO
-	];
-	Desc.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
-	Desc.storageMode = MTLStorageModeShared;
-	NSError *Error = nil;
-	id<MTLTexture> Texture = [Metal->Device newTextureWithDescriptor:Desc];
-	Texture.label = [
-		[NSString alloc] initWithBytes:Name.Bytes
-		length:Name.Size encoding:NSUTF8StringEncoding
-	];
 	return Texture;
 }
 
@@ -286,9 +290,12 @@ r_buffer R_BufferFrameEx(render_context *R, str8 Name, r_buffer_options *Options
 
 void *R_BufferData(render_context *R, r_buffer Buffer)
 {
-	metal_context *Metal = R->Backend;
-	id<MTLBuffer> B = Buffer.Transient ? Metal->FrameBuffers[Buffer.Handle] : Metal->Buffers[Buffer.Handle].Buffer;
-	return B.contents;
+	@autoreleasepool
+	{
+		metal_context *Metal = R->Backend;
+		id<MTLBuffer> B = Buffer.Transient ? Metal->FrameBuffers[Buffer.Handle] : Metal->Buffers[Buffer.Handle].Buffer;
+		return B.contents;
+	}
 }
 
 metal_shader *MetalShaderFromName(render_context *R, str8 Name, str8 UniformStruct)
@@ -443,59 +450,62 @@ MTLPrimitiveType MetalPrimType(r_primitive_type PrimType)
 void R_Draw(render_context *R, str8 ShaderName, s32 Count, r_primitive_type PrimType)
 {
 	metal_context *Metal = R->Backend;
-	r_shader Shader = R_Shader(R, ShaderName);
-	metal_shader *MetalShader = Metal->Shaders + Shader.Handle;
-	MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
-	PD.vertexFunction = MetalShader->VertexEntry;
-	PD.fragmentFunction = MetalShader->FragmentEntry;
-	PD.colorAttachments[0].pixelFormat = Metal->Textures[R->PassOptions.Colours[0].Handle].Texture.pixelFormat;
-	PD.colorAttachments[0].blendingEnabled = YES;
-	PD.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
-	PD.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
-	PD.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
-	PD.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-	if(Metal->Textures[R->PassOptions.Depth.Handle].Texture)
+	@autoreleasepool
 	{
-		PD.depthAttachmentPixelFormat = Metal->Textures[R->PassOptions.Depth.Handle].Texture.pixelFormat;
-	}
+		r_shader Shader = R_Shader(R, ShaderName);
+		metal_shader *MetalShader = Metal->Shaders + Shader.Handle;
+		MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
+		PD.vertexFunction = MetalShader->VertexEntry;
+		PD.fragmentFunction = MetalShader->FragmentEntry;
+		PD.colorAttachments[0].pixelFormat = Metal->Textures[R->PassOptions.Colours[0].Handle].Texture.pixelFormat;
+		PD.colorAttachments[0].blendingEnabled = YES;
+		PD.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
+		PD.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
+		PD.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
+		PD.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+		if(Metal->Textures[R->PassOptions.Depth.Handle].Texture)
+		{
+			PD.depthAttachmentPixelFormat = Metal->Textures[R->PassOptions.Depth.Handle].Texture.pixelFormat;
+		}
 
-	NSError *Error = nil;
-	id<MTLRenderPipelineState> Pipeline = [Metal->Device newRenderPipelineStateWithDescriptor:PD error:&Error];
-	if (!Pipeline)
-	{
-		LogError("Pipeline state failed: ?cstr",
-			(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
-		return;
+		NSError *Error = nil;
+		id<MTLRenderPipelineState> Pipeline = [Metal->Device newRenderPipelineStateWithDescriptor:PD error:&Error];
+		if (!Pipeline)
+		{
+			LogError("Pipeline state failed: ?cstr",
+				(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
+			return;
+		}
+		[Metal->ActiveRenderEncoder setVertexBuffer:Metal->FrameUniforms   offset:R->UniformStartOffset atIndex:0];
+		[Metal->ActiveRenderEncoder setFragmentBuffer:Metal->FrameUniforms offset:R->UniformStartOffset atIndex:0];
+		for(int I = 0; I < Metal->BoundBuffersCount; I++)
+		{
+			r_buffer BB = Metal->BoundBuffers[I];
+			id<MTLBuffer> Buffer = BB.Transient ? Metal->FrameBuffers[BB.Handle] : Metal->Buffers[BB.Handle].Buffer;
+			[Metal->ActiveRenderEncoder setVertexBuffer:Buffer   offset:0 atIndex:1 + I];
+			[Metal->ActiveRenderEncoder setFragmentBuffer:Buffer offset:0 atIndex:1 + I];
+		}
+		id<MTLHeap> FrameHeap = Metal->FrameHeaps[R->Frame % FRAMES_IN_FLIGHT];
+		for(int I = 0; I < Metal->BoundTexturesCount; I++)
+		{
+			id<MTLTexture> Texture = Metal->Textures[Metal->BoundTextures[I].Handle].Texture;
+			MTLResourceID *BTB = Metal->BindlessTexturesBuffer.contents;
+			BTB[Metal->BoundTextures[I].Handle] = Texture.gpuResourceID;
+			[Metal->ActiveRenderEncoder useResource: Texture usage: MTLResourceUsageRead stages:MTLRenderStageFragment];
+		}
+		[Metal->ActiveRenderEncoder setFragmentBuffer:Metal->BindlessTexturesBuffer offset:0 atIndex:1 + Metal->BoundBuffersCount];
+		Metal->BoundBuffersCount = 0;
+		Metal->BoundTexturesCount = 0;
+		[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
+		[Metal->ActiveRenderEncoder drawPrimitives:MetalPrimType(PrimType) vertexStart:0 vertexCount:Count];
+		R->UniformDeclarations.First = 0;
+		R->UniformDeclarations.Last = 0;
+		if(R->LargestUniformAlignment > 0)
+		{
+			R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, R->LargestUniformAlignment);
+		}
+		R->UniformStartOffset = R->UniformBytesCursor;
 	}
-	[Metal->ActiveRenderEncoder setVertexBuffer:Metal->FrameUniforms   offset:R->UniformStartOffset atIndex:0];
-	[Metal->ActiveRenderEncoder setFragmentBuffer:Metal->FrameUniforms offset:R->UniformStartOffset atIndex:0];
-	for(int I = 0; I < Metal->BoundBuffersCount; I++)
-	{
-		r_buffer BB = Metal->BoundBuffers[I];
-		id<MTLBuffer> Buffer = BB.Transient ? Metal->FrameBuffers[BB.Handle] : Metal->Buffers[BB.Handle].Buffer;
-		[Metal->ActiveRenderEncoder setVertexBuffer:Buffer   offset:0 atIndex:1 + I];
-		[Metal->ActiveRenderEncoder setFragmentBuffer:Buffer offset:0 atIndex:1 + I];
-	}
-	id<MTLHeap> FrameHeap = Metal->FrameHeaps[R->Frame % FRAMES_IN_FLIGHT];
-	for(int I = 0; I < Metal->BoundTexturesCount; I++)
-	{
-		id<MTLTexture> Texture = Metal->Textures[Metal->BoundTextures[I].Handle].Texture;
-		MTLResourceID *BTB = Metal->BindlessTexturesBuffer.contents;
-		BTB[Metal->BoundTextures[I].Handle] = Texture.gpuResourceID;
-		[Metal->ActiveRenderEncoder useResource: Texture usage: MTLResourceUsageRead stages:MTLRenderStageFragment];
-	}
-	[Metal->ActiveRenderEncoder setFragmentBuffer:Metal->BindlessTexturesBuffer offset:0 atIndex:1 + Metal->BoundBuffersCount];
-	Metal->BoundBuffersCount = 0;
-	Metal->BoundTexturesCount = 0;
-	[Metal->ActiveRenderEncoder setRenderPipelineState:Pipeline];
-	[Metal->ActiveRenderEncoder drawPrimitives:MetalPrimType(PrimType) vertexStart:0 vertexCount:Count];
-	R->UniformDeclarations.First = 0;
-	R->UniformDeclarations.Last = 0;
-	if(R->LargestUniformAlignment > 0)
-	{
-		R->UniformBytesCursor = AlignUp(R->UniformBytesCursor, R->LargestUniformAlignment);
-	}
-	R->UniformStartOffset = R->UniformBytesCursor;
 }
 
 r_shader R_Shader(render_context *R, str8 Name)
@@ -556,42 +566,44 @@ MTLClearColor MetalClearColour(v4f Colour)
 
 void R_PassBegin(render_context *R, str8 Name, r_pass_options *Options)
 {
-	metal_context *Metal = R->Backend;
-
-	R->PassOptions = *Options;
-	MTLRenderPassDescriptor *PassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-
-	PassDescriptor.colorAttachments[0].texture = Metal->Textures[Options->Colours[0].Handle].Texture;
-	PassDescriptor.colorAttachments[0].loadAction = MetalLoadAction(Options->ColourOps[0]);
-	PassDescriptor.colorAttachments[0].clearColor = MetalClearColour(Options->ClearColour[0]);
-	PassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-	PassDescriptor.colorAttachments[1].texture = Metal->Textures[Options->Colours[1].Handle].Texture;
-	PassDescriptor.colorAttachments[1].loadAction = MetalLoadAction(Options->ColourOps[1]);
-	PassDescriptor.colorAttachments[1].clearColor = MetalClearColour(Options->ClearColour[1]);
-	PassDescriptor.colorAttachments[1].storeAction = MTLStoreActionStore;
-	PassDescriptor.colorAttachments[2].texture = Metal->Textures[Options->Colours[2].Handle].Texture;
-	PassDescriptor.colorAttachments[2].loadAction = MetalLoadAction(Options->ColourOps[2]);
-	PassDescriptor.colorAttachments[2].clearColor = MetalClearColour(Options->ClearColour[2]);
-	PassDescriptor.colorAttachments[2].storeAction = MTLStoreActionStore;
-	PassDescriptor.colorAttachments[3].texture = Metal->Textures[Options->Colours[3].Handle].Texture;
-	PassDescriptor.colorAttachments[3].loadAction = MetalLoadAction(Options->ColourOps[3]);
-	PassDescriptor.colorAttachments[3].clearColor = MetalClearColour(Options->ClearColour[3]);
-	PassDescriptor.colorAttachments[3].storeAction = MTLStoreActionStore;
-	if(Metal->Textures[Options->Depth.Handle].Texture)
+	@autoreleasepool
 	{
-		PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle].Texture;
-		PassDescriptor.depthAttachment.loadAction = MetalLoadAction(Options->DepthOp);
-		PassDescriptor.depthAttachment.clearDepth = Options->ClearDepth;
-		PassDescriptor.depthAttachment.storeAction = MTLStoreActionStore;
+		metal_context *Metal = R->Backend;
+
+		R->PassOptions = *Options;
+		MTLRenderPassDescriptor *PassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+
+		PassDescriptor.colorAttachments[0].texture = Metal->Textures[Options->Colours[0].Handle].Texture;
+		PassDescriptor.colorAttachments[0].loadAction = MetalLoadAction(Options->ColourOps[0]);
+		PassDescriptor.colorAttachments[0].clearColor = MetalClearColour(Options->ClearColour[0]);
+		PassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+		PassDescriptor.colorAttachments[1].texture = Metal->Textures[Options->Colours[1].Handle].Texture;
+		PassDescriptor.colorAttachments[1].loadAction = MetalLoadAction(Options->ColourOps[1]);
+		PassDescriptor.colorAttachments[1].clearColor = MetalClearColour(Options->ClearColour[1]);
+		PassDescriptor.colorAttachments[1].storeAction = MTLStoreActionStore;
+		PassDescriptor.colorAttachments[2].texture = Metal->Textures[Options->Colours[2].Handle].Texture;
+		PassDescriptor.colorAttachments[2].loadAction = MetalLoadAction(Options->ColourOps[2]);
+		PassDescriptor.colorAttachments[2].clearColor = MetalClearColour(Options->ClearColour[2]);
+		PassDescriptor.colorAttachments[2].storeAction = MTLStoreActionStore;
+		PassDescriptor.colorAttachments[3].texture = Metal->Textures[Options->Colours[3].Handle].Texture;
+		PassDescriptor.colorAttachments[3].loadAction = MetalLoadAction(Options->ColourOps[3]);
+		PassDescriptor.colorAttachments[3].clearColor = MetalClearColour(Options->ClearColour[3]);
+		PassDescriptor.colorAttachments[3].storeAction = MTLStoreActionStore;
+		if(Metal->Textures[Options->Depth.Handle].Texture)
+		{
+			PassDescriptor.depthAttachment.texture = Metal->Textures[Options->Depth.Handle].Texture;
+			PassDescriptor.depthAttachment.loadAction = MetalLoadAction(Options->DepthOp);
+			PassDescriptor.depthAttachment.clearDepth = Options->ClearDepth;
+			PassDescriptor.depthAttachment.storeAction = MTLStoreActionStore;
+		}
+
+		Metal->ActiveRenderEncoder = [Metal->CommandBuffer renderCommandEncoderWithDescriptor:PassDescriptor];
+		Metal->ActiveRenderEncoder.label = [
+			[NSString alloc] initWithBytes:Name.Bytes
+			length:Name.Size encoding:NSUTF8StringEncoding
+		];
+		[Metal->ActiveRenderEncoder setCullMode:MTLCullModeNone];
 	}
-
-	Metal->ActiveRenderEncoder = [Metal->CommandBuffer renderCommandEncoderWithDescriptor:PassDescriptor];
-	Metal->ActiveRenderEncoder.label = [
-		[NSString alloc] initWithBytes:Name.Bytes
-		length:Name.Size encoding:NSUTF8StringEncoding
-	];
-	[Metal->ActiveRenderEncoder setCullMode:MTLCullModeNone];
-
 }
 
 void R_PassEnd(render_context *R, str8 Name)
@@ -658,75 +670,78 @@ void R_Init(render_context *R, m_arena *Arena, v2i Size, r_init_options Options)
 	R->Backend = M;
 	R->Arena = Arena;
 
-	M->Device = (__bridge id<MTLDevice>)Options.Device;
-	M->Layer = (__bridge CAMetalLayer*)Options.Layer;
-		MTLLogStateDescriptor *logDesc = [MTLLogStateDescriptor new];
-
-	logDesc.level = MTLLogLevelDebug;
-	logDesc.bufferSize = 64 * 1024;
-
-	NSError *err = nil;
-	MTLCommandQueueDescriptor *QueueDesc = [MTLCommandQueueDescriptor new];
-	if(Options.Logging)
+	@autoreleasepool
 	{
-		id<MTLLogState> Logger = [M->Device newLogStateWithDescriptor:logDesc
-															error:&err];
+		M->Device = (__bridge id<MTLDevice>)Options.Device;
+		M->Layer = (__bridge CAMetalLayer*)Options.Layer;
+			MTLLogStateDescriptor *logDesc = [MTLLogStateDescriptor new];
 
-		[Logger addLogHandler:^(NSString *SubSystem, NSString *Category,
-								MTLLogLevel Level, NSString *Message) {
-			NSLog(@"[GPU] %@", Message);
-		}];
-		QueueDesc.logState = Logger;
-	}
-	M->CommandQueue = [M->Device newCommandQueueWithDescriptor:QueueDesc];
-	M->Viewport = Size;
+		logDesc.level = MTLLogLevelDebug;
+		logDesc.bufferSize = 64 * 1024;
 
-	for (int Index = 0; Index < FRAMES_IN_FLIGHT; Index++)
-	{
-		MTLHeapDescriptor *HeapDesc = [[MTLHeapDescriptor alloc] init];
-		HeapDesc.size        = MegaBytes(64);
-		HeapDesc.storageMode = MTLStorageModeShared;
-		HeapDesc.type        = MTLHeapTypeAutomatic;
-		M->FrameHeaps[Index] = [M->Device newHeapWithDescriptor:HeapDesc];
-	}
-
-	{
-		str8 BlitSource = LoadShaderSource(TemporaryArena(), Options.ShaderDir, "blit.metal");
-		NSError *Error = nil;
-		NSString *NSSource = [[NSString alloc] initWithBytes:BlitSource.Bytes length:BlitSource.Size encoding:NSUTF8StringEncoding];	
-		MTLCompileOptions *CompileOptions = [MTLCompileOptions new];
-
-		CompileOptions.enableLogging = (getenv("GPU_LOGGING") != NULL);
-		id<MTLLibrary> Library = [M->Device newLibraryWithSource:NSSource options:CompileOptions error:&Error];
-		if (!Library)
+		NSError *err = nil;
+		MTLCommandQueueDescriptor *QueueDesc = [MTLCommandQueueDescriptor new];
+		if(Options.Logging)
 		{
-			LogError("Blit shader compile failed: ?cstr",
-				(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
+			id<MTLLogState> Logger = [M->Device newLogStateWithDescriptor:logDesc
+																error:&err];
+
+			[Logger addLogHandler:^(NSString *SubSystem, NSString *Category,
+									MTLLogLevel Level, NSString *Message) {
+				NSLog(@"[GPU] %@", Message);
+			}];
+			QueueDesc.logState = Logger;
 		}
-		else
+		M->CommandQueue = [M->Device newCommandQueueWithDescriptor:QueueDesc];
+		M->Viewport = Size;
+
+		for (int Index = 0; Index < FRAMES_IN_FLIGHT; Index++)
 		{
-			MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
-			PD.vertexFunction   = [Library newFunctionWithName:@"VertexMain"];
-			PD.fragmentFunction = [Library newFunctionWithName:@"FragmentMain"];
-			PD.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA10_XR_sRGB;
-			M->BlitPipeline = [M->Device newRenderPipelineStateWithDescriptor:PD error:&Error];
-			if (!M->BlitPipeline)
+			MTLHeapDescriptor *HeapDesc = [[MTLHeapDescriptor alloc] init];
+			HeapDesc.size        = MegaBytes(64);
+			HeapDesc.storageMode = MTLStorageModeShared;
+			HeapDesc.type        = MTLHeapTypeAutomatic;
+			M->FrameHeaps[Index] = [M->Device newHeapWithDescriptor:HeapDesc];
+		}
+
+		{
+			str8 BlitSource = LoadShaderSource(TemporaryArena(), Options.ShaderDir, "blit.metal");
+			NSError *Error = nil;
+			NSString *NSSource = [[NSString alloc] initWithBytes:BlitSource.Bytes length:BlitSource.Size encoding:NSUTF8StringEncoding];	
+			MTLCompileOptions *CompileOptions = [MTLCompileOptions new];
+
+			CompileOptions.enableLogging = (getenv("GPU_LOGGING") != NULL);
+			id<MTLLibrary> Library = [M->Device newLibraryWithSource:NSSource options:CompileOptions error:&Error];
+			if (!Library)
 			{
-				LogError("Blit pipeline failed: ?cstr",
+				LogError("Blit shader compile failed: ?cstr",
 					(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
 			}
+			else
+			{
+				MTLRenderPipelineDescriptor *PD = [[MTLRenderPipelineDescriptor alloc] init];
+				PD.vertexFunction   = [Library newFunctionWithName:@"VertexMain"];
+				PD.fragmentFunction = [Library newFunctionWithName:@"FragmentMain"];
+				PD.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA10_XR_sRGB;
+				M->BlitPipeline = [M->Device newRenderPipelineStateWithDescriptor:PD error:&Error];
+				if (!M->BlitPipeline)
+				{
+					LogError("Blit pipeline failed: ?cstr",
+						(char*)[Error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding]);
+				}
+			}
 		}
+
+		MTLHeapDescriptor *HeapDesc = [[MTLHeapDescriptor alloc] init];
+		HeapDesc.size        = MegaBytes(128);
+		HeapDesc.storageMode = MTLStorageModeShared;
+		HeapDesc.type        = MTLHeapTypeAutomatic;
+		M->PermanentArena = [M->Device newHeapWithDescriptor:HeapDesc];
+
+		M->BindlessTexturesBuffer = [M->PermanentArena newBufferWithLength:R_TEXTURE_TABLE_SIZE*8 options:MTLResourceStorageModeShared];
+		assert(M->BindlessTexturesBuffer);
+		M->InFlightSemaphore = dispatch_semaphore_create(FRAMES_IN_FLIGHT);
 	}
-
-	MTLHeapDescriptor *HeapDesc = [[MTLHeapDescriptor alloc] init];
-	HeapDesc.size        = MegaBytes(128);
-	HeapDesc.storageMode = MTLStorageModeShared;
-	HeapDesc.type        = MTLHeapTypeAutomatic;
-	M->PermanentArena = [M->Device newHeapWithDescriptor:HeapDesc];
-
-	M->BindlessTexturesBuffer = [M->PermanentArena newBufferWithLength:R_TEXTURE_TABLE_SIZE*8 options:MTLResourceStorageModeShared];
-	assert(M->BindlessTexturesBuffer);
-	M->InFlightSemaphore = dispatch_semaphore_create(FRAMES_IN_FLIGHT);
 }
 
 void R_BeginFrame(render_context *R, v2i ViewportSize)
@@ -746,38 +761,46 @@ void R_BeginFrame(render_context *R, v2i ViewportSize)
 	M->FrameBufferCount = 0;
 	M->FrameUniforms = nil;
 
-	M->CommandBuffer = [M->CommandQueue commandBuffer];
+	@autoreleasepool
+	{
+		M->CommandBuffer = [M->CommandQueue commandBuffer];
 
-	M->FrameUniforms = [M->FrameHeaps[Slot] newBufferWithLength:MegaBytes(8) options:MTLResourceStorageModeShared];
-	M->FrameUniforms.label = @"Frame Uniforms";
+		M->FrameUniforms = [M->FrameHeaps[Slot] newBufferWithLength:MegaBytes(8) options:MTLResourceStorageModeShared];
+		M->FrameUniforms.label = @"Frame Uniforms";
+	}
 }
 
-void R_Update(render_context *R, void *DrawableHandle, r_texture Source)
+void R_Present(render_context *R, r_texture Source)
 {
 	metal_context *M = R->Backend;
-	id<CAMetalDrawable> Drawable = (__bridge id<CAMetalDrawable>)DrawableHandle;
-
-	if (Drawable)
+	
+	@autoreleasepool
 	{
-		MTLRenderPassDescriptor *BlitPass = [MTLRenderPassDescriptor renderPassDescriptor];
-		BlitPass.colorAttachments[0].texture     = Drawable.texture;
-		BlitPass.colorAttachments[0].loadAction  = MTLLoadActionDontCare;
-		BlitPass.colorAttachments[0].storeAction = MTLStoreActionStore;
-		id<MTLRenderCommandEncoder> BlitEncoder = [M->CommandBuffer renderCommandEncoderWithDescriptor:BlitPass];
-		[BlitEncoder setRenderPipelineState:M->BlitPipeline];
-		[BlitEncoder setFragmentTexture:M->Textures[Source.Handle].Texture atIndex:0];
-		[BlitEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-		[BlitEncoder endEncoding];
+		CAMetalLayer *Layer = M->Layer;
+		id<CAMetalDrawable> Drawable = [Layer nextDrawable];
+		if(Drawable)
+		{
+			MTLRenderPassDescriptor *BlitPass = [MTLRenderPassDescriptor renderPassDescriptor];
+			BlitPass.colorAttachments[0].texture     = Drawable.texture;
+			BlitPass.colorAttachments[0].loadAction  = MTLLoadActionDontCare;
+			BlitPass.colorAttachments[0].storeAction = MTLStoreActionStore;
+			id<MTLRenderCommandEncoder> BlitEncoder = [M->CommandBuffer renderCommandEncoderWithDescriptor:BlitPass];
+			[BlitEncoder setRenderPipelineState:M->BlitPipeline];
+			[BlitEncoder setFragmentTexture:M->Textures[Source.Handle].Texture atIndex:0];
+			[BlitEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+			[BlitEncoder endEncoding];
 
-		[M->CommandBuffer presentDrawable:Drawable];
+			[M->CommandBuffer presentDrawable:Drawable];
+		}
+
+		__block dispatch_semaphore_t BlockSem = M->InFlightSemaphore;
+		[M->CommandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _) {
+			dispatch_semaphore_signal(BlockSem);
+		}];
+		[M->CommandBuffer commit];
 	}
 
-	__block dispatch_semaphore_t BlockSem = M->InFlightSemaphore;
-	[M->CommandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _) {
-		dispatch_semaphore_signal(BlockSem);
-	}];
-	[M->CommandBuffer commit];
-
+	M->CommandBuffer = nil;
 	R->Frame++;
 	R->TransformCount = 0;
 	R->ScissorCount = 0;
